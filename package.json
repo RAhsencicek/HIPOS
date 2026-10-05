@@ -1,0 +1,12 @@
+{
+  "name": "hipos-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @hipos/admin",
+    "build": "npm run build --workspace @hipos/admin",
+    "typecheck": "npm run typecheck --workspace @hipos/admin"
+  }
+}
