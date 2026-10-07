@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { PaymentSimulatorPanel } from "./PaymentSimulatorPanel";
+import type { TestOrder } from "./PaymentSimulatorPanel";
 import "./styles.css";
 
 type Product = {
@@ -9,14 +11,6 @@ type Product = {
   status: string;
   channels: string[];
   price: { amountMinor: number; currency: string };
-};
-type Order = {
-  id: string;
-  status: string;
-  paymentStatus: string;
-  totalMinor: number;
-  currency: string;
-  items: Array<{ productName: string; quantity: number; unitPriceMinor: number }>;
 };
 type Problem = { detail?: string; code?: string };
 
@@ -66,7 +60,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [order, setOrder] = useState<Order | null>(null);
+  const [order, setOrder] = useState<TestOrder | null>(null);
   const [retryId, setRetryId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,7 +94,7 @@ function App() {
     setSaving(true);
     setError("");
     try {
-      const created = await api<Order>(
+      const created = await api<TestOrder>(
         `/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/sales/orders`,
         scope.actor, { orderId, items: [{ productId: selected.id, quantity }] },
       );
@@ -121,8 +115,8 @@ function App() {
       </header>
       <section className="card">
         <p className="eyebrow">AYRI OPERASYON YÜZÜ</p>
-        <h1>İlk gerçek sipariş</h1>
-        <p className="intro">Bu ekrandaki sipariş PostgreSQL'e kaydolur. Yönetici aynı kaydı salt okunur görür; ödeme hâlâ alınmaz.</p>
+        <h1>Test siparişi ve ödeme durumları</h1>
+        <p className="intro">Sipariş PostgreSQL'e kaydolur. Ödeme sonuçları yalnız simüle edilir; gerçek para tahsil edilmez. Yönetici tümünü salt okunur görür.</p>
         <label htmlFor="scope">Test şubesi</label>
         <select id="scope" value={scopeKey} onChange={(event) => setScopeKey(event.target.value as typeof scopeKey)}>
           {scopes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
@@ -145,10 +139,12 @@ function App() {
         {order && <div className="success" role="status">
           <strong>Sipariş veritabanına kaydedildi.</strong>
           <span>Kimlik: {order.id}</span>
-          <span>Durum: Açık · Ödeme alınmadı · {money(order.totalMinor)}</span>
+          <span>Durum: Açık · Ödeme durumu: {order.paymentStatus} (test) · {money(order.totalMinor)}</span>
           <small>Yeni sipariş için ürünü veya adedi değiştirebilirsiniz.</small>
         </div>}
       </section>
+      {order && <PaymentSimulatorPanel key={`${scope.key}:${order.id}`} scope={scope}
+        order={order} onOrderChange={setOrder} />}
     </main>
   );
 }

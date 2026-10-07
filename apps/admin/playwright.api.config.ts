@@ -1,9 +1,11 @@
 import { defineConfig } from "@playwright/test";
 
+const uiPort = Number(process.env.HIPOS_TEST_UI_PORT ?? "5174");
+
 export default defineConfig({
   testDir: "./tests/api-e2e",
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: `http://127.0.0.1:${uiPort}`,
     browserName: "chromium",
     trace: "on-first-retry",
   },
@@ -15,8 +17,8 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: "VITE_FEATURE_PROVIDER=http VITE_API_BASE_URL=http://127.0.0.1:5181 npm run dev -- --port 5174 --strictPort",
-      url: "http://127.0.0.1:5174/admin",
+      command: `VITE_FEATURE_PROVIDER=http VITE_API_BASE_URL=http://127.0.0.1:5181 npm run dev -- --port ${uiPort} --strictPort`,
+      url: `http://127.0.0.1:${uiPort}/admin`,
       reuseExistingServer: false,
       timeout: 30_000,
     },

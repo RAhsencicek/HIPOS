@@ -195,6 +195,9 @@ test(
       assert.equal((await request(categoryPath(firm, moda))).data.code, "CATALOG_STORAGE_UNAVAILABLE");
       assert.equal((await request(`/api/v1/firms/${firm}/sales/orders?branchId=${moda}`)).data.code,
         "SALES_STORAGE_UNAVAILABLE");
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).data.code, "PAYMENT_STORAGE_UNAVAILABLE");
       assert.equal(
         (await request(featurePath(moda, "catalog.drafts"), "PUT", {
           desiredEnabled: true, expectedVersion: 1,
@@ -529,6 +532,12 @@ test(
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
       assert.equal(catalogMigrationCount.stdout.trim(), "5");
+      const salesMigrationCount = await runPg("psql", [
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        'SELECT count(*) FROM sales."__EFMigrationsHistory"',
+      ]);
+      assert.equal(salesMigrationCount.stdout.trim(), "2");
       const auditCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -657,6 +666,84 @@ test(
       await startApi();
       assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 64000);
 
+      // Simüle ödeme: kısmi başarı, belirsiz sonuç, çözüm, iptal ve tamamlama.
+      const paymentsPath = `${posOrders(moda)}/${orderId}/payment-attempts`;
+      const firstAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+      const unknownAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+      const pendingAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
+      const finalAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4";
+      const paymentBody = (attemptId, amountMinor, simulatedOutcome, expectedOrderVersion) => ({
+        attemptId, amountMinor, method: "card", simulatedOutcome, expectedOrderVersion,
+      });
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda")).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).status, 200);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1))).status, 403);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-besiktas")).status, 403);
+      const partial = await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda");
+      assert.equal(partial.status, 201);
+      assert.equal(partial.data.attempt.simulated, true);
+      assert.equal(partial.data.order.paymentStatus, "partially_paid");
+      assert.equal(partial.data.order.paidMinor, 20000);
+      assert.equal(partial.data.order.remainingMinor, 44000);
+      assert.equal(partial.data.order.status, "open");
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda")).status, 200);
+      assert.equal((await request(`${posOrders(besiktas)}/${orderId}/payment-attempts`, "POST",
+        paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-besiktas")).data.code, "PAYMENT_NOT_FOUND");
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 21000, "succeeded", 1), "pos-moda")).data.code, "PAYMENT_ID_CONFLICT");
+      assert.equal((await request(paymentsPath, "POST", paymentBody(unknownAttempt, 44000, "unknown", 1), "pos-moda")).data.code, "VERSION_CONFLICT");
+      const unknown = await request(paymentsPath, "POST", paymentBody(unknownAttempt, 44000, "unknown", 2), "pos-moda");
+      assert.equal(unknown.status, 201);
+      assert.equal(unknown.data.order.paymentStatus, "unknown");
+      assert.equal(unknown.data.order.paidMinor, 20000);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(pendingAttempt, 44000, "succeeded", 3), "pos-moda")).data.code, "PAYMENT_UNRESOLVED");
+      const unknownResolve = `${paymentsPath}/${unknownAttempt}/resolve`;
+      assert.equal((await request(unknownResolve, "POST", { outcome: "succeeded", expectedOrderVersion: 2 }, "pos-moda")).data.code, "VERSION_CONFLICT");
+      const failedUnknown = await request(unknownResolve, "POST", { outcome: "failed", expectedOrderVersion: 3 }, "pos-moda");
+      assert.equal(failedUnknown.status, 200);
+      assert.equal(failedUnknown.data.order.paymentStatus, "partially_paid");
+      assert.equal((await request(unknownResolve, "POST", { outcome: "failed", expectedOrderVersion: 3 }, "pos-moda")).status, 200);
+      assert.equal((await request(unknownResolve, "POST", { outcome: "succeeded", expectedOrderVersion: 4 }, "pos-moda")).data.code, "PAYMENT_ALREADY_FINAL");
+      const pending = await request(paymentsPath, "POST", paymentBody(pendingAttempt, 44000, "pending", 4), "pos-moda");
+      assert.equal(pending.status, 201);
+      assert.equal(pending.data.order.paymentStatus, "pending");
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: false, expectedVersion: 2,
+      })).status, 200);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(finalAttempt, 44000, "succeeded", 5), "pos-moda")).data.code,
+        "FEATURE_DISABLED");
+      assert.equal((await request(`${paymentsPath}/${pendingAttempt}/resolve`, "POST", {
+        outcome: "cancelled", expectedOrderVersion: 5,
+      }, "pos-moda")).data.order.paymentStatus, "partially_paid");
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: true, expectedVersion: 3,
+      })).status, 200);
+      const full = await request(paymentsPath, "POST", paymentBody(finalAttempt, 44000, "succeeded", 6), "pos-moda");
+      assert.equal(full.status, 201);
+      assert.equal(full.data.order.paymentStatus, "paid");
+      assert.equal(full.data.order.paidMinor, 64000);
+      assert.equal(full.data.order.remainingMinor, 0);
+      assert.equal(full.data.order.status, "open");
+      assert.equal((await request(paymentsPath, "POST", paymentBody("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5", 1, "succeeded", 7), "pos-moda")).data.code, "AMOUNT_EXCEEDS_REMAINING");
+      assert.equal((await request(paymentsPath)).data.length, 4);
+      assert.equal((await request(paymentsPath, "GET", undefined, "manager-single")).status, 403);
+      assert.equal((await request(salesList(moda))).data.items[0].paymentStatus, "paid");
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: false, expectedVersion: 4,
+      })).status, 200);
+      assert.equal((await request(paymentsPath)).data.length, 4);
+      const paymentAudit = await runPg("psql", [
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT action || ':' || status FROM sales.payment_attempt_audit
+         WHERE order_id = '${orderId}' ORDER BY id`,
+      ]);
+      assert.deepEqual(paymentAudit.stdout.trim().split("\n"), [
+        "started:succeeded", "started:unknown", "resolved:failed",
+        "started:pending", "resolved:cancelled", "started:succeeded",
+      ]);
+
       // Gerçek taslak → sürümlü fiyat → yayın → test POS satışı.
       const publishedProductId = "77777777-7777-4777-8777-777777777709";
       const publishedPriceId = "99999999-9999-4999-8999-999999999909";
@@ -756,6 +843,9 @@ test(
       assert.equal((await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: true, expectedVersion: 3,
       })).status, 200);
+      assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
+        desiredEnabled: true, expectedVersion: 5,
+      })).status, 200);
       uiOutput = "";
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
@@ -828,6 +918,10 @@ test(
       await posPage.getByText("Sipariş veritabanına kaydedildi.").waitFor();
       assert.equal((await request(salesList(moda))).data.items.length, 2);
       assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 69980);
+      await posPage.getByRole("button", { name: "Simüle ödeme girişimi oluştur" }).click();
+      await posPage.getByText("Simülatör sonucu: başarılı. Gerçek tahsilat yapılmadı.").waitFor();
+      assert.equal((await request(salesList(moda))).data.items[0].paymentStatus, "paid");
+      assert.equal((await request(salesList(moda))).data.items[0].paidMinor, 69980);
       ui.kill("SIGTERM");
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
@@ -846,7 +940,9 @@ test(
       const managerPage = await browser.newPage();
       await managerPage.goto(`${uiBase}/admin/sales`);
       await managerPage.getByRole("heading", { name: "Canlı sipariş görünümü" }).waitFor();
-      await managerPage.getByRole("row").filter({ hasText: "Panelden Pizza" }).first().waitFor();
+      const paidRow = managerPage.getByRole("row").filter({ hasText: "Panelden Pizza" }).first();
+      await paidRow.waitFor();
+      await paidRow.getByText("Ödendi · simüle").waitFor();
       assert.equal(await managerPage.getByRole("button", { name: "Sipariş oluştur" }).count(), 0);
       await browser.close();
       browser = undefined;

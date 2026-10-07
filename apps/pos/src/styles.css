@@ -20,4 +20,13 @@ button:disabled { background: #9fb6cc; cursor: not-allowed; }
 .error { background: #fff0f0; color: #9d2934; }
 .success { display: grid; gap: 6px; background: #eaf8f0; color: #185c39; }
 .success small { opacity: .75; }
+.payment-card { margin-top: 20px; }
+.payment-card h2 { margin: 4px 0 8px; font-size: 22px; }
+.payment-card > p:not(.eyebrow) { color: #68798d; line-height: 1.5; }
+.payment-card form { margin-top: 20px; }
+.payment-card button { margin-top: 18px; }
+.payment-card .secondary { background: #e9f0f7; color: #28445f; }
+.payment-card .secondary:disabled { color: #70869c; }
+.resolve-box { margin-top: 22px; padding: 18px; border: 1px solid #e6c978; border-radius: 12px; background: #fffae9; }
+.resolve-box p { color: #716442; }
 @media (max-width: 560px) { header { display: block; } header p { text-align: left; } .card { padding: 20px; } }

@@ -5,4 +5,5 @@ public sealed class FeatureRuntimeCapabilities
 {
     public bool CatalogDraftsReady { get; set; }
     public bool SalesOrdersReady { get; set; }
+    public bool PaymentSimulatorReady { get; set; }
 }

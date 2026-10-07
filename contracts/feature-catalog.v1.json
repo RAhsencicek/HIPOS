@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": 4,
+  "catalogVersion": 5,
   "definitions": [
     { "key": "catalog.products", "name": "Ürün ve Menü", "category": "Menü", "description": "Ürünleri, kategorileri ve menü yayınlarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "book-open" },
     { "key": "catalog.drafts", "name": "Ürün Taslakları", "category": "Menü", "description": "Şubeye ait ürün taslaklarını kalıcı olarak oluşturun ve güncelleyin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products"], "icon": "file-pen-line" },
@@ -9,6 +9,7 @@
     { "key": "catalog.pricing", "name": "Fiyat Yönetimi", "category": "Menü", "description": "Şubeye ve kanala göre fiyatları hazırlayın.", "scopeType": "branch", "availability": "prototype", "dependencies": ["catalog.products"], "icon": "tag" },
     { "key": "sales.monitoring", "name": "Satış İzleme", "category": "Operasyon", "description": "Adisyonları ve sipariş durumlarını salt okunur izleyin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "receipt-text" },
     { "key": "sales.pos_orders", "name": "Test POS Siparişleri", "category": "Operasyon", "description": "Geliştirme ortamında POS siparişini gerçek veritabanına kaydedin; ödeme işlemi içermez.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["sales.monitoring"], "icon": "receipt-text" },
+    { "key": "payments.simulator", "name": "Test Ödeme Simülatörü", "category": "Finans", "description": "Geliştirme ortamında ödeme durumlarını gerçek tahsilat olmadan doğrulayın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "credit-card" },
     { "key": "branches.tables", "name": "Masa Görünümü", "category": "Operasyon", "description": "Masa doluluğunu ve açık adisyonları inceleyin.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "layout-grid" },
     { "key": "kitchen.monitoring", "name": "Mutfak İzleme", "category": "Operasyon", "description": "Hazırlık ve gecikme durumunu görün.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "chef-hat" },
     { "key": "inventory.items", "name": "Stok Takibi", "category": "Stok ve Tedarik", "description": "Hammadde ve depo stoklarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "boxes", "setupRequirements": ["Hammadde ve depo tanımı gerekli"] },

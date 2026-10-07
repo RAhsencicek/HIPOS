@@ -14,19 +14,19 @@ Modülerlik iki ayrı konudur: kodun iş alanlarına ayrılması (**modüler mon
 | --- | --- |
 | Yönetim paneli | React + TypeScript + Vite ile ekran iskeleti, ortak shell, gezinme, tek/çok şube örnekleri hazır. Çoğu alan görsel prototip/fixture. |
 | Ürünler ve Menü | Ürün listesi/ayrıntısı ve şube kapsamlı kategori özeti varsayılan mock veya isteğe bağlı PostgreSQL API'sinden okunur. Panelde şube bazlı taslak oluşturma/güncelleme, fiyat sürümü, ilk POS yayını ve geçmiş okuma gerçek API'ye bağlıdır. Kategori oluşturma/ad değiştirme API'si vardır, panel formu henüz yoktur. |
-| Test POS ve sipariş | Yönetim panelinden ayrı, yalnız Development için küçük `apps/pos` ekranı var. `sales.pos_orders` açıldığında yayınlanmış POS ürününden gerçek PostgreSQL siparişi oluşur; fiyat ve ürün adı satış anında kopyalanır. Yönetim Satışlar ekranı HTTP modunda bunu salt okunur ve periyodik olarak okur. Ödeme, gerçek cihaz ve üretim yetkisi yok. |
+| Test POS, sipariş ve ödeme durumu | Yönetim panelinden ayrı, yalnız Development için `apps/pos` ekranı var. Yayınlanmış üründen gerçek PostgreSQL siparişi oluşur; fiyat ve ürün adı satış anında kopyalanır. `payments.simulator` ile kısmi/başarılı/başarısız/bekleyen/belirsiz test sonuçları kaydedilir. Yönetim Satışlar ekranı sipariş ve **simüle** ödeme durumunu salt okunur okur. Gerçek tahsilat, cihaz ve üretim yetkisi yok. |
 | Modül kataloğu | Tanım (`FeatureDefinition`) ve şube durumu (`BranchFeatureState`) ayrıldı. `desiredEnabled`, `effectiveForNewWork`, `lifecycle`, `blockers`, `version` ayrı alanlar. |
 | Modül ekranı | Şube bazlı aç/kapa önizlemesi, bağımlılık uyarıları, kurulum/sağlayıcı/kapanma durumları ve sürüm çakışmasında yenileme var. Kapalı modülün geçmiş/örnek okuması sürüyor. |
 | .NET API | ASP.NET Core 10 üzerinde modül listesi, durum, sürümlü tercih komutu, örnek kapsam/işlem izni, denetim kaydı ve yeni iş politikası uçları var. |
-| Depolama | Varsayılan modül belleği; isteğe bağlı EF Core 10 + Npgsql + PostgreSQL. Modül tercihleri, katalog taslakları, fiyat sürümleri, yayın kayıtları ve test siparişleri kalıcıdır. `modules`, `catalog` ve `sales` şemaları ayrı migration ile kurulur. |
+| Depolama | Varsayılan modül belleği; isteğe bağlı EF Core 10 + Npgsql + PostgreSQL. Modül tercihleri, katalog taslakları, fiyat sürümleri, yayın kayıtları, test siparişleri ve simüle ödeme girişimleri kalıcıdır. `modules`, `catalog` ve `sales` şemaları ayrı migration ile kurulur. |
 | Eşzamanlılık | Aynı şubenin modül satırları işlem içinde kilitleniyor. Eski `expectedVersion` 409 döndürüyor. Bağımlılık ve yazma aynı işlemde. |
-| Testler | Tip/derleme, frontend birim ve tarayıcı testleri; API HTTP testi; panel–API tarayıcı testi; geçici gerçek PostgreSQL ile tarayıcıdan taslak kaydı, sunucu yeniden başlatma, şube ayrımı ve çakışma testi. |
+| Testler | Tip/derleme, frontend birim ve tarayıcı testleri; API HTTP testi; panel–API tarayıcı testi; geçici gerçek PostgreSQL ile taslak → fiyat → yayın → sipariş → simüle ödeme zinciri, sunucu yeniden başlatma, şube ayrımı, tekrar istek, çakışma ve denetim kaydı testleri. |
 
 ## 3. Bu başarı neyi **henüz** kanıtlamaz?
 
 - `X-Demo-Actor` bir test başlığıdır; herkes taklit edebilir. Gerçek oturum veya kullanıcı yetkisi değildir. Sunucu bu nedenle yalnız Development ortamında açılır.
-- PostgreSQL modül tercihini, katalog kayıtlarını, ürün taslaklarını, fiyat sürümlerini, yayın anlık görüntülerini ve **test POS siparişlerini** saklar. Fiyat/yayın yalnız ilk şube-POS panel akışıdır; ödeme, kasa, stok, müşteri, rapor ve entegrasyon işlemleri gerçek backend'e bağlı değildir.
-- `effectiveForNewWork` etkin `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing` ve `sales.pos_orders` için gerçek komutu açabilir. Test POS sipariş özelliği ödeme veya üretime hazır POS anlamına gelmez; diğer prototip/planlı özelliklerde `false` kalır.
+- PostgreSQL modül tercihini, katalog kayıtlarını, ürün taslaklarını, fiyat/yayın anlık görüntülerini, **test POS siparişlerini ve simüle ödeme sonuçlarını** saklar. Gerçek tahsilat, kasa, stok, müşteri, rapor ve entegrasyon işlemleri backend'e bağlı değildir.
+- `effectiveForNewWork` etkin `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, `sales.pos_orders` ve `payments.simulator` için yeni komutu açabilir. Simülatör gerçek ödeme veya üretime hazır POS anlamına gelmez; diğer prototip/planlı özelliklerde `false` kalır.
 - `draining` geçişi test amaçlı olayla doğrulanmıştır. Gerçek devam eden mutfak, ödeme veya entegrasyon işlerinin sınırları henüz modellenmemiştir.
 - İlk yönetici rolleri aynı menüyü görür; gerçek firma/şube üyeliği ve işlem yetkisi henüz veritabanında değildir.
 - Kod iş alanlarına ayrılmaya başlamıştır; tam modüler monolit modül sınırları, modüller arası olaylar ve tüm alanların gerçek verisi henüz kurulmamıştır.
@@ -34,9 +34,9 @@ Modülerlik iki ayrı konudur: kodun iş alanlarına ayrılması (**modüler mon
 
 ## 4. Sıradaki çalışma: modüler backend omurgası
 
-Öncelik, modül düğmesini çoğaltmak değil, her yönetim alanının gerçek verisi ve komutlarıyla birlikte çalışan modüler monolit kurmaktır. Bugünkü 17 özellik tanımı bütün ekran capability'lerini kapsamaz. [Modüler Backend Planı](MODULER_BACKEND_PLANI.md) bu açığı, alan sahipliğini, bağımlılıkları ve kabul koşullarını açıklar.
+Öncelik, modül düğmesini çoğaltmak değil, her yönetim alanının gerçek verisi ve komutlarıyla birlikte çalışan modüler monolit kurmaktır. Bugünkü 18 özellik tanımı bütün ekran capability'lerini kapsamaz. [Modüler Backend Planı](MODULER_BACKEND_PLANI.md) bu açığı, alan sahipliğini, bağımlılıkları ve kabul koşullarını açıklar.
 
-İlk envanter, ortak tanım sözleşmesi, katalog taslağı, firma kategorisi, taslak fiyat sürümü ve ilk POS yayını komutları kuruldu. Fiyat/yayın panel akışı, ayrı test POS'ta kalıcı sipariş ve yöneticide salt okunur izleme uçtan uca doğrulandı. Sıradaki işler kategori panel formu ve ödeme girişimi/simülatör sözleşmesi ile sipariş yaşam döngüsüdür. Bu yayın akışı yalnız ilk POS yayınıdır; yayın sonrası fiyat değiştirme, yeniden yayın ve çok kanallı/merkezi yayın henüz yoktur. Her komut firma/şube kapsamı, modülün yeni işe uygunluğu, bağımlılık, eşzamanlılık ve denetim kaydını sunucuda doğrulamalı. Kapalı modül geçmiş kaydı silmemeli.
+İlk envanter, ortak tanım sözleşmesi, katalog taslağı, firma kategorisi, fiyat sürümü ve ilk POS yayını komutları kuruldu. Panel → Test POS → kalıcı sipariş → simüle ödeme → yöneticide salt okunur izleme uçtan uca doğrulandı. Sıradaki işler kategori panel formu, siparişin kapanış/iptal yaşam döngüsü ve gerçek sağlayıcıdan bağımsız ödeme adaptörü sınırıdır. Bu yayın akışı yalnız ilk POS yayınıdır; yayın sonrası fiyat değiştirme, yeniden yayın ve çok kanallı/merkezi yayın henüz yoktur. Her komut firma/şube kapsamı, modülün yeni işe uygunluğu, bağımlılık, eşzamanlılık ve denetim kaydını sunucuda doğrulamalı. Kapalı modül geçmiş kaydı silmemeli.
 
 Pilot hesap akışı **kontrollü ve dar kapsamlı** olacak: ilk firma ve sahibi HIPOS ekibi oluşturacak; herkese açık kayıt ve Google/Gmail girişi şimdilik yok. Bu öncelik değişimi güvenliği erteleme izni değildir. Gerçek verili pilot dış kullanıcıya açılmadan önce sunucu oturumu, firma/şube üyeliği ve işlem yetkisi uygulanmalı; seçili şube sunucuda bağımsız doğrulanmalı. İlk UI kararı değişmez: yönetici rolleri aynı ekranları görür. Ayrıntı [Kimlik ve Hesap Akışı](KIMLIK_VE_HESAP_AKISI.md) belgesindedir.
 
@@ -60,4 +60,4 @@ Kimlik kapısının kabul koşulları: girişsiz istek 401; başka firmaya/şube
 
 ## 7. Bugünkü net karar
 
-Mevcut mimari yön **doğru**, fakat “üretime hazır modüler restoran sistemi” aşamasında değil. Modül tercihi, örnek şube sınırı, bağımlılık, sürüm çakışması ve panelden kalıcı taslak/fiyat/yayın → test POS siparişi akışı doğrulandı. Güvenilir kullanıcı/şube yetkisi gerçek verili pilotun zorunlu kapısıdır. Diğer alanlar tek tek, modüller arası uyum testleriyle backend'e taşınır.
+Mevcut mimari yön **doğru**, fakat “üretime hazır modüler restoran sistemi” aşamasında değil. Modül tercihi, örnek şube sınırı, bağımlılık, sürüm çakışması ve panelden kalıcı taslak/fiyat/yayın → test POS siparişi → simüle ödeme akışı doğrulandı. Güvenilir kullanıcı/şube yetkisi ve gerçek ödeme sağlayıcısı müşteri pilotundan önce ayrı kapılardır. Diğer alanlar tek tek, modüller arası uyum testleriyle backend'e taşınır.

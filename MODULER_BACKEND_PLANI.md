@@ -9,15 +9,15 @@ Durum: Öncelik kararı. İlk pilot hesap akışı kontrollü ve küçük tutulu
 1. **Kod sınırı:** Katalog, satış, stok, mutfak, finans gibi alanların kendi verisi ve iş kuralları vardır. Bir modül diğerinin tablosunu gizlice değiştirmez; sözleşme/olay üzerinden konuşur. Başlangıçta tek ASP.NET Core uygulaması ve tek PostgreSQL kullanılabilir.
 2. **İşletme tercihi:** Firma/şube bir yeteneği açıp kapatabilir. Bu tercih, yeni iş kabulünü etkiler; geçmiş kayıtları silmez ve migration çalıştırmaz. Bağımlılık, kurulum eksiği, sağlayıcı bekleme ve devam eden iş ayrı durumlar olarak kalır.
 
-Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğruladı. `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing` ve geliştirme amaçlı `sales.pos_orders` gerçek komutlara modül kapısıyla bağlandı; diğer prototip/planlı özelliklerde `effectiveForNewWork=false` kalır. Yalnız düğmenin çalışması, bütün iş alanının çalıştığı anlamına gelmez.
+Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğruladı. `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, geliştirme amaçlı `sales.pos_orders` ve `payments.simulator` kalıcı komutlara modül kapısıyla bağlandı; diğer prototip/planlı özelliklerde `effectiveForNewWork=false` kalır. Simüle ödeme gerçek tahsilat veya tamamlanmış kasa modülü anlamına gelmez.
 
 ## 2. İlk teknik boşluklar
 
-- Backend'deki 17 özellik tanımı paneldeki çok sayıdaki alt işin tamamını temsil etmiyor. **Capability envanteri** ayrıntılandırılmalı: hangisi temel alan, hangisi ayrı aç/kapa yeteneği, hangisi sadece ekran/rapor?
+- Backend'deki 18 özellik tanımı paneldeki çok sayıdaki alt işin tamamını temsil etmiyor. **Capability envanteri** ayrıntılandırılmalı: hangisi temel alan, hangisi ayrı aç/kapa yeteneği, hangisi sadece ekran/rapor?
 - Modül tanımları paylaşılan katalogdan okunuyor; sonraki iş API sözleşmesi/tip üretimiyle ekran–backend davranışını da eşleştirmek.
-- Ürün taslağı, fiyat sürümü, ilk POS yayını ve geliştirme ortamındaki test POS siparişi gerçek yeni iş komutuna bağlandı. Stok tüketimi, ödeme, yeniden fiyatlandırma ve yeniden yayın komutları henüz yok.
+- Ürün taslağı, fiyat sürümü, ilk POS yayını, test POS siparişi ve **simüle ödeme girişimi/sonucu** kalıcı komutlara bağlandı. Gerçek tahsilat, stok tüketimi, yeniden fiyatlandırma ve yeniden yayın komutları henüz yok.
 - `setup_required`, `provider_pending` ve `draining` örnek durumlar. Gerçek kurulum/sağlayıcı/iş tamamlama sinyalleri ilgili modüller tarafından üretilmeli.
-- Modüller arası olay, tekrar eden komut, geri alma ve rapor projeksiyonu henüz işletme verisi üzerinde doğrulanmadı.
+- Tekrarlanan katalog/satış/simüle ödeme komutları sınandı; modüller arası olay, geri alma ve rapor projeksiyonu henüz işletme verisi üzerinde doğrulanmadı.
 
 ## 3. Her capability için aynı sözleşme
 
@@ -52,7 +52,7 @@ Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalış
 | Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
 | Stok ve reçete | Hammadde, depo, hareket, reçete sürümü, maliyet | Menü, satış, satın alma, rapor | Yönetimde örnek ekran; gerçek stok hareketi yok. |
 | Satın alma | Talep, onay, sipariş, mal kabul, tedarikçi | Stok, gider/borç | Planlı yönetsel akış. |
-| Kasa ve ödeme | Tahsilat durumu, vardiya, mutabakat, iade | Satış, finans, rapor | Planlı; gerçek sağlayıcı veya tahsilat yok. |
+| Kasa ve ödeme | Tahsilat durumu, vardiya, mutabakat, iade | Satış, finans, rapor | Test girişimi/sonucu PostgreSQL'de; kısmi, bekleyen ve belirsiz durumlar doğrulandı. Gerçek sağlayıcı, tahsilat ve kasa yok. |
 | Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Planlı. |
 | Müşteri ve pazarlama | Müşteri, segment, izin, sadakat, kampanya | Satış, menü, rapor | Planlı. |
 | Raporlama | Tanımlı satış/ödeme/stok projeksiyonları | Kaynak modüllerin olayları | Görsel prototip. |

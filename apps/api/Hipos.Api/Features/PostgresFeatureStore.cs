@@ -32,6 +32,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
         if (key == "sales.pos_orders" && command.DesiredEnabled && !runtime.SalesOrdersReady)
             return FeatureCommandResult.Rejected("SALES_STORAGE_UNAVAILABLE", 503,
                 "Test POS siparişi için satış migration'ı gerekli.");
+        if (key == "payments.simulator" && command.DesiredEnabled && !runtime.PaymentSimulatorReady)
+            return FeatureCommandResult.Rejected("PAYMENT_STORAGE_UNAVAILABLE", 503,
+                "Test ödeme için satış migration'ı gerekli.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Bütün şube satırları kilitlenir: bağımlılık kontrolü ile yazma tek atomik işlem olur.
         var rows = await db.BranchFeatureStates.FromSqlInterpolated(
@@ -40,7 +43,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
         var states = rows.ToDictionary(row => row.Key, row => row.ToState());
         var result = FeatureRules.SetDesired(states, key, command,
             (IsCatalogWrite(key) && runtime.CatalogDraftsReady) ||
-            (key == "sales.pos_orders" && runtime.SalesOrdersReady));
+            (key == "sales.pos_orders" && runtime.SalesOrdersReady) ||
+            (key == "payments.simulator" && runtime.PaymentSimulatorReady));
         if (result.Failure is not null || result.State is null) return result;
         var next = result.State;
         if (next.Version == states[key].Version) return result; // Aynı tercih tekrarlandı: audit veya yazma yok.
@@ -68,7 +72,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
         db.BranchFeatureStates.AsNoTracking().AnyAsync(row =>
             row.FirmId == firmId && row.BranchId == branchId && row.Key == key && row.EffectiveForNewWork &&
             (!IsCatalogWrite(key) || runtime.CatalogDraftsReady) &&
-            (key != "sales.pos_orders" || runtime.SalesOrdersReady),
+            (key != "sales.pos_orders" || runtime.SalesOrdersReady) &&
+            (key != "payments.simulator" || runtime.PaymentSimulatorReady),
             cancellationToken);
 
     private static bool IsCatalogWrite(string key) =>

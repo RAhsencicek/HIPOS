@@ -15,7 +15,7 @@ public sealed record SalesOrderLine(
     long UnitPriceMinor, long LineTotalMinor, string Currency);
 public sealed record SalesOrderDetail(
     string Id, string FirmId, string BranchId, string Source, string Status,
-    string PaymentStatus, long TotalMinor, string Currency,
+    string PaymentStatus, long TotalMinor, long PaidMinor, long RemainingMinor, string Currency,
     DateTimeOffset CreatedAt, int Version, IReadOnlyList<SalesOrderLine> Items);
 public sealed record SalesOrderResult(SalesOrderDetail? Order, FeatureFailure? Failure, bool Created)
 {
@@ -38,7 +38,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         var sorted = command.Items.OrderBy(item => item.ProductId).ToArray();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join("|", sorted.Select(item => $"{item.ProductId:N}:{item.Quantity}")))));
-        var existing = await db.Orders.AsNoTracking().Include(row => row.Lines)
+        var existing = await db.Orders.AsNoTracking().Include(row => row.Lines).Include(row => row.PaymentAttempts)
             .FirstOrDefaultAsync(row => row.Id == command.OrderId, cancellationToken);
         if (existing is not null) return Existing(existing, firmId, branchId, fingerprint);
 
@@ -110,10 +110,20 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
     {
         var query = db.Orders.AsNoTracking().Where(row => row.FirmId == firmId);
         if (branchId is not null) query = query.Where(row => row.BranchId == branchId);
-        var rows = await query.Include(row => row.Lines)
+        var rows = await query.Include(row => row.Lines).Include(row => row.PaymentAttempts)
             .OrderByDescending(row => row.CreatedAt).ThenByDescending(row => row.Id)
             .Take(100).ToListAsync(cancellationToken);
         return rows.Select(ToDetail).ToArray();
+    }
+
+    public async Task<SalesOrderDetail?> GetAsync(
+        string firmId, string branchId, Guid orderId, CancellationToken cancellationToken)
+    {
+        var row = await db.Orders.AsNoTracking().Include(order => order.Lines)
+            .Include(order => order.PaymentAttempts)
+            .SingleOrDefaultAsync(order => order.Id == orderId && order.FirmId == firmId &&
+                order.BranchId == branchId, cancellationToken);
+        return row is null ? null : ToDetail(row);
     }
 
     private static SalesOrderResult Existing(
@@ -123,9 +133,12 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             : SalesOrderResult.Rejected("ORDER_ID_CONFLICT", 409,
                 "Sipariş kimliği başka bir kayıt için kullanılıyor.");
 
-    private static SalesOrderDetail ToDetail(SalesOrderRow row) =>
+    public static SalesOrderDetail ToDetail(SalesOrderRow row) =>
         new(row.Id.ToString(), row.FirmId, row.BranchId, row.Source, row.Status,
-            row.PaymentStatus, row.TotalMinor, row.Currency, row.CreatedAt, row.Version,
+            row.PaymentStatus, row.TotalMinor,
+            row.PaymentAttempts.Where(attempt => attempt.Status == "succeeded").Sum(attempt => attempt.AmountMinor),
+            row.TotalMinor - row.PaymentAttempts.Where(attempt => attempt.Status == "succeeded").Sum(attempt => attempt.AmountMinor),
+            row.Currency, row.CreatedAt, row.Version,
             row.Lines.OrderBy(line => line.ProductId).Select(line =>
                 new SalesOrderLine(line.ProductId.ToString(), line.ProductName, line.Sku,
                     line.Quantity, line.UnitPriceMinor, line.LineTotalMinor, line.Currency)).ToArray());

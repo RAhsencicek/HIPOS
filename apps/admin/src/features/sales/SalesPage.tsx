@@ -16,11 +16,17 @@ type LiveOrder = {
   status: string;
   paymentStatus: string;
   totalMinor: number;
+  paidMinor: number;
+  remainingMinor: number;
   createdAt: string;
   items: Array<{ productName: string; quantity: number }>;
 };
 const moneyMinor = (amountMinor: number) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(amountMinor / 100);
+const paymentLabel: Record<string, string> = {
+  unpaid: "Ödenmedi", partially_paid: "Kısmi · simüle",
+  paid: "Ödendi · simüle", pending: "Bekliyor · simüle", unknown: "Belirsiz · simüle",
+};
 
 function LiveSalesPage({ ctx }: { ctx: ViewContext }) {
   const [orders, setOrders] = useState<LiveOrder[]>([]);
@@ -55,7 +61,7 @@ function LiveSalesPage({ ctx }: { ctx: ViewContext }) {
     <PageHeading eyebrow="SATIŞLAR VE ADİSYONLAR" title="Canlı sipariş görünümü"
       description="Test POS'tan veritabanına kaydedilen siparişler. Yönetici yalnız izler."
       action={<StatusPill tone="blue">Salt okunur · 5 sn yenileme</StatusPill>} />
-    <div className="notice" role="status">Geliştirme önizlemesi: Bu siparişler test POS kaynaklıdır. Ödeme alınmış sayılmaz.</div>
+    <div className="notice" role="status">Geliştirme önizlemesi: Siparişler veritabanındadır; ödeme durumları yalnız simülatördendir. Gerçek tahsilat yapılmaz.</div>
     {state === "loading" && <div className="card empty-list" role="status">Siparişler yükleniyor…</div>}
     {state === "error" && <div className="card empty-list" role="alert">{error}</div>}
     {state === "ready" && <div className="card content-card">
@@ -68,7 +74,9 @@ function LiveSalesPage({ ctx }: { ctx: ViewContext }) {
           <td>{ctx.branches.find((branch) => branch.apiId === order.branchId)?.name ?? order.branchId}</td>
           <td>{order.items.map((item) => `${item.quantity}× ${item.productName}`).join(", ")}</td>
           <td><StatusPill tone="blue">Açık</StatusPill></td>
-          <td><StatusPill tone="purple">Ödenmedi</StatusPill></td>
+          <td><StatusPill tone={order.paymentStatus === "paid" ? "green" : order.paymentStatus === "unknown" ? "orange" : "purple"}>
+            {paymentLabel[order.paymentStatus] ?? order.paymentStatus}
+          </StatusPill><small>Ödenen: {moneyMinor(order.paidMinor)} · Kalan: {moneyMinor(order.remainingMinor)}</small></td>
           <td className="numeric strong">{moneyMinor(order.totalMinor)}</td>
           <td className="muted">{new Date(order.createdAt).toLocaleString("tr-TR")}</td>
         </tr>)}</tbody></table></div>}

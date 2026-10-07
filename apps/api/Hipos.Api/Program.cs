@@ -29,6 +29,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogCategoryCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
+    builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
 }
 else if (storage == "memory")
@@ -57,6 +58,7 @@ if (storage == "postgres")
     salesReady = !(await salesDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
+    featureRuntime.PaymentSimulatorReady = salesReady;
 }
 app.UseCors("LocalPreview");
 
@@ -295,6 +297,83 @@ app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders",
         return result.Created
             ? Results.Created($"/api/v1/firms/{firmId}/sales/orders?branchId={branchId}", result.Order)
             : Results.Ok(result.Order);
+    });
+
+app.MapGet("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders/{orderId}",
+    async (string firmId, string branchId, string orderId, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubenin siparişini okuma izni yok.");
+        if (!salesReady)
+            return Failure(context, "SALES_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı.");
+        if (!Guid.TryParse(orderId, out var id))
+            return Failure(context, "ORDER_NOT_FOUND", 404, "Sipariş bulunamadı.");
+        var order = await services.GetRequiredService<SalesOrders>().GetAsync(
+            firmId, branchId, id, context.RequestAborted);
+        return order is null
+            ? Failure(context, "ORDER_NOT_FOUND", 404, "Sipariş bulunamadı.")
+            : Results.Ok(order);
+    });
+
+app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders/{orderId}/payment-attempts",
+    async (string firmId, string branchId, string orderId, StartSimulatedPayment command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanOperate || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede test ödeme girişimi başlatma izni yok.");
+        if (!salesReady)
+            return Failure(context, "PAYMENT_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı.");
+        if (!Guid.TryParse(orderId, out var id))
+            return Failure(context, "ORDER_NOT_FOUND", 404, "Sipariş bulunamadı.");
+        var result = await services.GetRequiredService<PaymentSimulator>().StartAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure)
+            return Failure(context, failure.Code, failure.Status, failure.Message);
+        var response = new { attempt = result.Attempt, order = result.Order };
+        return result.Created
+            ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/orders/{id}/payment-attempts/{result.Attempt!.Id}", response)
+            : Results.Ok(response);
+    });
+
+app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders/{orderId}/payment-attempts/{attemptId}/resolve",
+    async (string firmId, string branchId, string orderId, string attemptId, ResolveSimulatedPayment command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanOperate || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede test ödeme sonucu doğrulama izni yok.");
+        if (!salesReady)
+            return Failure(context, "PAYMENT_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı.");
+        if (!Guid.TryParse(orderId, out var id) || !Guid.TryParse(attemptId, out var paymentId))
+            return Failure(context, "PAYMENT_NOT_FOUND", 404, "Ödeme girişimi bulunamadı.");
+        var result = await services.GetRequiredService<PaymentSimulator>().ResolveAsync(
+            firmId, branchId, id, paymentId, command, actor.Name, context.RequestAborted);
+        return result.Failure is { } failure
+            ? Failure(context, failure.Code, failure.Status, failure.Message)
+            : Results.Ok(new { attempt = result.Attempt, order = result.Order });
+    });
+
+app.MapGet("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders/{orderId}/payment-attempts",
+    async (string firmId, string branchId, string orderId, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubenin ödeme geçmişine erişim izni yok.");
+        if (!salesReady)
+            return Failure(context, "PAYMENT_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı.");
+        if (!Guid.TryParse(orderId, out var id))
+            return Failure(context, "ORDER_NOT_FOUND", 404, "Sipariş bulunamadı.");
+        var order = await services.GetRequiredService<SalesDbContext>().Orders.AsNoTracking()
+            .AnyAsync(row => row.Id == id && row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
+        if (!order) return Failure(context, "ORDER_NOT_FOUND", 404, "Sipariş bulunamadı.");
+        return Results.Ok(await services.GetRequiredService<PaymentSimulator>()
+            .ListAsync(firmId, branchId, id, context.RequestAborted));
     });
 
 app.MapGet("/api/v1/features/definitions", (HttpContext context) =>
