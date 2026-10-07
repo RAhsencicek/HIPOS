@@ -18,6 +18,8 @@ Gelecekte aynı ürün ailesine POS/kasa, garson, mutfak/KDS, kurye, QR/web mü�
 
 İlk panelin kullanıcıları firma sahibi, genel müdür, bölge/merkez yöneticisi, şube müdürü, operasyon yöneticisi, finans yöneticisi, rapor kullanıcısı ve sistem yöneticisidir. İlk frontend sürümünde hepsi aynı yönetim menülerini ve ekranlarını görür. Rol bazlı menü gizleme veya işlem ayrıştırma bu aşamanın önceliği değildir. Gelecek backend firma, şube, rol ve izin bazlı veri ve işlem ayrımına hazırlanmalıdır. Firma ve şube verisi birbirine karışmamalıdır.
 
+İlk gerçek giriş yöntemi HIPOS hesabıdır (e-posta/şifre). Google/Gmail veya diğer harici hesaplarla giriş daha sonraki seçeneklerdir; ilk yayın için şart değildir. Hesap kimliği ile firma/şube üyeliği ayrı tutulur; aynı yönetim arayüzünü görme kararı sunucudaki veri kapsamı denetimini kaldırmaz. İlk hesap ve davet akışı [Kimlik ve Hesap Akışı](KIMLIK_VE_HESAP_AKISI.md) içinde tasarlanır.
+
 Garson, kasiyer, mutfak personeli, kurye ve müşteri bu panelin kullanıcıları değildir.
 
 Uzun vadeli hedef; bağımsız restoran, zincir, franchise, pizza, kahvaltı, kafe, bar, hızlı servis, fine dining, pastane, bulut mutfak ve paket servis işletmeleridir. İlk tasarım iki senaryoda doğrulanır: tek şubeli pizza/kahvaltı işletmesi ve en az iki şubeli restoran.

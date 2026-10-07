@@ -231,6 +231,7 @@ export const sections: NavSection[] = [
 
 export type DemoBranch = {
   id: string;
+  apiId: string;
   name: string;
   district: string;
   brandId: string | null;
@@ -243,6 +244,7 @@ export type DemoBranch = {
 };
 export type DemoScenario = {
   id: string;
+  firmId: string;
   firm: string;
   brand: string | null;
   branches: DemoBranch[];
@@ -251,11 +253,13 @@ export type DemoScenario = {
 export const scenarios: DemoScenario[] = [
   {
     id: "single",
+    firmId: "11111111-1111-4111-8111-111111111111",
     firm: "Günaydın Pizza & Kahvaltı",
     brand: null,
     branches: [
       {
         id: "kadikoy",
+        apiId: "33333333-3333-4333-8333-333333333333",
         name: "Kadıköy Şubesi",
         district: "İstanbul · Kadıköy",
         brandId: null,
@@ -270,11 +274,13 @@ export const scenarios: DemoScenario[] = [
   },
   {
     id: "multi",
+    firmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     firm: "ABC Restoran Grubu",
     brand: "PizzaMarka",
     branches: [
       {
         id: "moda",
+        apiId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
         name: "Moda Şubesi",
         district: "İstanbul · Kadıköy",
         brandId: "pizza-marka",
@@ -287,6 +293,7 @@ export const scenarios: DemoScenario[] = [
       },
       {
         id: "besiktas",
+        apiId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
         name: "Beşiktaş Şubesi",
         district: "İstanbul · Beşiktaş",
         brandId: "pizza-marka",
@@ -299,6 +306,7 @@ export const scenarios: DemoScenario[] = [
       },
       {
         id: "atasehir",
+        apiId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
         name: "Ataşehir Şubesi",
         district: "İstanbul · Ataşehir",
         brandId: "pizza-marka",
@@ -313,85 +321,6 @@ export const scenarios: DemoScenario[] = [
   },
 ];
 
-export type DemoProduct = {
-  id: string;
-  name: string;
-  category: string;
-  sku: string;
-  price: number;
-  status: "Yayında" | "Taslak";
-  channels: string[];
-  image: string;
-  recipe: boolean;
-};
-export const products: DemoProduct[] = [
-  {
-    id: "margherita",
-    name: "Margherita Pizza",
-    category: "Pizzalar",
-    sku: "PZZ-001",
-    price: 320,
-    status: "Yayında",
-    channels: ["POS", "QR", "Paket"],
-    image: "🍕",
-    recipe: true,
-  },
-  {
-    id: "karisik",
-    name: "Karışık Pizza",
-    category: "Pizzalar",
-    sku: "PZZ-002",
-    price: 410,
-    status: "Yayında",
-    channels: ["POS", "QR", "Paket"],
-    image: "🍕",
-    recipe: true,
-  },
-  {
-    id: "kahvalti",
-    name: "Serpme Kahvaltı",
-    category: "Kahvaltı",
-    sku: "KHV-001",
-    price: 690,
-    status: "Yayında",
-    channels: ["POS", "QR"],
-    image: "🥐",
-    recipe: true,
-  },
-  {
-    id: "menemen",
-    name: "Menemen",
-    category: "Kahvaltı",
-    sku: "KHV-003",
-    price: 245,
-    status: "Yayında",
-    channels: ["POS", "QR"],
-    image: "🍳",
-    recipe: true,
-  },
-  {
-    id: "limonata",
-    name: "Ev Yapımı Limonata",
-    category: "İçecekler",
-    sku: "ICK-008",
-    price: 125,
-    status: "Yayında",
-    channels: ["POS", "QR", "Paket"],
-    image: "🍋",
-    recipe: false,
-  },
-  {
-    id: "tatli",
-    name: "San Sebastian Cheesecake",
-    category: "Tatlılar",
-    sku: "TTL-012",
-    price: 220,
-    status: "Taslak",
-    channels: ["POS"],
-    image: "🍰",
-    recipe: false,
-  },
-];
 
 export type DemoCheck = {
   id: string;
@@ -495,146 +424,6 @@ export const checks: DemoCheck[] = [
   },
 ];
 
-export type Feature = {
-  key: string;
-  name: string;
-  category: string;
-  description: string;
-  availability: "Prototip" | "Planlandı";
-  dependencies: string[];
-  icon: string;
-  setup?: string;
-};
-export const features: Feature[] = [
-  {
-    key: "catalog.products",
-    name: "Ürün ve Menü",
-    category: "Menü",
-    description: "Ürünleri, kategorileri ve menü yayınlarını yönetin.",
-    availability: "Prototip",
-    dependencies: [],
-    icon: "book-open",
-  },
-  {
-    key: "catalog.pricing",
-    name: "Fiyat Yönetimi",
-    category: "Menü",
-    description: "Şubeye ve kanala göre fiyatları hazırlayın.",
-    availability: "Prototip",
-    dependencies: ["catalog.products"],
-    icon: "tag",
-  },
-  {
-    key: "sales.monitoring",
-    name: "Satış İzleme",
-    category: "Operasyon",
-    description: "Adisyonları ve sipariş durumlarını salt okunur izleyin.",
-    availability: "Prototip",
-    dependencies: [],
-    icon: "receipt-text",
-  },
-  {
-    key: "branches.tables",
-    name: "Masa Görünümü",
-    category: "Operasyon",
-    description: "Masa doluluğunu ve açık adisyonları inceleyin.",
-    availability: "Prototip",
-    dependencies: ["sales.monitoring"],
-    icon: "layout-grid",
-  },
-  {
-    key: "kitchen.monitoring",
-    name: "Mutfak İzleme",
-    category: "Operasyon",
-    description: "Hazırlık ve gecikme durumunu görün.",
-    availability: "Prototip",
-    dependencies: ["sales.monitoring"],
-    icon: "chef-hat",
-  },
-  {
-    key: "inventory.items",
-    name: "Stok Takibi",
-    category: "Stok ve Tedarik",
-    description: "Hammadde ve depo stoklarını yönetin.",
-    availability: "Prototip",
-    dependencies: [],
-    icon: "boxes",
-    setup: "Hammadde ve depo tanımı gerekli",
-  },
-  {
-    key: "inventory.recipes",
-    name: "Stok ve Reçete",
-    category: "Stok ve Tedarik",
-    description: "Ürün reçetelerini ve porsiyon maliyetlerini bağlayın.",
-    availability: "Prototip",
-    dependencies: ["catalog.products", "inventory.items"],
-    icon: "notebook-tabs",
-    setup: "Hammadde tanımı gerekli",
-  },
-  {
-    key: "procurement.requests",
-    name: "Satın Alma",
-    category: "Stok ve Tedarik",
-    description: "Talep, sipariş ve mal kabul akışlarını yönetin.",
-    availability: "Planlandı",
-    dependencies: ["inventory.items"],
-    icon: "truck",
-  },
-  {
-    key: "finance.expenses",
-    name: "Gider Yönetimi",
-    category: "Finans",
-    description: "Gider ve tedarikçi borcu kayıtlarını yönetin.",
-    availability: "Planlandı",
-    dependencies: [],
-    icon: "wallet",
-  },
-  {
-    key: "cash.monitoring",
-    name: "Kasa İzleme",
-    category: "Finans",
-    description: "Kasa vardiyası ve ödeme dağılımını inceleyin.",
-    availability: "Planlandı",
-    dependencies: ["sales.monitoring"],
-    icon: "landmark",
-  },
-  {
-    key: "reports.sales",
-    name: "Satış Raporları",
-    category: "Analiz",
-    description: "Şube, kanal ve ürün performansını kıyaslayın.",
-    availability: "Prototip",
-    dependencies: ["sales.monitoring"],
-    icon: "chart-no-axes-combined",
-  },
-  {
-    key: "customers.loyalty",
-    name: "Sadakat ve Kuponlar",
-    category: "Müşteri",
-    description: "Müşteri segmentleri ve kampanya araçları.",
-    availability: "Planlandı",
-    dependencies: [],
-    icon: "heart-handshake",
-  },
-  {
-    key: "integrations.delivery",
-    name: "Yemek Platformları",
-    category: "Entegrasyon",
-    description: "Yemeksepeti, GetirYemek ve diğer bağlantılar.",
-    availability: "Planlandı",
-    dependencies: [],
-    icon: "plug-zap",
-  },
-];
-
-export const initialEnabled = [
-  "catalog.products",
-  "catalog.pricing",
-  "sales.monitoring",
-  "branches.tables",
-  "kitchen.monitoring",
-  "reports.sales",
-];
 
 export const formatMoney = (value: number) =>
   new Intl.NumberFormat("tr-TR", {

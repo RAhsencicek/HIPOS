@@ -3,10 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["apps/*"],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev": "npm run dev --workspace @hipos/admin",
-    "build": "npm run build --workspace @hipos/admin",
-    "typecheck": "npm run typecheck --workspace @hipos/admin"
+    "dev:pos": "npm run dev --workspace @hipos/pos",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace @hipos/admin",
+    "test:e2e": "npm run test:e2e --workspace @hipos/admin",
+    "test:api": "node --test apps/api/Hipos.Api.Tests/http.test.mjs",
+    "test:api-ui": "npm run test:api-ui --workspace @hipos/admin",
+    "test:db": "node --test apps/api/Hipos.Api.Tests/postgres.test.mjs"
   }
 }

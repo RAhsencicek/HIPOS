@@ -1,6 +1,6 @@
 # Yönetim Paneli — Teknik Mimari Kararları
 
-Durum: Kararlaştırılan teknoloji yönü ve hedef uygulama ilkeleri. Mevcut ilk tasarım prototipi bu hedef mimarinin tamamı değildir: sayfalar şimdilik tek `App.tsx` içinde, örnek veriler `data/catalog.ts` içinde ve HTTP/mock sağlayıcı arayüzü henüz kurulmadı. Ürün kapsamı için [Ana Ürün Dokümanı](URUN_TANIMI.md) geçerlidir. Ayrıntılı API alanları henüz taslaktır.
+Durum: Kararlaştırılan teknoloji yönü ve hedef uygulama ilkeleri. İlk tasarım prototipi alan dosyalarına ayrıldı. Ürünler ve Menü için mock sağlayıcı sınırı kuruldu; diğer alanlar hâlâ görsel fixture kullanır. Modül tercihi için çalışan HTTP sağlayıcısı ve isteğe bağlı PostgreSQL kalıcılığı vardır; gerçek kimlik doğrulaması ve diğer iş alanlarının backend'i henüz yoktur. Ayrıntılı adımlar [UI Uygulama Planı](UI_UYGULAMA_PLANI.md) içindedir. Ürün kapsamı için [Ana Ürün Dokümanı](URUN_TANIMI.md) geçerlidir. Ayrıntılı API alanları henüz taslaktır.
 
 ## 1. Tasarım hedefleri
 
@@ -18,7 +18,7 @@ Durum: Kararlaştırılan teknoloji yönü ve hedef uygulama ilkeleri. Mevcut il
 | Dil | TypeScript, sıkı tip denetimi | Ekran, modül, bağlam ve API sözleşmelerinde değişiklikleri yakalamak. |
 | Yönetim uygulaması | React + Vite | Yoğun etkileşimli iç panel için hızlı geliştirme ve üretim derlemesi. İlk aşamada sunucu tarafı HTML üretimi gerekmiyor. |
 | Sayfa yönlendirme | React Router | İlk ekip için sade başlangıç; iç içe yönetim sayfaları ve adreslenebilir filtreler. TanStack Router ancak ekip ve ekran gereksinimi somut fayda gösterirse yeniden değerlendirilir. |
-| Sunucu verisi | TanStack Query | Gerçek API eklendiğinde yükleme, hata, önbellek ve yeniden sorgulama yönetimi. Prototipte veri erişim katmanının arkasında kullanılır. |
+| Sunucu verisi | TanStack Query (hedef) | Gerçek API alanları çoğaldığında yükleme, hata, önbellek ve yeniden sorgulama yönetimi için değerlendirilecek; mevcut prototipte henüz kurulu değil. |
 | Görsel sistem | Tasarım değişkenleri + CSS; gerekirse Tailwind CSS ve erişilebilir başsız bileşenler | İlk prototip mevcut referansa göre CSS ile kuruldu. Bileşen kapsamı genişlerse ek araç seçilir. |
 | Çalışma alanı | npm workspaces | İleride yönetim, POS ve diğer uygulamalar için ortak paketleri aynı depoda yönetmeye hazır olmak. Başlangıçta yalnız gerekli uygulama/paketler oluşturulur. |
 | Uçtan uca doğrulama | Playwright | Şube değiştirme, modül kapalı hali ve prototip uyarısı gibi kullanıcı akışlarını tarayıcıda doğrulamak. |
@@ -84,38 +84,44 @@ Her modülün kalıcı bir kimliği, görünür adı, açıklaması, kapsamı, b
 
 ```text
 FeatureDefinition:
-  id
+  key
   name
   description
-  scope: firm | branch
+  scopeType: branch
   dependencies[]
   availability: real | prototype | planned
   setupRequirements[]
 
-FeatureState:
+BranchFeatureState:
   firmId
-  branchId?          # Şube kapsamlı özellikte zorunlu
-  featureId
-  enabled
-  setupStatus
-  providerStatus?
+  branchId
+  key
+  desiredEnabled
+  effectiveForNewWork
+  lifecycle: disabled | setup_required | provider_pending | ready | draining
+  blockers[]
+  inFlightWorkCount
+  version
+  updatedAt
 ```
 
-`availability` ürünün uygulanma düzeyidir; `enabled` ilgili işletmenin tercihi; `setupStatus` gerekli verilerin tamamlanma durumudur. Bu alanlar tek bir “aktif” bayrağına indirgenmez. Frontend, A1 kapsamındaki değişikliği A2 verisine uygulamaz. Gerçek backend geldiğinde bu kural sunucuda da doğrulanır; istemcideki filtre tek başına veri izolasyonu sayılmaz.
+`availability` ürünün uygulanma düzeyidir; `desiredEnabled` ilgili işletmenin tercihi, `effectiveForNewWork` ise gerçek yeni işin başlayıp başlayamayacağını belirtir. `lifecycle`, `blockers` ve `version` ayrıca taşınır. Bunlar tek bir “aktif” bayrağına indirgenmez. Frontend, A1 kapsamındaki değişikliği A2 verisine uygulamaz. Gerçek backend geldiğinde bu kural sunucuda da doğrulanır; istemcideki filtre tek başına veri izolasyonu sayılmaz.
 
 **Mimari modül ile aç/kapa ayarı farklı şeylerdir.** Modüler monolit kodu iş alanlarına ayırır. Özellik ayarı ise belirli firma/şubede hangi yeteneğin kullanılacağını belirleyen veridir. Bir özelliği kapatmak modülün kodunu kaldırmaz, EF migrasyonu çalıştırmaz ve geçmiş kayıtları silmez. Bir özelliği açmak; kapsam, bağımlılık, kurulum ve sağlayıcı kontrolleri başarıyla geçince etkili olur. UI, API ve arka plan işleri aynı etkili duruma uymalıdır. Kaydedilen tercihle fiilen kullanılabilir durum ayrı gösterilmelidir; örneğin “Açık, kurulum gerekiyor”.
 
 ## 5. Veri ve API sınırı
 
-Hedef mimaride ekranlar doğrudan dağınık sabit veri dizilerini okumaz. Her alan bir veri erişim arayüzüne bağlanır; prototip veri sağlayıcısı bu arayüzü örnek senaryolarla doldurur. Gerçek API geldiğinde sağlayıcı değişir, ekran sözleşmesi korunur. İlk görsel prototipte ise fixture'lar tek `data/catalog.ts` dosyasındadır; sağlayıcı katmanı ve sözleşme tipleri sonraki uygulama adımıdır. Prototipte gerçek kaydetme olmayan komutlar başarı sonucu üretmez. Gerekirse etkileşimli taslak yalnız `prototip` etiketi altında, kalıcı işlem iddiası olmadan gösterilir.
+Hedef mimaride ekranlar doğrudan dağınık sabit veri dizilerini okumaz. Her alan bir veri erişim arayüzüne bağlanır; prototip veri sağlayıcısı bu arayüzü örnek senaryolarla doldurur. Gerçek API geldiğinde sağlayıcı değişir; sözleşme gelişirse ekran uyarlamaları kontrollü yapılır. Bu yaklaşım katalog okuması ve modül durumu için uygulandı. Modül tercihleri varsayılan olarak oturumluk mock üzerinde, yerel .NET sunucusunda bellek veya isteğe bağlı PostgreSQL deposunda değişir. PostgreSQL modu yalnız modül tercihi ve denetim kaydını kalıcı tutar. Diğer yönetim alanları bu turda taşınmadı ve görsel fixture'ları kullanıyor. Prototipte gerçek işletme kaydı oluşturmayan komutlar başarı sonucu üretmez.
 
-Mock verinin hedef şekli, ilerideki ASP.NET Core API yanıtıyla aynı sözleşmeden türemelidir. Firma/marka/şube kapsamı, kimlikler, para ve miktar, liste sayfalaması, modül durumu ve hata biçimi [API ve Mock Veri Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) içinde ilk taslak olarak tanımlanmıştır. Bugünkü görsel fixture'lar henüz bu sözleşmeyle bire bir aynı değildir; gerçek veri akışına geçmeden önce sağlayıcıyla birlikte hizalanacaktır.
+Mock verinin hedef şekli, ilerideki ASP.NET Core API yanıtıyla aynı sözleşmeden türemelidir. Firma/marka/şube kapsamı, kimlikler, para ve miktar, liste sayfalaması, modül durumu ve hata biçimi [API ve Mock Veri Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) içinde ilk taslak olarak tanımlanmıştır. Katalog fixture'ları bu başlangıç biçimini kullanır; diğer görsel fixture'lar henüz kullanmaz. Gerçek API sözleşmesi OpenAPI ile doğrulanırken sürümlü olarak netleştirilir.
 
 Gelecekte HTTP API sözleşmesi OpenAPI ile belgelenir. İstek ve yanıtlar firma, isteğe bağlı marka ve şube kapsamını açıkça taşır. Liste ekranlarında filtre, sıralama, sayfalama ve zaman aralığı sözleşmesi tutarlı olur. Para tutarı, vergi ve miktar gösterimi biçimlendirilir; hesaplamanın kaynağı backend olur. Hata cevapları ekranın `hata`, `yetkisiz`, `kurulum gerekiyor` ve `modül kapalı` durumlarına eşlenir.
 
 ## 6. Backend çalışma kararı
 
 Backend için çalışma kararı **.NET 10 + ASP.NET Core → Application/Domain → EF Core 10/Npgsql → PostgreSQL** zinciridir. Modüller tek uygulama ve ilk aşamada tek dağıtım birimi içinde kalır. NestJS ilk backend tercihi değildir; yalnız .NET prototipi somut teknik ölçütlerde başarısız olursa alternatif olarak değerlendirilir. Bu değişiklik kullanıcı kararıdır.
+
+`apps/api/Hipos.Api` bu zincirin modül ayarlarına odaklı ilk ASP.NET Core doğrulama dilimidir: modül tanımları, şube durumları, sürüm kontrollü komut, örnek kapsam/işlem izni ve denetim kaydı. `FeatureRules` API ve EF Core'dan bağımsızdır; bellek ve PostgreSQL depoları aynı kuralları kullanır. PostgreSQL deposu EF Core 10/Npgsql ile ayrı `modules` şemasına yazar. Aynı şubenin durum satırları işlem içinde kilitlenir; eski sürüm 409 ile reddedilir. Migration ayrı kurulum adımıdır; modül aç/kapa sırasında çalışmaz. Teste özel iş tamamlama olayı `draining → disabled` geçişini doğrular. `X-Demo-Actor` gerçek kimlik doğrulaması değildir; uygulama yalnız Development ortamında çalışır. Gerçek oturum, üretim yetkileri ve operasyon komutları bu prototipe dahil değildir.
 
 Firma ve şube izolasyonu her sorgu/komut için sunucuda doğrulanır. PostgreSQL satır güvenliği ek savunma katmanı olarak değerlendirilebilir; uygulama düzeyi kapsam denetiminin yerine geçmez. Modül etkinliği ayrı tablolarda veya kayıtlarda saklanır; modül kapatmak şema migrasyonu ya da veri silme yapmaz. EF Core migrasyonları ürün sürümlerinde kontrollü olarak uygulanır, kullanıcı modül düğmesine bastığında değil. Hassas yönetsel işlemler için işlem geçmişi, idempotent ödeme komutları ve tutarlı rapor tanımları backend tasarımının parçasıdır.
 

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": 3,
+  "definitions": [
+    { "key": "catalog.products", "name": "Ürün ve Menü", "category": "Menü", "description": "Ürünleri, kategorileri ve menü yayınlarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "book-open" },
+    { "key": "catalog.drafts", "name": "Ürün Taslakları", "category": "Menü", "description": "Şubeye ait ürün taslaklarını kalıcı olarak oluşturun ve güncelleyin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products"], "icon": "file-pen-line" },
+    { "key": "catalog.pricing", "name": "Fiyat Yönetimi", "category": "Menü", "description": "Şubeye ve kanala göre fiyatları hazırlayın.", "scopeType": "branch", "availability": "prototype", "dependencies": ["catalog.products"], "icon": "tag" },
+    { "key": "sales.monitoring", "name": "Satış İzleme", "category": "Operasyon", "description": "Adisyonları ve sipariş durumlarını salt okunur izleyin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "receipt-text" },
+    { "key": "sales.pos_orders", "name": "Test POS Siparişleri", "category": "Operasyon", "description": "Geliştirme ortamında POS siparişini gerçek veritabanına kaydedin; ödeme işlemi içermez.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["sales.monitoring"], "icon": "receipt-text" },
+    { "key": "branches.tables", "name": "Masa Görünümü", "category": "Operasyon", "description": "Masa doluluğunu ve açık adisyonları inceleyin.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "layout-grid" },
+    { "key": "kitchen.monitoring", "name": "Mutfak İzleme", "category": "Operasyon", "description": "Hazırlık ve gecikme durumunu görün.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "chef-hat" },
+    { "key": "inventory.items", "name": "Stok Takibi", "category": "Stok ve Tedarik", "description": "Hammadde ve depo stoklarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "boxes", "setupRequirements": ["Hammadde ve depo tanımı gerekli"] },
+    { "key": "inventory.recipes", "name": "Stok ve Reçete", "category": "Stok ve Tedarik", "description": "Ürün reçetelerini ve porsiyon maliyetlerini bağlayın.", "scopeType": "branch", "availability": "prototype", "dependencies": ["catalog.products", "inventory.items"], "icon": "notebook-tabs", "setupRequirements": ["Hammadde tanımı gerekli"] },
+    { "key": "procurement.requests", "name": "Satın Alma", "category": "Stok ve Tedarik", "description": "Talep, sipariş ve mal kabul akışlarını yönetin.", "scopeType": "branch", "availability": "planned", "dependencies": ["inventory.items"], "icon": "truck" },
+    { "key": "finance.expenses", "name": "Gider Yönetimi", "category": "Finans", "description": "Gider ve tedarikçi borcu kayıtlarını yönetin.", "scopeType": "branch", "availability": "planned", "dependencies": [], "icon": "wallet" },
+    { "key": "cash.monitoring", "name": "Kasa İzleme", "category": "Finans", "description": "Kasa vardiyası ve ödeme dağılımını inceleyin.", "scopeType": "branch", "availability": "planned", "dependencies": ["sales.monitoring"], "icon": "landmark" },
+    { "key": "reports.sales", "name": "Satış Raporları", "category": "Analiz", "description": "Şube, kanal ve ürün performansını kıyaslayın.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "chart-no-axes-combined" },
+    { "key": "customers.loyalty", "name": "Sadakat ve Kuponlar", "category": "Müşteri", "description": "Müşteri segmentleri ve kampanya araçları.", "scopeType": "branch", "availability": "planned", "dependencies": [], "icon": "heart-handshake" },
+    { "key": "integrations.delivery", "name": "Yemek Platformları", "category": "Entegrasyon", "description": "Yemeksepeti, GetirYemek ve diğer bağlantılar.", "scopeType": "branch", "availability": "planned", "dependencies": [], "icon": "plug-zap", "providerRequired": true }
+  ]
+}

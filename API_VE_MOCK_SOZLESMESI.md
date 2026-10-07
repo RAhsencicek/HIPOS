@@ -1,6 +1,6 @@
 # Yönetim Paneli — API ve Mock Veri Sözleşmesi
 
-Durum: Frontend prototipi için başlangıç sözleşmesi. Henüz çalışan backend veya kesin OpenAPI dosyası değildir. Alanlar gerçek ASP.NET Core API geliştirilirken sürümlü sözleşmeyle doğrulanır. Ürün kapsamı [Ana Ürün Dokümanı](URUN_TANIMI.md), mimari sınırlar [Teknik Mimari](TEKNIK_MIMARI.md) içindedir.
+Durum: Frontend prototipi için başlangıç sözleşmesi. Modül diliminin geliştirme ortamına özel çalışan ASP.NET Core prototipi ve isteğe bağlı PostgreSQL kalıcılığı vardır; üretim backend'i veya kesin OpenAPI dosyası değildir. Alanlar gerçek API geliştirilirken sürümlü sözleşmeyle doğrulanır. Ürün kapsamı [Ana Ürün Dokümanı](URUN_TANIMI.md), mimari sınırlar [Teknik Mimari](TEKNIK_MIMARI.md) içindedir.
 
 ## 1. Temel ilkeler
 
@@ -33,10 +33,11 @@ GET /api/v1/firms/{firmId}/context
 GET /api/v1/firms/{firmId}/branches
 GET /api/v1/firms/{firmId}/products?branchId={branchId}
 GET /api/v1/firms/{firmId}/sales/summary?branchId={branchId}&from={utc}&to={utc}
-GET /api/v1/firms/{firmId}/features?branchId={branchId}
+GET /api/v1/features/definitions
+GET /api/v1/firms/{firmId}/branches/{branchId}/features
 ```
 
-Firma içindeki toplu okumalarda `branchId` yoksa, yalnız yetkili olunan şubeler birleştirilir; yanıtta `scope` bunu açıkça belirtir. Tek kayıt ayrıntısı veya değişiklik komutu, etkilenen şubeyi açıkça taşır. `brandId` filtre olarak eklenebilir, ancak firma ve şube doğrulamasının yerine geçmez.
+Firma içindeki toplu okumalarda `branchId` yoksa, yalnız yetkili olunan şubeler birleştirilir; yanıtta `scope` bunu açıkça belirtir. Modül durumu okuması ve değiştirme komutu ise bu ilk sözleşmede mutlaka tek şubeyi hedefler. `brandId` filtre olarak eklenebilir, ancak firma ve şube doğrulamasının yerine geçmez.
 
 Kapsam yanıtı örneği:
 
@@ -63,30 +64,37 @@ Tekil kaynak doğrudan nesne döner. Liste yanıtı `items` ve `pageInfo` taşı
 {
   "items": [
     {
-      "id": "55555555-5555-4555-8555-555555555555",
+      "id": "55555555-5555-4555-8555-555555555501",
       "firmId": "11111111-1111-4111-8111-111111111111",
-      "brandId": "22222222-2222-4222-8222-222222222222",
+      "brandId": null,
       "branchIds": ["33333333-3333-4333-8333-333333333333"],
       "name": "Margherita Pizza",
+      "sku": "PZZ-001",
+      "category": { "id": "pizza", "name": "Pizzalar" },
       "status": "published",
-      "price": { "amountMinor": 29900, "currency": "TRY" },
+      "channels": ["pos", "qr", "delivery"],
+      "image": "🍕",
+      "recipeLinked": true,
+      "price": { "amountMinor": 32000, "currency": "TRY" },
+      "priceSource": "central",
       "updatedAt": "2026-10-05T09:30:00Z",
-      "version": 3
+      "version": 1
     }
   ],
   "pageInfo": { "page": 1, "pageSize": 25, "totalItems": 1, "totalPages": 1 },
   "scope": {
     "firmId": "11111111-1111-4111-8111-111111111111",
     "branchId": "33333333-3333-4333-8333-333333333333"
-  }
+  },
+  "categories": [{ "id": "pizza", "name": "Pizzalar" }]
 }
 ```
 
-Toplu görünümde `scope.branchId` `null` olur. `items: []` geçerli boş durumdur; hata veya modül kapalı anlamına gelmez. Ürünlerin `branchIds` alanı görünürlük örneğidir; merkezden miras ve şube istisnalarının kesin modeli menü/yayın akışı tasarlanırken ayrıntılandırılır. Gerçek API'nin bu alanı aynen kullanması zorunlu değildir; prototip boyunca tek bir sözleşme kullanılması zorunludur.
+Toplu görünümde `scope.branchId` `null` olur. `items: []` geçerli boş durumdur; hata veya modül kapalı anlamına gelmez. Ürünlerin `branchIds` alanı görünürlük örneğidir. `priceSource: central` merkez fiyatının gösterildiğini, `branch_override` seçili şubeye özgü fiyatın sunucu tarafından döndürüldüğünü anlatır. Frontend geçerli fiyatı hesaplamaz. Ayrıntı yanıtı buna ek olarak `description`, `allergens` ve `optionGroups` taşır. Merkezden miras ve şube istisnalarının kesin kuralları backend tasarımında ayrıntılandırılır. Gerçek API'nin bu alanları aynen kullanması zorunlu değildir; prototip boyunca tek bir sözleşme kullanılması zorunludur.
 
 ## 5. Modül kataloğu ve şube durumu
 
-Her katalog kaydında sabit `key`, ad, açıklama, kapsam, bağımlılık ve ürün olgunluğu vardır. Şube durumunda istenen tercih ile yeni işlem yapabilme durumu ayrıdır:
+`FeatureDefinition` kataloğu ile `BranchFeatureState` şube durumu ayrı yanıtlar/alanlardır. Tanımda sabit `key`, ad, açıklama, kapsam, bağımlılık ve ürün olgunluğu vardır. Şube durumunda istenen tercih ile yeni işlem yapabilme durumu ayrıdır:
 
 ```json
 {
@@ -94,7 +102,13 @@ Her katalog kaydında sabit `key`, ad, açıklama, kapsam, bağımlılık ve ür
   "name": "Stok ve Reçete",
   "scopeType": "branch",
   "availability": "prototype",
-  "dependencies": ["catalog.products", "inventory.items"],
+  "dependencies": ["catalog.products", "inventory.items"]
+}
+```
+
+```json
+{
+  "key": "inventory.recipes",
   "firmId": "11111111-1111-4111-8111-111111111111",
   "branchId": "33333333-3333-4333-8333-333333333333",
   "desiredEnabled": true,
@@ -103,12 +117,15 @@ Her katalog kaydında sabit `key`, ad, açıklama, kapsam, bağımlılık ve ür
   "blockers": [
     { "code": "RECIPE_ITEMS_MISSING", "message": "Önce hammaddeleri tanımlayın." }
   ],
+  "inFlightWorkCount": 0,
   "version": 2,
   "updatedAt": "2026-10-05T09:30:00Z"
 }
 ```
 
-`availability`: `real`, `prototype`, `planned`. `lifecycle`: `disabled`, `setup_required`, `provider_pending`, `ready`, `draining`. Bir özellik `prototype` durumundayken kullanıcı onu örnek olarak açabilir; `effectiveForNewWork` gerçek backend işlemi için `false` kalır. UI prototip akışını ayrıca gösterebilir. `desiredEnabled: true` tek başına kullanım izni değildir.
+`availability`: `real`, `backend_preview`, `prototype`, `planned`. `backend_preview`, geliştirme ortamında gerçek sunucu komutu bulunan ama gerçek kullanıcı kimliği/panel akışı veya yayın kapıları tamamlanmamış yetenektir; üretime hazır anlamına gelmez. `lifecycle`: `disabled`, `setup_required`, `provider_pending`, `ready`, `draining`. Bir özellik `prototype` durumundayken kullanıcı onu örnek olarak açabilir; `effectiveForNewWork` gerçek backend işlemi için `false` kalır. UI prototip akışını ayrıca gösterebilir. `desiredEnabled: true` tek başına kullanım izni değildir. Şimdiki mock tercihleri yalnız bellekte tutar; sayfa yenileme onları sıfırlar.
+
+Yerel .NET prototipi bu biçimde tanım ve durum listeleri ile sürüm kontrollü PUT komutunu sunar. `X-Demo-Actor` yalnız geliştirme testleri içindir, güvenilir kimlik doğrulaması değildir. Bellek modu yeniden başlatılınca sıfırlanır; PostgreSQL modunda modül tercihi/denetim kaydı, katalog okuması ve şube bazlı taslaklar kalıcı olabilir. Aynı şubenin modül ayarları PostgreSQL işleminde kilitlenir; farklı şubeler etkilenmez. `catalog.drafts` için ilk gerçek yeni iş komutu aynı modül kilidiyle bağlandı; diğer alanların yeni iş politikası prototiptir. `/_prototype/.../complete-one-work` yalnız testte devam eden bir işin bittiğini simüle eder; gerçek mutfak veya ödeme komutu değildir. Üretim kimlik doğrulaması ve operasyon komutları kapsam dışıdır.
 
 Bağımlılık listesi katalogda gösterilir ve etkinleştirme öncesi denetlenir. Bağımlılıklar döngü oluşturamaz. Eksik bağımlılık kullanıcıya aktivasyon planı olarak gösterilir; sessizce başka şubelerde değişiklik yapılmaz.
 
@@ -164,6 +181,7 @@ Hatalar ASP.NET Core'un desteklediği Problem Details biçiminde döner. `type`,
 - Kaydetme prototipinde geçici ekran değişikliği gerekiyorsa bu açıkça “yalnız bu önizlemede” diye etiketlenir. Sunucuda kayıt oluştuğu söylenmez.
 - Fixture kaynağına ait `demo` bilgisi uygulama katmanında tutulur; gelecekteki iş verisi JSON'unun içine sahte başarı bayrağı eklenmez.
 - API eklendiğinde mock ve HTTP sağlayıcıları aynı sözleşme örnekleriyle doğrulanır. Sözleşme değişikliği sürümlendirilir.
+- Frontend katalog sağlayıcısı `listProducts`, `getProduct`, `createDraft` ve `updateDraft` sözleşmelerini uygular. Varsayılan mock yazmayı açıkça reddeder. PostgreSQL migration'ı kurulduğunda `VITE_CATALOG_PROVIDER=http` ve `VITE_FEATURE_PROVIDER=http` ile temel taslak formu gerçek API'ye bağlanır. `catalogState` sorgu parametresi sadece mock durum önizlemesini seçer; API sözleşmesinin parçası değildir. Ayrıntı [Katalog Backend Sözleşmesi](KATALOG_BACKEND_SOZLESMESI.md) içindedir.
 
 ## 8. Açık teknik ayrıntılar
 

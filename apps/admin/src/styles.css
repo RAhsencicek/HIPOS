@@ -76,6 +76,14 @@ input:focus {
   box-shadow: 0 0 0 3px #391ee015;
   outline: none;
 }
+.draft-form-card { padding: 24px; margin: 18px 0; }
+.draft-form-card > p { color: #777783; margin: 8px 0 20px; }
+.draft-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.draft-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; font-size: 13px; font-weight: 600; }
+.draft-field input, .draft-field textarea { width: 100%; border: 1px solid #e7e7eb; border-radius: 10px; padding: 10px 12px; font: inherit; font-weight: 400; color: #292936; background: #fff; }
+.draft-field textarea { resize: vertical; }
+.draft-actions { display: flex; justify-content: flex-end; gap: 10px; }
+@media (max-width: 640px) { .draft-form-grid { grid-template-columns: 1fr; } }
 .app-shell {
   display: flex;
   min-height: 100vh;
@@ -1049,8 +1057,11 @@ td.strong {
   gap: 18px;
   padding: 0 22px;
   border-bottom: 1px solid #eeeef1;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 .tabs button {
+  flex: none;
   height: 45px;
   background: transparent;
   border: 0;
