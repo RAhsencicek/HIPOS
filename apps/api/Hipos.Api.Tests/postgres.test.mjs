@@ -528,7 +528,7 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
-      assert.equal(catalogMigrationCount.stdout.trim(), "4");
+      assert.equal(catalogMigrationCount.stdout.trim(), "5");
       const auditCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -657,6 +657,98 @@ test(
       await startApi();
       assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 64000);
 
+      // Gerçek taslak → sürümlü fiyat → yayın → test POS satışı.
+      const publishedProductId = "77777777-7777-4777-8777-777777777709";
+      const publishedPriceId = "99999999-9999-4999-8999-999999999909";
+      const nextPriceId = "99999999-9999-4999-8999-999999999910";
+      const publicationId = "99999999-9999-4999-8999-999999999911";
+      const pricePath = `${draftPath}/${publishedProductId}/price`;
+      const publishPath = `${draftPath}/${publishedProductId}/publish`;
+      const draftForPublish = {
+        draftId: publishedProductId, name: "Yayınlanan Pizza", sku: "PZZ-909",
+        categoryId: "pizza", categoryName: winningName, description: "İlk yayın testi",
+      };
+      assert.equal((await request(draftPath, "POST", draftForPublish)).status, 201);
+      assert.equal((await request(pricePath, "PUT", {
+        priceVersionId: publishedPriceId, amountMinor: 32550, expectedVersion: 1,
+      })).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(featurePath(moda, "catalog.price_drafts"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).status, 200);
+      assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).status, 200);
+      assert.equal((await request(publishPath, "POST", {
+        publicationId, expectedVersion: 1,
+      })).data.code, "PRICE_REQUIRED");
+      assert.equal((await request(pricePath, "PUT", {
+        priceVersionId: publishedPriceId, amountMinor: 32550, expectedVersion: 1,
+      }, "manager-single")).status, 403);
+      const firstPrice = await request(pricePath, "PUT", {
+        priceVersionId: publishedPriceId, amountMinor: 32550, expectedVersion: 1,
+      });
+      assert.equal(firstPrice.status, 201);
+      assert.equal(firstPrice.data.priceVersion.number, 1);
+      assert.equal(firstPrice.data.product.version, 2);
+      assert.equal((await request(pricePath, "PUT", {
+        priceVersionId: publishedPriceId, amountMinor: 32550, expectedVersion: 1,
+      })).status, 200);
+      assert.equal((await request(pricePath, "PUT", {
+        priceVersionId: nextPriceId, amountMinor: 33000, expectedVersion: 1,
+      })).data.code, "VERSION_CONFLICT");
+      const secondPrice = await request(pricePath, "PUT", {
+        priceVersionId: nextPriceId, amountMinor: 33000, expectedVersion: 2,
+      });
+      assert.equal(secondPrice.status, 201);
+      assert.equal(secondPrice.data.priceVersion.number, 2);
+      assert.equal((await request(publishPath, "POST", {
+        publicationId, expectedVersion: 2,
+      })).data.code, "VERSION_CONFLICT");
+      const publication = await request(publishPath, "POST", {
+        publicationId, expectedVersion: 3,
+      });
+      assert.equal(publication.status, 201);
+      assert.equal(publication.data.product.status, "published");
+      assert.equal(publication.data.product.price.amountMinor, 33000);
+      assert.deepEqual(publication.data.product.channels, ["pos"]);
+      assert.equal(publication.data.publication.priceVersionId, nextPriceId);
+      assert.equal((await request(publishPath, "POST", {
+        publicationId, expectedVersion: 3,
+      })).status, 200);
+      assert.equal((await request(publishPath, "POST", {
+        publicationId: "99999999-9999-4999-8999-999999999912", expectedVersion: 3,
+      })).data.code, "DRAFT_NOT_FOUND");
+      const priceHistoryPath = `/api/v1/firms/${firm}/branches/${moda}/catalog/products/${publishedProductId}/price-versions`;
+      const publishHistoryPath = `/api/v1/firms/${firm}/branches/${moda}/catalog/products/${publishedProductId}/publications`;
+      assert.deepEqual((await request(priceHistoryPath)).data.map((item) => item.amountMinor), [32550, 33000]);
+      assert.equal((await request(publishHistoryPath)).data.length, 1);
+      assert.equal((await request(publishHistoryPath, "GET", undefined, "manager-single")).status, 403);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${besiktas}/catalog/products/${publishedProductId}/publications`)).status, 404);
+      const publishAudit = await runPg("psql", [
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT action || ':' || version FROM catalog.draft_audit
+         WHERE draft_id = '${publishedProductId}' ORDER BY id`,
+      ]);
+      assert.deepEqual(publishAudit.stdout.trim().split("\n"),
+        ["created:1", "price_set:2", "price_set:3", "published:4"]);
+      const unpublishedId = "77777777-7777-4777-8777-777777777710";
+      assert.equal((await request(draftPath, "POST", {
+        draftId: unpublishedId, name: "Bekleyen Pizza", sku: "PZZ-910",
+        categoryId: "pizza", categoryName: winningName, description: "Kapalı yayın testi",
+      })).status, 201);
+      assert.equal((await request(`${draftPath}/${unpublishedId}/price`, "PUT", {
+        priceVersionId: "99999999-9999-4999-8999-999999999913", amountMinor: 28000, expectedVersion: 1,
+      })).status, 201);
+      assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
+        desiredEnabled: false, expectedVersion: 2,
+      })).status, 200);
+      assert.equal((await request(`${draftPath}/${unpublishedId}/publish`, "POST", {
+        publicationId: "99999999-9999-4999-8999-999999999914", expectedVersion: 2,
+      })).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(publishHistoryPath)).data.length, 1);
+      assert.equal((await request(priceHistoryPath)).data.length, 2);
+
       // Ayrı test POS yüzü → gerçek API/PostgreSQL → yönetici salt okunur ekranı.
       assert.equal((await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: true, expectedVersion: 3,
@@ -675,11 +767,12 @@ test(
       const posPage = await browser.newPage();
       await posPage.goto(uiBase);
       await posPage.getByLabel("Test şubesi").selectOption("moda");
-      await posPage.getByLabel("Yayınlanmış POS ürünü").selectOption(pizzaId);
+      await posPage.getByLabel("Yayınlanmış POS ürünü").selectOption(publishedProductId);
       await posPage.getByLabel("Adet").fill("2");
       await posPage.getByRole("button", { name: "Sipariş oluştur" }).click();
       await posPage.getByText("Sipariş veritabanına kaydedildi.").waitFor();
       assert.equal((await request(salesList(moda))).data.items.length, 2);
+      assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 66000);
       ui.kill("SIGTERM");
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
@@ -698,7 +791,7 @@ test(
       const managerPage = await browser.newPage();
       await managerPage.goto(`${uiBase}/admin/sales`);
       await managerPage.getByRole("heading", { name: "Canlı sipariş görünümü" }).waitFor();
-      await managerPage.getByRole("row").filter({ hasText: "Margherita Pizza" }).first().waitFor();
+      await managerPage.getByRole("row").filter({ hasText: "Yayınlanan Pizza" }).first().waitFor();
       assert.equal(await managerPage.getByRole("button", { name: "Sipariş oluştur" }).count(), 0);
       await browser.close();
       browser = undefined;

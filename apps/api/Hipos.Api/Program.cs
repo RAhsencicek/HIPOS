@@ -27,6 +27,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
     builder.Services.AddScoped<CatalogCategoryCommands>();
+    builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
 }
@@ -181,6 +182,86 @@ app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts/{draftId}"
         return result.Failure is { } failure
             ? Failure(context, failure.Code, failure.Status, failure.Message)
             : Results.Ok(result.Product);
+    });
+
+app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts/{draftId}/price",
+    async (string firmId, string branchId, string draftId, SetDraftPrice command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede fiyat hazırlama izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(draftId, out var id))
+            return Failure(context, "DRAFT_NOT_FOUND", 404, "Taslak bulunamadı.");
+        var result = await services.GetRequiredService<CatalogPublicationCommands>().SetPriceAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure)
+            return Failure(context, failure.Code, failure.Status, failure.Message);
+        if (result.Product is null || result.PriceVersion is null)
+            return Failure(context, "PRICE_INCONSISTENT", 503, "Fiyat kaydı okunamadı.");
+        var response = new { product = result.Product, priceVersion = result.PriceVersion };
+        return result.Created
+            ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{id}/price-versions", response)
+            : Results.Ok(response);
+    });
+
+app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts/{draftId}/publish",
+    async (string firmId, string branchId, string draftId, PublishProductDraft command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede ürün yayınlama izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(draftId, out var id))
+            return Failure(context, "DRAFT_NOT_FOUND", 404, "Taslak bulunamadı.");
+        var result = await services.GetRequiredService<CatalogPublicationCommands>().PublishAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure)
+            return Failure(context, failure.Code, failure.Status, failure.Message);
+        if (result.Product is null || result.Publication is null)
+            return Failure(context, "PUBLICATION_INCONSISTENT", 503, "Yayın kaydı okunamadı.");
+        var response = new { product = result.Product, publication = result.Publication };
+        return result.Created
+            ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{id}/publications", response)
+            : Results.Ok(response);
+    });
+
+app.MapGet("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/price-versions",
+    async (string firmId, string branchId, string productId, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanRead(firmId, branchId) || actor.CanOperate)
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubenin fiyat geçmişine erişim izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(productId, out var id) ||
+            await services.GetRequiredService<CatalogQueries>().GetAsync(new CatalogScope(firmId, branchId), id, context.RequestAborted) is null)
+            return Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bulunamadı.");
+        return Results.Ok(await services.GetRequiredService<CatalogPublicationCommands>()
+            .PriceHistoryAsync(firmId, branchId, id, context.RequestAborted));
+    });
+
+app.MapGet("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/publications",
+    async (string firmId, string branchId, string productId, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanRead(firmId, branchId) || actor.CanOperate)
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubenin yayın geçmişine erişim izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(productId, out var id) ||
+            await services.GetRequiredService<CatalogQueries>().GetAsync(new CatalogScope(firmId, branchId), id, context.RequestAborted) is null)
+            return Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bulunamadı.");
+        return Results.Ok(await services.GetRequiredService<CatalogPublicationCommands>()
+            .PublicationHistoryAsync(firmId, branchId, id, context.RequestAborted));
     });
 
 app.MapGet("/api/v1/firms/{firmId}/sales/orders",

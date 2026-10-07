@@ -54,7 +54,7 @@ Ardından API'yi PostgreSQL modunda açın:
 ASPNETCORE_ENVIRONMENT=Development HIPOS_FEATURE_STORAGE=postgres HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet run --project apps/api/Hipos.Api/Hipos.Api.csproj --urls http://127.0.0.1:5180
 ```
 
-Diğer terminalde `VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_SALES_PROVIDER=http npm run dev` çalışır. Şube seçip **Ayarlar → Modüller ve Özellikler** içinde **Ürün taslakları** özelliğini açınca temel taslak formu gerçek API'ye bağlanır. Aynı ekranda **Test POS Siparişleri** özelliğini ilgili şube için açabilirsiniz. Ayrı terminalde `npm run dev:pos` test POS'u [http://localhost:5176](http://localhost:5176) adresinde açar. Satışa açık yayınlanmış POS ürünü varsa test siparişi gerçek PostgreSQL kaydı oluşturur; yönetim paneli **Satışlar** ekranında bunu salt okunur görür. Boş veritabanında önce yayınlanmış, fiyatlı ürün gerekir; panelden ürün yayınlama henüz uygulanmadı. Ödeme işlemi bu dilimde yoktur.
+Diğer terminalde `VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_SALES_PROVIDER=http npm run dev` çalışır. Şube seçip **Ayarlar → Modüller ve Özellikler** içinde **Ürün taslakları** özelliğini açınca temel taslak formu gerçek API'ye bağlanır. Aynı ekranda **Fiyat Taslakları**, **Menü Yayınlama** ve **Test POS Siparişleri** ilgili şube için açılabilir. Ayrı terminalde `npm run dev:pos` test POS'u [http://localhost:5176](http://localhost:5176) adresinde açar. Satışa açık yayınlanmış POS ürünü varsa test siparişi gerçek PostgreSQL kaydı oluşturur; yönetim paneli **Satışlar** ekranında bunu salt okunur görür. Boş veritabanında artık taslak → fiyat sürümü → POS yayını backend API zinciri vardır; panelden fiyat/yayın formu henüz uygulanmadı. Ödeme işlemi bu dilimde yoktur.
 
 Migration **ayrı komutla** uygulanır; modül düğmesi migration veya tablo silme işlemi yapmaz. [compose.yaml](compose.yaml) yalnız yerel geliştirme içindir; örnek parolası üretimde kullanılmaz. Sunucu yalnız Development ortamında açılır; `X-Demo-Actor` başlığı gerçek kimlik doğrulaması değildir. Katalog veya satış migration'ı eksikse ilgili API açık bir `503` döner. `VITE_SALES_PROVIDER` verilmezse yönetimdeki eski satış görünümü açıkça örnek veridir.
 
@@ -67,7 +67,7 @@ npm run test:api-ui
 npm run test:db
 ```
 
-`test:api-ui` panel–API bağlantısını tarayıcıda doğrular. `test:db` bu Mac'teki PostgreSQL 18 araçlarıyla geçici, izole bir veritabanı açar; taslak ve sipariş kaydı, test POS → yönetim paneli tarayıcı akışı, sunucu yeniden başlatma, şube izolasyonu ve denetim kaydını doğrular. Test kendi geçici verisini temizler; Docker gerektirmez.
+`test:api-ui` panel–API bağlantısını tarayıcıda doğrular. `test:db` bu Mac'teki PostgreSQL 18 araçlarıyla geçici, izole bir veritabanı açar; taslak, fiyat sürümü, ilk yayın ve sipariş kaydı, test POS → yönetim paneli tarayıcı akışı, sunucu yeniden başlatma, şube izolasyonu ve denetim kaydını doğrular. Test kendi geçici verisini temizler; Docker gerektirmez.
 
 ## Bu sürümde
 
@@ -78,7 +78,7 @@ npm run test:db
 - Şube bazlı modül kataloğu ve bağımlılık gösteren açma/kapama önizlemesi
 - Kapalı modülde geçmiş okuması, yeni iş önizlemesini kapatma ve gerçek işlem olmadığına dair açık etiketler
 
-Varsayılan panel verileri örnektir. Modül seçimleri tarayıcı oturumunda, .NET bellek modunda sunucu belleğinde veya PostgreSQL modunda veritabanında tutulur. HTTP/PostgreSQL hazırlandığında yönetici paneli temel ürün taslağını oluşturur/günceller ve test POS siparişlerini salt okunur izler. Sipariş yalnız ayrı test POS ekranından oluşturulur; ürün/fiyat yayını, ödeme ve dış sağlayıcı bağlantısı henüz yoktur.
+Varsayılan panel verileri örnektir. Modül seçimleri tarayıcı oturumunda, .NET bellek modunda sunucu belleğinde veya PostgreSQL modunda veritabanında tutulur. HTTP/PostgreSQL hazırlandığında yönetici paneli temel ürün taslağını oluşturur/günceller ve test POS siparişlerini salt okunur izler. Sipariş yalnız ayrı test POS ekranından oluşturulur; ilk ürün/fiyat yayını yalnız backend API'sinde vardır. Panelde yayın formu, yeniden yayın, ödeme ve dış sağlayıcı bağlantısı henüz yoktur.
 
 Bu sürüm görsel/etkileşimli tasarım prototipidir. Ekran kodu alan dosyalarına ayrıldı ve yollar `/admin` altında toplandı. **Ürünler ve Menü** listesi/ayrıntısı `CatalogProvider` üzerinden varsayılan mock veya isteğe bağlı PostgreSQL API verisi alır; HTTP modunda temel taslak formu gerçek yazma komutunu kullanır. Diğer alanlar hâlâ görsel fixture kullanır. Gerçek kullanıcı girişi ve işletme operasyonları henüz yoktur. Katalogdaki `catalogState` sorgu parametresi yalnız mock durum önizlemesi içindir.
 

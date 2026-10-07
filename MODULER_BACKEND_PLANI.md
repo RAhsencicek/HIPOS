@@ -9,13 +9,13 @@ Durum: Öncelik kararı. İlk pilot hesap akışı kontrollü ve küçük tutulu
 1. **Kod sınırı:** Katalog, satış, stok, mutfak, finans gibi alanların kendi verisi ve iş kuralları vardır. Bir modül diğerinin tablosunu gizlice değiştirmez; sözleşme/olay üzerinden konuşur. Başlangıçta tek ASP.NET Core uygulaması ve tek PostgreSQL kullanılabilir.
 2. **İşletme tercihi:** Firma/şube bir yeteneği açıp kapatabilir. Bu tercih, yeni iş kabulünü etkiler; geçmiş kayıtları silmez ve migration çalıştırmaz. Bağımlılık, kurulum eksiği, sağlayıcı bekleme ve devam eden iş ayrı durumlar olarak kalır.
 
-Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğruladı. `catalog.drafts` için ilk gerçek yönetsel komutlar modül kapısıyla bağlandı; diğer prototip/planlı özelliklerde `effectiveForNewWork=false` kalır. Yalnız düğmenin çalışması, bütün iş alanının çalıştığı anlamına gelmez.
+Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğruladı. `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing` ve geliştirme amaçlı `sales.pos_orders` gerçek komutlara modül kapısıyla bağlandı; diğer prototip/planlı özelliklerde `effectiveForNewWork=false` kalır. Yalnız düğmenin çalışması, bütün iş alanının çalıştığı anlamına gelmez.
 
 ## 2. İlk teknik boşluklar
 
-- Backend'deki 15 modül tanımı paneldeki çok sayıdaki alt işin tamamını temsil etmiyor. **Capability envanteri** ayrıntılandırılmalı: hangisi temel alan, hangisi ayrı aç/kapa yeteneği, hangisi sadece ekran/rapor?
+- Backend'deki 17 özellik tanımı paneldeki çok sayıdaki alt işin tamamını temsil etmiyor. **Capability envanteri** ayrıntılandırılmalı: hangisi temel alan, hangisi ayrı aç/kapa yeteneği, hangisi sadece ekran/rapor?
 - Modül tanımları paylaşılan katalogdan okunuyor; sonraki iş API sözleşmesi/tip üretimiyle ekran–backend davranışını da eşleştirmek.
-- Ürün taslağı ve geliştirme ortamındaki test POS siparişi gerçek yeni iş komutuna bağlandı. Stok tüketimi, ödeme, fiyat ve yayın komutları henüz yok.
+- Ürün taslağı, fiyat sürümü, ilk POS yayını ve geliştirme ortamındaki test POS siparişi gerçek yeni iş komutuna bağlandı. Stok tüketimi, ödeme, yeniden fiyatlandırma ve yeniden yayın komutları henüz yok.
 - `setup_required`, `provider_pending` ve `draining` örnek durumlar. Gerçek kurulum/sağlayıcı/iş tamamlama sinyalleri ilgili modüller tarafından üretilmeli.
 - Modüller arası olay, tekrar eden komut, geri alma ve rapor projeksiyonu henüz işletme verisi üzerinde doğrulanmadı.
 
@@ -46,7 +46,7 @@ Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalış
 | --- | --- | --- | --- |
 | Firma, marka, şube ve erişim | İşletme yapısı, kullanıcı üyeliği, kapsam | Bütün modüller | Demo kapsamı var; gerçek hesap/üyelik yok. |
 | Modül yönetimi | Tanım, şube tercihi, yaşam döngüsü, denetim | Bütün yeni iş komutları | Tercih PostgreSQL'de doğrulandı; taslak komutuyla ilk atomik bağlantı kuruldu. |
-| Ürün, menü ve fiyat | Ürün, kategori, seçenek, alerjen, kanal/şube görünürlüğü, fiyat sürümü, yayın | Satış, kampanya, reçete, merkez yayın | PostgreSQL okuması, panelde temel taslak yazması ve firma kategorisi oluşturma/ad değiştirme API'si var; kategori panel yazması ve diğer işler planlı. |
+| Ürün, menü ve fiyat | Ürün, kategori, seçenek, alerjen, kanal/şube görünürlüğü, fiyat sürümü, yayın | Satış, kampanya, reçete, merkez yayın | PostgreSQL okuması, panelde temel taslak yazması, kategori API'si, fiyat sürümü ve ilk POS yayını API'si var; fiyat/yayın panel formları, tekrar yayın ve diğer işler planlı. |
 | Şube ve masa | Şube durumu, masa tanımı, masa planı | Adisyon ve rapor | Yönetimde görsel/örnek veri. |
 | Satış ve adisyon | Sipariş/adisyon yaşam döngüsü, kalem ve fiyat anlık görüntüsü | Menü, mutfak, ödeme, stok, rapor | Ayrı test POS'tan ilk kalıcı açık sipariş ve yöneticide HTTP salt okunur liste var; tam adisyon yaşam döngüsü yok. |
 | Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
@@ -85,7 +85,7 @@ Aynı işlemde kesin tutarlılık gereken adımlar tek veritabanı işlemiyle ko
 
 ### B. İlk gerçek iş dilimi: Ürünler ve Menü
 
-[Katalog backend dilimi](KATALOG_BACKEND_SOZLESMESI.md) ürün listesi/detayı, şube görünürlüğü, mevcut şube fiyatı ve yönetsel ürün taslağı oluşturma/güncellemeyi doğruladı; temel taslak formu panele bağlandı. Taslak komutu ayrı `catalog.drafts` anahtarıyla aç/kapa, şube ve sürüm denetimine bağlıdır. Firma kategorisi okuması ve sürümlü, denetimli oluşturma/ad değiştirme API'si de hazır. Sırada kategori panel yazması, şube/kanal görünürlüğü komutları, fiyat sürümü, yayın ve geçmiş vardır. Bu parçalar tamamlanmadan bütün katalog “tamamlandı” sayılmaz.
+[Katalog backend dilimi](KATALOG_BACKEND_SOZLESMESI.md) ürün listesi/detayı, şube görünürlüğü, mevcut şube fiyatı ve yönetsel ürün taslağı oluşturma/güncellemeyi doğruladı; temel taslak formu panele bağlandı. Firma kategorisi okuması ve sürümlü, denetimli oluşturma/ad değiştirme API'si hazır. Yeni fiyat sürümü ve ilk POS yayını komutları ayrı `catalog.price_drafts`/`catalog.publishing` anahtarlarıyla aç/kapa, şube, sürüm ve denetim kaydına bağlıdır; geçmiş API'leri vardır. Sırada bu komutların panel akışları, kategori panel yazması, şube/kanal görünürlüğü, yeniden fiyatlandırma ve yayın vardır. Bunlar tamamlanmadan bütün katalog “tamamlandı” sayılmaz.
 
 ### C. Bağımlı alanları sırayla bağlama
 

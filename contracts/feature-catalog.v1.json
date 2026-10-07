@@ -1,9 +1,11 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": 3,
+  "catalogVersion": 4,
   "definitions": [
     { "key": "catalog.products", "name": "Ürün ve Menü", "category": "Menü", "description": "Ürünleri, kategorileri ve menü yayınlarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "book-open" },
     { "key": "catalog.drafts", "name": "Ürün Taslakları", "category": "Menü", "description": "Şubeye ait ürün taslaklarını kalıcı olarak oluşturun ve güncelleyin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products"], "icon": "file-pen-line" },
+    { "key": "catalog.price_drafts", "name": "Fiyat Taslakları", "category": "Menü", "description": "Taslak ürün için fiyat sürümleri hazırlayın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.drafts"], "icon": "tag" },
+    { "key": "catalog.publishing", "name": "Menü Yayınlama", "category": "Menü", "description": "Geçerli fiyatlı taslak ürünü POS'a yayınlayın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.price_drafts"], "icon": "book-open" },
     { "key": "catalog.pricing", "name": "Fiyat Yönetimi", "category": "Menü", "description": "Şubeye ve kanala göre fiyatları hazırlayın.", "scopeType": "branch", "availability": "prototype", "dependencies": ["catalog.products"], "icon": "tag" },
     { "key": "sales.monitoring", "name": "Satış İzleme", "category": "Operasyon", "description": "Adisyonları ve sipariş durumlarını salt okunur izleyin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "receipt-text" },
     { "key": "sales.pos_orders", "name": "Test POS Siparişleri", "category": "Operasyon", "description": "Geliştirme ortamında POS siparişini gerçek veritabanına kaydedin; ödeme işlemi içermez.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["sales.monitoring"], "icon": "receipt-text" },

@@ -61,6 +61,38 @@ public sealed class CatalogCategoryAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class CatalogPriceVersionRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid ProductId { get; set; }
+    public int Number { get; set; }
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "TRY";
+    public string Actor { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class CatalogPublicationRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid ProductId { get; set; }
+    public int Number { get; set; }
+    public Guid PriceVersionId { get; set; }
+    public string ProductName { get; set; } = "";
+    public string Sku { get; set; } = "";
+    public string CategoryId { get; set; } = "";
+    public string CategoryName { get; set; } = "";
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "TRY";
+    public string[] Channels { get; set; } = [];
+    public DateTimeOffset PublishedAt { get; set; }
+    public string Actor { get; set; } = "";
+}
+
 public sealed class CatalogDraftRow
 {
     public Guid Id { get; set; }
@@ -93,6 +125,8 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogBranchPriceRow> BranchPrices => Set<CatalogBranchPriceRow>();
     public DbSet<CatalogCategoryRow> Categories => Set<CatalogCategoryRow>();
     public DbSet<CatalogCategoryAuditRow> CategoryAudit => Set<CatalogCategoryAuditRow>();
+    public DbSet<CatalogPriceVersionRow> PriceVersions => Set<CatalogPriceVersionRow>();
+    public DbSet<CatalogPublicationRow> Publications => Set<CatalogPublicationRow>();
     public DbSet<CatalogDraftRow> Drafts => Set<CatalogDraftRow>();
     public DbSet<CatalogDraftAuditRow> DraftAudit => Set<CatalogDraftAuditRow>();
 
@@ -168,6 +202,50 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.CategoryId, row.Id });
+        });
+        modelBuilder.Entity<CatalogPriceVersionRow>(entity =>
+        {
+            entity.ToTable("price_versions", table =>
+            {
+                table.HasCheckConstraint("ck_price_version_number", "number > 0");
+                table.HasCheckConstraint("ck_price_version_amount", "amount_minor > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.Number).HasColumnName("number");
+            entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
+            entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(row => new { row.FirmId, row.ProductId, row.Number }).IsUnique();
+        });
+        modelBuilder.Entity<CatalogPublicationRow>(entity =>
+        {
+            entity.ToTable("publications", table =>
+            {
+                table.HasCheckConstraint("ck_publication_number", "number > 0");
+                table.HasCheckConstraint("ck_publication_amount", "amount_minor > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.Number).HasColumnName("number");
+            entity.Property(row => row.PriceVersionId).HasColumnName("price_version_id");
+            entity.Property(row => row.ProductName).HasColumnName("product_name").HasMaxLength(256);
+            entity.Property(row => row.Sku).HasColumnName("sku").HasMaxLength(80);
+            entity.Property(row => row.CategoryId).HasColumnName("category_id").HasMaxLength(80);
+            entity.Property(row => row.CategoryName).HasColumnName("category_name").HasMaxLength(160);
+            entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
+            entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(row => row.Channels).HasColumnName("channels");
+            entity.Property(row => row.PublishedAt).HasColumnName("published_at");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.HasIndex(row => new { row.FirmId, row.ProductId, row.Number }).IsUnique();
         });
         modelBuilder.Entity<CatalogDraftRow>(entity =>
         {

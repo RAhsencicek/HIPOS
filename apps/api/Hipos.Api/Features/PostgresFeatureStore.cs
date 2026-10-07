@@ -26,7 +26,7 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
         string firmId, string branchId, string key, SetFeatureDesiredState command,
         string actor, CancellationToken cancellationToken)
     {
-        if (key == "catalog.drafts" && command.DesiredEnabled && !runtime.CatalogDraftsReady)
+        if (IsCatalogWrite(key) && command.DesiredEnabled && !runtime.CatalogDraftsReady)
             return FeatureCommandResult.Rejected("CATALOG_STORAGE_UNAVAILABLE", 503,
                 "Ürün taslağı için katalog migration'ı gerekli.");
         if (key == "sales.pos_orders" && command.DesiredEnabled && !runtime.SalesOrdersReady)
@@ -39,7 +39,7 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
             .ToListAsync(cancellationToken);
         var states = rows.ToDictionary(row => row.Key, row => row.ToState());
         var result = FeatureRules.SetDesired(states, key, command,
-            (key == "catalog.drafts" && runtime.CatalogDraftsReady) ||
+            (IsCatalogWrite(key) && runtime.CatalogDraftsReady) ||
             (key == "sales.pos_orders" && runtime.SalesOrdersReady));
         if (result.Failure is not null || result.State is null) return result;
         var next = result.State;
@@ -67,9 +67,12 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, FeatureRuntimeCapa
         string firmId, string branchId, string key, CancellationToken cancellationToken) =>
         db.BranchFeatureStates.AsNoTracking().AnyAsync(row =>
             row.FirmId == firmId && row.BranchId == branchId && row.Key == key && row.EffectiveForNewWork &&
-            (key != "catalog.drafts" || runtime.CatalogDraftsReady) &&
+            (!IsCatalogWrite(key) || runtime.CatalogDraftsReady) &&
             (key != "sales.pos_orders" || runtime.SalesOrdersReady),
             cancellationToken);
+
+    private static bool IsCatalogWrite(string key) =>
+        key is "catalog.drafts" or "catalog.price_drafts" or "catalog.publishing";
 
     public async Task<FeatureCommandResult> CompleteOneInFlightWorkAsync(
         string firmId, string branchId, string key, CancellationToken cancellationToken)

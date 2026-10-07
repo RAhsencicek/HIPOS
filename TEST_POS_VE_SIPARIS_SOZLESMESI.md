@@ -22,7 +22,7 @@ Panel `VITE_SALES_PROVIDER=http` olduğunda listeyi API'den okur ve beş saniyed
 ## Bilerek henüz yapılmayanlar
 
 - Gerçek HIPOS hesabı, POS personeli yetkisi ve cihaz kimliği: bugünkü `X-Demo-Actor` yalnız Development içindir.
-- Panelden satılabilir ürün yayınlama/fiyat sürümü: test veritabanında yayınlanmış fixture kullanılır. Üretim siparişinden önce fiyat sürümü ve atomik yayın modeli gerekir.
+- Panelden satılabilir ürün yayınlama/fiyat sürümü: ilk fiyat sürümü ve POS yayını API'de vardır; yönetici formu henüz bağlanmadı. Test veritabanında fixture da kullanılır. Üretim siparişinden önce merkezi/çok şubeli fiyat ve yayının kuralları netleşmelidir.
 - Masa/adisyon çoklu kalem düzenleme, iptal, ikram, KDS, stok tüketimi ve sipariş kapatma.
 - Ödeme simülatörü, nakit/kart sağlayıcısı, iade ve mutabakat. `unpaid` dışında ödeme durumu henüz yazılamaz.
 - Push bağlantısı ve çevrimdışı POS: panel şu an periyodik okur. POS ağ kesintisinde yerel kuyruk tutmaz.
@@ -30,4 +30,4 @@ Panel `VITE_SALES_PROVIDER=http` olduğunda listeyi API'den okur ve beş saniyed
 
 ## Kabul testi
 
-Geçici PostgreSQL testinde yalnız POS aktörü kendi şubesine sipariş açar; yöneticinin yazması reddedilir. Taslak/kanalı kapalı ürün satılamaz. Şube fiyatı siparişe kopyalanır. Aynı isteğin tekrarı ikinci sipariş/denetim satırı doğurmaz. Modül kapalıyken yeni kayıt engellenir, geçmiş okunur. Sunucu yeniden başlatılınca kayıt durur. Playwright testi ayrı test POS ekranından kaydeder ve yönetim panelinin salt okunur ekranında aynı siparişi görür.
+Geçici PostgreSQL testinde yalnız POS aktörü kendi şubesine sipariş açar; yöneticinin yazması reddedilir. Taslak/kanalı kapalı ürün satılamaz. Şube fiyatı siparişe kopyalanır. Aynı isteğin tekrarı ikinci sipariş/denetim satırı doğurmaz. Modül kapalıyken yeni kayıt engellenir, geçmiş okunur. Sunucu yeniden başlatılınca kayıt durur. Playwright testi yeni fiyat sürümüyle yayınlanan ürünü ayrı test POS ekranından siparişe ekler ve yönetim panelinin salt okunur ekranında görür.
