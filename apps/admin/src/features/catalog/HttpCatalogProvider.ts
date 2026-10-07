@@ -8,6 +8,12 @@ import type {
   ProductDetailRequest,
   ProductListRequest,
   ProductListResponse,
+  PriceResult,
+  PriceVersion,
+  Publication,
+  PublicationResult,
+  PublishDraftRequest,
+  SetDraftPriceRequest,
   UpdateDraftRequest,
 } from "./contracts";
 
@@ -118,6 +124,43 @@ export class HttpCatalogProvider implements CatalogProvider {
         expectedVersion: request.expectedVersion,
       },
     );
+  }
+
+  setDraftPrice(request: SetDraftPriceRequest): Promise<PriceResult> {
+    if (!request.scope.branchId)
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Fiyat için bir şube seçin."));
+    return this.request(`${this.draftPath(request.scope)}/${encodeURIComponent(request.draftId)}/price`,
+      request.scope, "PUT", {
+        priceVersionId: request.priceVersionId,
+        amountMinor: request.amountMinor,
+        expectedVersion: request.expectedVersion,
+      });
+  }
+
+  publishDraft(request: PublishDraftRequest): Promise<PublicationResult> {
+    if (!request.scope.branchId)
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Yayın için bir şube seçin."));
+    return this.request(`${this.draftPath(request.scope)}/${encodeURIComponent(request.draftId)}/publish`,
+      request.scope, "POST", {
+        publicationId: request.publicationId,
+        expectedVersion: request.expectedVersion,
+      });
+  }
+
+  listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]> {
+    if (!request.scope.branchId)
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Fiyat geçmişi için bir şube seçin."));
+    return this.request(`${this.historyPath(request.scope, request.productId)}/price-versions`, request.scope);
+  }
+
+  listPublications(request: ProductDetailRequest): Promise<Publication[]> {
+    if (!request.scope.branchId)
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Yayın geçmişi için bir şube seçin."));
+    return this.request(`${this.historyPath(request.scope, request.productId)}/publications`, request.scope);
+  }
+
+  private historyPath(scope: CatalogScope, productId: string): string {
+    return `/api/v1/firms/${encodeURIComponent(scope.firmId)}/branches/${encodeURIComponent(scope.branchId!)}/catalog/products/${encodeURIComponent(productId)}`;
   }
 
   private draftPath(scope: CatalogScope): string {

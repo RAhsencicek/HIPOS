@@ -79,4 +79,32 @@ describe("HttpCatalogProvider", () => {
       .rejects.toMatchObject({ code: "INVALID_DRAFT" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("fiyat, yayın ve geçmiş uçlarını şube kapsamında çağırır", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new HttpCatalogProvider();
+    const draftId = "77777777-7777-4777-8777-777777777709";
+    await provider.setDraftPrice({ scope, draftId, priceVersionId: "price-id", amountMinor: 32550, expectedVersion: 2 });
+    await provider.publishDraft({ scope, draftId, publicationId: "publication-id", expectedVersion: 3 });
+    await provider.listPriceVersions({ scope, productId: draftId });
+    await provider.listPublications({ scope, productId: draftId });
+    const prefix = `/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog`;
+    expect(new URL(fetchMock.mock.calls[0][0]).pathname).toBe(`${prefix}/drafts/${draftId}/price`);
+    expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ priceVersionId: "price-id", amountMinor: 32550, expectedVersion: 2 });
+    expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe(`${prefix}/drafts/${draftId}/publish`);
+    expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ publicationId: "publication-id", expectedVersion: 3 });
+    expect(new URL(fetchMock.mock.calls[2][0]).pathname).toBe(`${prefix}/products/${draftId}/price-versions`);
+    expect(new URL(fetchMock.mock.calls[3][0]).pathname).toBe(`${prefix}/products/${draftId}/publications`);
+  });
+
+  it("fiyat/yayın hatasını başarıya çevirmeden iletir", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: "VERSION_CONFLICT", detail: "Taslak değişti." }), { status: 409 },
+    )));
+    await expect(new HttpCatalogProvider().publishDraft({ scope, draftId: "draft", publicationId: "id", expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: "VERSION_CONFLICT", status: 409 });
+  });
 });

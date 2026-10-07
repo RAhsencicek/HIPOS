@@ -19,6 +19,7 @@ import { StatusPill, PageHeading, DemoNotice } from "../../shared/ui";
 import { channelLabels, formatCatalogMoney } from "./formatters";
 import { useCategoryList, useProductDetail, useProductList } from "./useCatalogData";
 import { DraftForm } from "./DraftForm";
+import { PricePublicationPanel } from "./PricePublicationPanel";
 import type { CatalogLoad } from "./useCatalogData";
 import type { ProductListResponse } from "./contracts";
 
@@ -148,7 +149,7 @@ export function ProductsPage({ ctx, canPreviewNewWork, canWriteDraft }: { ctx: V
       />
       <DemoNotice>
         {source === "http"
-          ? "Ürünler PostgreSQL'den okunur. Taslak oluşturma gerçek API kaydıdır; fiyat ve yayın işlemleri henüz bağlı değildir."
+          ? "Ürünler PostgreSQL'den okunur. Taslak, fiyat sürümü ve ilk POS yayını seçili şubede gerçek API kaydıdır; ödeme ve yeniden yayın henüz yoktur."
           : "Ürünler örnek veridir. Ürün ekleme ve kaydetme akışı henüz gerçek kayıt oluşturmaz."}
       </DemoNotice>
       {source === "http" && !canWriteDraft && <div className="notice" role="status">
@@ -367,10 +368,14 @@ export function ProductDetail({
   ctx,
   productId,
   canWriteDraft,
+  canSetPrice,
+  canPublish,
 }: {
   ctx: ViewContext;
   productId: string;
   canWriteDraft: boolean;
+  canSetPrice: boolean;
+  canPublish: boolean;
 }) {
   const { source, notifyChange } = useCatalogProvider();
   const [editing, setEditing] = useState(false);
@@ -400,7 +405,9 @@ export function ProductDetail({
         description={`Stok kodu: ${product.sku} · ${product.category.name}`}
         action={source === "http" && product.status === "draft" ?
           <button className="primary-button" disabled={!canWriteDraft} onClick={() => { setSaveNotice(""); setEditing(true); }}>Taslağı düzenle</button>
-          : <StatusPill tone="purple">Önizleme</StatusPill>}
+          : source === "http" && product.status === "published"
+            ? <StatusPill tone="green">POS'ta yayında</StatusPill>
+            : <StatusPill tone="purple">Önizleme</StatusPill>}
       />
       {source === "http" && product.status === "draft" && !canWriteDraft && <div className="notice" role="status">
         Taslak okunabilir; yeni değişiklik için bu şubedeki taslak modülü hazır olmalı. <Link to="/admin/settings/modules">Modül ayarları</Link>
@@ -431,6 +438,8 @@ export function ProductDetail({
                 <small>
                   {product.priceSource === "branch_override"
                     ? "Şube istisnası"
+                    : source === "http" && ctx.branchApiId && product.branchIds.length === 1
+                      ? "Bu şubenin fiyatı"
                     : "Merkez fiyatı"}
                 </small>
               </div>
@@ -484,12 +493,16 @@ export function ProductDetail({
               </strong>
             </div>
           </section>
+          {source === "http" && ctx.branchApiId && <PricePublicationPanel
+            key={`${ctx.firmId}:${ctx.branchApiId}:${product.id}`}
+            scope={scope} product={product} canSetPrice={canSetPrice} canPublish={canPublish}
+            onChanged={(message) => { if (message) setSaveNotice(message); notifyChange(); }} />}
         </div>
         <aside className="detail-aside">
           <section className="card aside-card">
             <span className="card-kicker">YAYIN DURUMU</span>
             <h3>{statusLabel[product.status]}</h3>
-            <p>Gerçek yayın işlemi henüz bağlı değil.</p>
+            <p>{source === "http" ? "Şube kapsamındaki ilk POS yayını API üzerinden yapılır; yayın geçmişi aşağıda görünür." : "Bu durum örnek veridir; gerçek yayın yapılmaz."}</p>
             <StatusPill
               tone={product.status === "published" ? "green" : "orange"}
             >
@@ -508,14 +521,14 @@ export function ProductDetail({
               <Check size={16} /> Reçete bağlantısı
             </div>
             <div className="aside-check muted">
-              <Clock3 size={16} /> {source === "http" && product.status === "draft" ? "Taslak kaydı API'ye bağlı" : "Yayın ve diğer kayıt işlemleri planlandı"}
+              <Clock3 size={16} /> {source === "http" ? "Fiyat ve ilk POS yayını API'ye bağlı" : "Kayıt işlemleri planlandı"}
             </div>
           </section>
           <section className="card aside-card muted-aside">
             <ShieldCheck size={21} />
             <p>
               {source === "http"
-                ? "Taslak ürünün temel alanları düzenlenebilir. Fiyat, yayın ve diğer işlemler henüz uygulanmadı."
+                ? "Taslak, fiyat ve ilk POS yayını bu şubede API'ye bağlıdır. Diğer işlemler henüz uygulanmadı."
                 : "Bu sayfa yalnızca tasarım önizlemesidir. Değişiklikler veritabanına kaydedilmez."}
             </p>
           </section>

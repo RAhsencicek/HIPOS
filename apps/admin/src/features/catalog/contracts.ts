@@ -87,12 +87,54 @@ export type UpdateDraftRequest = DraftFields & {
   expectedVersion: number;
 };
 
+export type PriceVersion = {
+  id: string;
+  productId: string;
+  number: number;
+  amountMinor: number;
+  currency: "TRY";
+  createdAt: string;
+};
+
+export type Publication = {
+  id: string;
+  productId: string;
+  number: number;
+  priceVersionId: string;
+  amountMinor: number;
+  currency: "TRY";
+  channels: SalesChannel[];
+  publishedAt: string;
+};
+
+export type SetDraftPriceRequest = {
+  scope: CatalogScope;
+  draftId: string;
+  priceVersionId: string;
+  amountMinor: number;
+  expectedVersion: number;
+};
+
+export type PublishDraftRequest = {
+  scope: CatalogScope;
+  draftId: string;
+  publicationId: string;
+  expectedVersion: number;
+};
+
+export type PriceResult = { product: CatalogProductDetail; priceVersion: PriceVersion };
+export type PublicationResult = { product: CatalogProductDetail; publication: Publication };
+
 export interface CatalogProvider {
   listProducts(request: ProductListRequest): Promise<ProductListResponse>;
   listCategories(scope: CatalogScope): Promise<CategoryListResponse>;
   getProduct(request: ProductDetailRequest): Promise<CatalogProductDetail>;
   createDraft(request: CreateDraftRequest): Promise<CatalogProductDetail>;
   updateDraft(request: UpdateDraftRequest): Promise<CatalogProductDetail>;
+  setDraftPrice(request: SetDraftPriceRequest): Promise<PriceResult>;
+  publishDraft(request: PublishDraftRequest): Promise<PublicationResult>;
+  listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]>;
+  listPublications(request: ProductDetailRequest): Promise<Publication[]>;
 }
 
 export type CatalogErrorCode =
@@ -109,6 +151,11 @@ export type CatalogErrorCode =
   | "INVALID_DRAFT"
   | "INVALID_VERSION"
   | "VERSION_CONFLICT"
+  | "INVALID_PRICE"
+  | "PRICE_REQUIRED"
+  | "DRAFT_NOT_FOUND"
+  | "PRICE_VERSION_CONFLICT"
+  | "PUBLICATION_CONFLICT"
   | "FEATURE_DRAINING"
   | "UNAUTHENTICATED"
   | "LOAD_FAILED"

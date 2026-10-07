@@ -142,6 +142,10 @@ describe("MockCatalogProvider", () => {
     const command = { scope: moda, draftId: "77777777-7777-4777-8777-777777777703", name: "Pizza", sku: "P-1", categoryId: "pizza", categoryName: "Pizzalar", description: "" };
     await expect(provider.createDraft(command)).rejects.toMatchObject({ code: "DRAFT_NOT_AVAILABLE" });
     await expect(provider.updateDraft({ ...command, expectedVersion: 1 })).rejects.toMatchObject({ code: "DRAFT_NOT_AVAILABLE" });
+    await expect(provider.setDraftPrice({ scope: moda, draftId: command.draftId, priceVersionId: "price", amountMinor: 10000, expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: "DRAFT_NOT_AVAILABLE" });
+    await expect(provider.publishDraft({ scope: moda, draftId: command.draftId, publicationId: "publication", expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: "DRAFT_NOT_AVAILABLE" });
     expect(JSON.stringify(catalogRecords)).toBe(before);
   });
 });

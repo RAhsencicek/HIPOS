@@ -11,6 +11,12 @@ import type {
   ProductDetailRequest,
   ProductListRequest,
   ProductListResponse,
+  PriceResult,
+  PriceVersion,
+  Publication,
+  PublicationResult,
+  PublishDraftRequest,
+  SetDraftPriceRequest,
   UpdateDraftRequest,
 } from "./contracts";
 
@@ -231,5 +237,27 @@ export class MockCatalogProvider implements CatalogProvider {
       "DRAFT_NOT_AVAILABLE", 409,
       "Bu önizleme gerçek ürün taslağı güncellemez. Yerel PostgreSQL API'sini seçin.",
     ));
+  }
+
+  setDraftPrice(_request: SetDraftPriceRequest): Promise<PriceResult> {
+    return Promise.reject(new CatalogProviderError(
+      "DRAFT_NOT_AVAILABLE", 409, "Örnek veri için kalıcı fiyat sürümü oluşturulmaz.",
+    ));
+  }
+
+  publishDraft(_request: PublishDraftRequest): Promise<PublicationResult> {
+    return Promise.reject(new CatalogProviderError(
+      "DRAFT_NOT_AVAILABLE", 409, "Örnek veri POS'a gerçekten yayınlanmaz.",
+    ));
+  }
+
+  async listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]> {
+    await this.getProduct(request);
+    return [];
+  }
+
+  async listPublications(request: ProductDetailRequest): Promise<Publication[]> {
+    await this.getProduct(request);
+    return [];
   }
 }

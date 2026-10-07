@@ -749,10 +749,66 @@ test(
       assert.equal((await request(publishHistoryPath)).data.length, 1);
       assert.equal((await request(priceHistoryPath)).data.length, 2);
 
-      // Ayrı test POS yüzü → gerçek API/PostgreSQL → yönetici salt okunur ekranı.
+      // Yönetim paneli → fiyat → yayın → ayrı test POS → salt okunur sipariş görünümü.
+      assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
+        desiredEnabled: true, expectedVersion: 3,
+      })).status, 200);
       assert.equal((await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: true, expectedVersion: 3,
       })).status, 200);
+      uiOutput = "";
+      ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
+        "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
+        cwd: join(repo, "apps/admin"),
+        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http",
+          VITE_SALES_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
+      ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
+      await waitForUi(uiBase, ui, () => uiOutput);
+      browser = await chromium.launch({ headless: true });
+      const catalogPage = await browser.newPage();
+      await catalogPage.goto(`${uiBase}/admin/catalog/products`);
+      await catalogPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await catalogPage.getByRole("button", { name: "Yeni taslak" }).click();
+      await catalogPage.getByLabel("Ürün adı").fill("Panelden Pizza");
+      await catalogPage.getByLabel("Stok kodu").fill("PZZ-911");
+      await catalogPage.getByLabel("Kategori kodu").fill("pizza");
+      await catalogPage.getByLabel("Kategori adı").fill(winningName);
+      await catalogPage.getByRole("button", { name: "Taslağı kaydet" }).click();
+      await catalogPage.getByText("Taslak veritabanına kaydedildi.").waitFor();
+      await catalogPage.getByRole("link", { name: "Panelden Pizza", exact: true }).click();
+      await catalogPage.getByLabel("Fiyat (TL)").waitFor();
+      const panelDraftId = new URL(catalogPage.url()).pathname.split("/").at(-1);
+      assert.equal((await request(`${draftPath}/${panelDraftId}`, "PUT", {
+        name: "Panelden Pizza", sku: "PZZ-911", categoryId: "pizza",
+        categoryName: winningName, description: "Harici düzenleme", expectedVersion: 1,
+      })).status, 200);
+      await catalogPage.getByLabel("Fiyat (TL)").fill("349,90");
+      await catalogPage.getByRole("button", { name: "Fiyat sürümü kaydet" }).click();
+      await catalogPage.getByRole("alert").getByText("başka bir işlemle değişti", { exact: false }).waitFor();
+      assert.equal(await catalogPage.getByText("Fiyat sürümü veritabanına kaydedildi.").count(), 0);
+      await catalogPage.getByRole("button", { name: "Güncel taslağı yükle" }).click();
+      await catalogPage.getByLabel("Fiyat (TL)").fill("349,90");
+      await catalogPage.getByRole("button", { name: "Fiyat sürümü kaydet" }).click();
+      await catalogPage.getByText("Fiyat sürümü veritabanına kaydedildi.").waitFor();
+      await catalogPage.getByText("Fiyat sürümü 1").waitFor();
+      await catalogPage.getByRole("button", { name: "POS'a yayınla" }).click();
+      await catalogPage.getByText("Ürün POS kanalında yayınlandı; kayıt veritabanında doğrulandı.").waitFor();
+      await catalogPage.getByText("POS yayını 1").waitFor();
+      const panelProduct = (await request(`${catalogPath(firm, moda)}&query=Panelden`)).data.items[0];
+      assert.equal(panelProduct.status, "published");
+      assert.equal(panelProduct.price.amountMinor, 34990);
+      await catalogPage.close();
+      ui.kill("SIGTERM");
+      await new Promise((resolve) => ui.once("exit", resolve));
+      ui = undefined;
+      assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
+        desiredEnabled: false, expectedVersion: 4,
+      })).status, 200);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/products/${panelProduct.id}/publications`)).data.length, 1);
+
       uiOutput = "";
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
@@ -763,16 +819,15 @@ test(
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
       ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
       await waitForUi(uiBase, ui, () => uiOutput);
-      browser = await chromium.launch({ headless: true });
       const posPage = await browser.newPage();
       await posPage.goto(uiBase);
       await posPage.getByLabel("Test şubesi").selectOption("moda");
-      await posPage.getByLabel("Yayınlanmış POS ürünü").selectOption(publishedProductId);
+      await posPage.getByLabel("Yayınlanmış POS ürünü").selectOption(panelProduct.id);
       await posPage.getByLabel("Adet").fill("2");
       await posPage.getByRole("button", { name: "Sipariş oluştur" }).click();
       await posPage.getByText("Sipariş veritabanına kaydedildi.").waitFor();
       assert.equal((await request(salesList(moda))).data.items.length, 2);
-      assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 66000);
+      assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 69980);
       ui.kill("SIGTERM");
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
@@ -791,7 +846,7 @@ test(
       const managerPage = await browser.newPage();
       await managerPage.goto(`${uiBase}/admin/sales`);
       await managerPage.getByRole("heading", { name: "Canlı sipariş görünümü" }).waitFor();
-      await managerPage.getByRole("row").filter({ hasText: "Yayınlanan Pizza" }).first().waitFor();
+      await managerPage.getByRole("row").filter({ hasText: "Panelden Pizza" }).first().waitFor();
       assert.equal(await managerPage.getByRole("button", { name: "Sipariş oluştur" }).count(), 0);
       await browser.close();
       browser = undefined;
@@ -801,7 +856,7 @@ test(
     } catch (error) {
       const pgOutput = await readFile(log, "utf8").catch(() => "");
       throw new Error(
-        `${error.message}\nAPI: ${apiOutput}\nUI: ${uiOutput}\nPostgreSQL: ${pgOutput}`,
+        `${error.message}\nAPI (son bölüm): ${apiOutput.slice(-12000)}\nUI: ${uiOutput}\nPostgreSQL (son bölüm): ${pgOutput.slice(-4000)}`,
       );
     } finally {
       await browser?.close();

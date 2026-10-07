@@ -1,6 +1,6 @@
 # HIPOS — Ürünler ve Menü backend sözleşmesi
 
-Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme** ve ilk **taslak fiyat sürümü → POS yayını** komutları uygulandı. Panelin temel taslak formu API'ye bağlıdır; kategori, fiyat ve yayın komutları henüz panel formuna bağlanmadı. İleri tarihli/merkezi fiyat, kanal/şube yayını ve geri alma planlıdır. Yönetici paneli ilk kullanıcı yüzüdür; sipariş oluşturma veya POS işlemi bu sözleşmenin parçası değildir.
+Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme** ve ilk **taslak fiyat sürümü → POS yayını** komutları uygulandı. Panelde taslak, fiyat, ilk yayın ve geçmiş API'ye bağlıdır; kategori yazma formu henüz yoktur. İleri tarihli/merkezi fiyat, çok kanallı yayın ve geri alma planlıdır. Yönetici paneli ilk kullanıcı yüzüdür; sipariş oluşturma veya POS işlemi bu sözleşmenin parçası değildir.
 
 ## Bugün çalışan okuma dilimi
 
@@ -48,7 +48,7 @@ GET /api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/publ
 
 Yetkili yönetici aynı şubenin taslağına pozitif TRY fiyatı yazar; her değişiklik ayrı, numaralı ve değiştirilmeyen `price_versions` kaydıdır. `expectedVersion` eskiyse `409` döner. Fiyat kimliğiyle aynı tutarı tekrar göndermek ikinci sürüm üretmez. Yayın, son fiyat sürümünü ve ürünün ad/kategori/kod/fiyatını `publications` anlık görüntüsüne aynı işlemde kaydeder; ürünü yalnız `pos` kanalında `published` yapar, taslak yazma kaydını kaldırır. Geçerli fiyat yoksa yayın reddedilir. Yayın kimliğiyle tekrar aynı istek ikinci yayın yaratmaz. Denetim kaydı, ürün projeksiyonu ve yayın birlikte tamamlanır. `catalog.price_drafts` ve `catalog.publishing` bağımsız şube yetenekleridir; modül kapalıysa yeni komut işlemez, geçmiş fiyat/yayın kayıtları okunabilir.
 
-Bu ilk dilim **tek şubeli taslaktan ilk POS yayınıdır**. Yayını güncelleme, geri alma, merkezi/çok şubeli fiyat, kanal seçimi, ileri tarihli fiyat ve gerçek panel formu henüz yoktur. Daha önceki test fixture'ları `published` ürün taşıyabilir; yeni yayın akışının kanıtı ayrı uçtan uca testtedir.
+Bu ilk dilim **tek şubeli taslaktan ilk POS yayınıdır**. Yayını güncelleme, geri alma, merkezi/çok şubeli fiyat, kanal seçimi ve ileri tarihli fiyat henüz yoktur. Daha önceki test fixture'ları `published` ürün taşıyabilir; yeni yayın akışının kanıtı panel → API → Test POS → yönetim tarayıcı testidir.
 
 ## Bugün çalışan firma kategorisi komutları
 
@@ -71,9 +71,9 @@ Kategori firma genelinde olduğu için komutu yalnız bütün firma şubelerine 
 | Seçenek grupları, alerjenler, görseller | Ürün ilişkileri | Bağla/çıkar, görsel yükle | Yalnız mevcut okuma alanları; dosya/ilişki komutu yok. |
 | Menüler ve kompozisyon | Menü–kategori–ürün hiyerarşisi | Taslak menü düzenle | Planlandı. |
 | Kanal/şube görünürlüğü | Ürün kapsamı | Taslak görünürlük değiştir | Şube görünürlüğü okunur; komut yok. |
-| Fiyatlar ve sürümler | Merkez/şube fiyatı, geçerlilik | Fiyat taslağı, şube istisnası, sürüm oluştur | Şube taslağı için numaralı fiyat sürümü API'si ve geçmiş okuması var; ileri tarih/merkez istisnası ve panel formu yok. |
+| Fiyatlar ve sürümler | Merkez/şube fiyatı, geçerlilik | Fiyat taslağı, şube istisnası, sürüm oluştur | Şube taslağı için numaralı fiyat sürümü API'si, panel formu ve geçmiş okuması var; ileri tarih/merkez istisnası yok. |
 | İleri tarihli fiyatlar | Zamanlanmış sürümler | Gelecek tarihli fiyat planla/iptal et | Planlandı. |
-| Menü yayınlama ve geçmişi | Taslak/yayın sürümleri | Yayınla, geri al | İlk taslak → POS yayını ve geçmiş API'si var; geri alma, tekrar yayın ve panel formu yok. |
+| Menü yayınlama ve geçmişi | Taslak/yayın sürümleri | Yayınla, geri al | İlk taslak → POS yayını ve geçmişi panelden çalışır; geri alma ve tekrar yayın yok. |
 
 ### Kategori ve şube kapsamı kararı
 
@@ -92,4 +92,4 @@ Kategori firmaya aittir; marka bağı ileride isteğe bağlı eklenebilir. Bir k
 
 ## Sıradaki teknik dilim
 
-Taslak formu gerçek API'ye bağlandı; fiyat/yayın API'si çalışıyor ama panel formu henüz yok. Gerçek HIPOS hesabı/şube üyeliği pilot öncesi kapıdır. Sırada fiyat/yayın panel akışı, daha kapsamlı şube/kanal görünürlüğü ve ödeme sözleşmesi var. Bugünkü dar model bütün kataloğun son domain modeli ilan edilmez.
+Taslak, fiyat ve ilk yayın panelden gerçek API'ye bağlandı. Gerçek HIPOS hesabı/şube üyeliği pilot öncesi kapıdır. Sırada daha kapsamlı şube/kanal görünürlüğü, yeniden yayın/fiyatlandırma kuralları ve ödeme sözleşmesi var. Bugünkü dar model bütün kataloğun son domain modeli ilan edilmez.

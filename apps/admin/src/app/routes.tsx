@@ -138,9 +138,16 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     ? featureLoad.states.find((entry) => entry.key === "catalog.drafts")
     : undefined;
   const canWriteDraft = Boolean(scope && catalogSource === "http" && featureSource === "http" && draftState?.effectiveForNewWork);
+  const priceState = featureLoad.status === "success"
+    ? featureLoad.states.find((entry) => entry.key === "catalog.price_drafts") : undefined;
+  const publishingState = featureLoad.status === "success"
+    ? featureLoad.states.find((entry) => entry.key === "catalog.publishing") : undefined;
+  const canSetPrice = Boolean(scope && catalogSource === "http" && featureSource === "http" && priceState?.effectiveForNewWork);
+  const canPublish = Boolean(scope && catalogSource === "http" && featureSource === "http" && publishingState?.effectiveForNewWork);
   let content: ReactNode;
   if (productId) {
-    content = <ProductDetail ctx={ctx} productId={productId} canWriteDraft={canWriteDraft} />;
+    content = <ProductDetail ctx={ctx} productId={productId} canWriteDraft={canWriteDraft}
+      canSetPrice={canSetPrice} canPublish={canPublish} />;
   } else if (
     !section ||
     (section === "overview" && (!item || item === "daily"))
