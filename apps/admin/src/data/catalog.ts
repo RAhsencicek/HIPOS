@@ -1,3 +1,5 @@
+import singleDemo from "../../../../contracts/demo-single-branch.v1.json";
+
 export type NavItem = { label: string; slug: string };
 export type NavSection = {
   id: string;
@@ -46,7 +48,7 @@ export const sections: NavSection[] = [
       { label: "Fiyatlar", slug: "prices" },
       { label: "Fiyat Sürümleri", slug: "price-versions" },
       { label: "İleri Tarihli Fiyatlar", slug: "scheduled-prices" },
-      { label: "Menü Yayınlama", slug: "publishing" },
+      { label: "POS'a Ürün Yayını", slug: "publishing" },
       { label: "Yayın Geçmişi", slug: "publish-history" },
     ],
   },
@@ -165,6 +167,7 @@ export const sections: NavSection[] = [
       { label: "Geciken İşler", slug: "delayed" },
       { label: "Yazıcı Yedekleri", slug: "printer-backups" },
       { label: "Servis Durumu", slug: "service" },
+      { label: "Personel", slug: "personnel" },
       { label: "Garson Çağrıları", slug: "calls" },
       { label: "İstasyon Performansı", slug: "performance" },
     ],
@@ -254,14 +257,14 @@ export const scenarios: DemoScenario[] = [
   {
     id: "single",
     firmId: "11111111-1111-4111-8111-111111111111",
-    firm: "Günaydın Pizza & Kahvaltı",
+    firm: singleDemo.firm.name,
     brand: null,
     branches: [
       {
         id: "kadikoy",
         apiId: "33333333-3333-4333-8333-333333333333",
-        name: "Kadıköy Şubesi",
-        district: "İstanbul · Kadıköy",
+        name: singleDemo.branch.name,
+        district: singleDemo.branch.district,
         brandId: null,
         tables: 24,
         occupied: 16,

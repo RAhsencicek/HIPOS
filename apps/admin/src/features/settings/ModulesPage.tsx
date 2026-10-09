@@ -57,7 +57,7 @@ export function ModulesPage({ ctx }: { ctx: ViewContext }) {
     ? features.filter(
         (feature) =>
           branchStates.find((state) => state.key === feature.key)
-            ?.desiredEnabled && feature.dependencies.includes(selected.key),
+            ?.desiredEnabled && feature.dependencies.includes(selected.key) && !feature.disableWithParent,
       )
     : [];
   const missing = selected

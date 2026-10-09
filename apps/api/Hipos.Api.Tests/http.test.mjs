@@ -287,6 +287,19 @@ test(
           .length,
         0,
       );
+
+      // Masa bağımlılığı özel olarak otomatik kapanır; adisyon izleme bağımsız kalır.
+      const singleStates = `${path(single, "33333333-3333-4333-8333-333333333333")}`;
+      assert.equal((await request(`${singleStates}/service.waiters`, "manager-single", "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).status, 200);
+      assert.equal((await request(`${singleStates}/branches.tables`, "manager-single", "PUT", {
+        desiredEnabled: false, expectedVersion: 1,
+      })).status, 200);
+      const afterTablesOff = (await request(singleStates, "manager-single")).data;
+      assert.equal(afterTablesOff.find((state) => state.key === "branches.tables").desiredEnabled, false);
+      assert.equal(afterTablesOff.find((state) => state.key === "service.waiters").desiredEnabled, false);
+      assert.equal(afterTablesOff.find((state) => state.key === "sales.monitoring").desiredEnabled, true);
     } finally {
       child.kill("SIGTERM");
     }

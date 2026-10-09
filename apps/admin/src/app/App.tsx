@@ -7,7 +7,7 @@ import { Dashboard } from "../features/overview/OverviewPage";
 import { RouteView } from "./routes";
 
 export default function App() {
-  const [scenarioId, setScenarioId] = useState("multi");
+  const [scenarioId, setScenarioId] = useState("single");
   const scenario = scenarios.find((s) => s.id === scenarioId) ?? scenarios[0];
   const [branchId, setBranchId] = useState("all");
   const validBranchId = scenario.branches.some((b) => b.id === branchId)

@@ -22,8 +22,11 @@ import { DraftForm } from "./DraftForm";
 import { PricePublicationPanel } from "./PricePublicationPanel";
 import type { CatalogLoad } from "./useCatalogData";
 import type { ProductListResponse } from "./contracts";
+import singleDemo from "../../../../../contracts/demo-single-branch.v1.json";
 
 const statusLabel = { published: "Yayında", draft: "Taslak" } as const;
+type InventoryRecipeDetail = { id: string; productId: string; productName: string; version: number; portion: string;
+  lines: Array<{ ingredientId: string; ingredientName: string; quantity: number; unit: string }> };
 
 function CatalogStatePanel<T>({
   load,
@@ -370,17 +373,39 @@ export function ProductDetail({
   canWriteDraft,
   canSetPrice,
   canPublish,
+  inventorySource,
 }: {
   ctx: ViewContext;
   productId: string;
   canWriteDraft: boolean;
   canSetPrice: boolean;
   canPublish: boolean;
+  inventorySource: "mock" | "http";
 }) {
   const { source, notifyChange } = useCatalogProvider();
   const [editing, setEditing] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
+  const [recipeState, setRecipeState] = useState<{ status: "loading" } | { status: "loaded"; recipe: InventoryRecipeDetail | null } | { status: "error"; message: string }>({ status: "loading" });
   useEffect(() => { setEditing(false); setSaveNotice(""); }, [ctx.firmId, ctx.branchApiId, productId]);
+  useEffect(() => {
+    if (inventorySource !== "http" || !ctx.branchApiId) { setRecipeState({ status: "loaded", recipe: null }); return; }
+    let cancelled = false;
+    setRecipeState({ status: "loading" });
+    const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+    const actor = ctx.isMulti ? "manager-multi" : "manager-single";
+    void fetch(`${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/inventory/recipes/${encodeURIComponent(productId)}`, {
+      headers: { "X-Demo-Actor": actor },
+    }).then(async (response) => {
+      if (response.status === 404) return null;
+      if (!response.ok) {
+        const problem = await response.json().catch(() => ({})) as { detail?: string };
+        throw new Error(problem.detail ?? `Reçete API'si yanıt vermedi (${response.status}).`);
+      }
+      return response.json() as Promise<InventoryRecipeDetail>;
+    }).then((recipe) => { if (!cancelled) setRecipeState({ status: "loaded", recipe }); })
+      .catch((reason) => { if (!cancelled) setRecipeState({ status: "error", message: (reason as Error).message }); });
+    return () => { cancelled = true; };
+  }, [ctx.branchApiId, ctx.firmId, ctx.isMulti, inventorySource, productId]);
   const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
   const load = useProductDetail(scope, productId);
   if (load.status !== "success") {
@@ -394,6 +419,9 @@ export function ProductDetail({
     );
   }
   const product = load.data;
+  const demoRecipe = ctx.scenarioId === "single"
+    ? singleDemo.recipes.find((recipe) => recipe.productId === product.id)
+    : undefined;
   return (
     <>
       <Link to="/admin/catalog/products" className="back-link">
@@ -480,10 +508,33 @@ export function ProductDetail({
             <h2>Reçete ve seçenekler</h2>
             <div className="detail-row">
               <span>Reçete</span>
-              <StatusPill tone={product.recipeLinked ? "green" : "orange"}>
-                {product.recipeLinked ? "Bağlı göstergesi" : "Kurulum gerekiyor"}
+              <StatusPill tone={inventorySource === "http"
+                ? recipeState.status === "loaded" && recipeState.recipe ? "green" : recipeState.status === "error" ? "orange" : "neutral"
+                : product.recipeLinked ? "green" : demoRecipe ? "purple" : "orange"}>
+                {inventorySource === "http"
+                  ? recipeState.status === "loading" ? "Reçete yükleniyor"
+                    : recipeState.status === "error" ? "Reçete API'si kullanılamıyor"
+                      : recipeState.recipe ? `PostgreSQL · sürüm ${recipeState.recipe.version}` : "Kalıcı reçete yok"
+                  : product.recipeLinked ? "Kalıcı bağlantı" : demoRecipe ? "Örnek gösterim" : "Bu özellik henüz etkin değil"}
               </StatusPill>
             </div>
+            {inventorySource === "http" && recipeState.status === "error" && <p role="alert">{recipeState.message}</p>}
+            {inventorySource === "http" && recipeState.status === "loaded" && recipeState.recipe && <div className="demo-product-recipe">
+              <small>Kalıcı reçete · {recipeState.recipe.portion} · sürüm {recipeState.recipe.version}</small>
+              {recipeState.recipe.lines.map((line) => <div className="detail-row" key={line.ingredientId}>
+                <span>{line.ingredientName}</span><strong>{line.quantity} {line.unit}</strong>
+              </div>)}
+              <Link className="subtle-link" to="/admin/inventory/recipes">Reçeteyi yönet <ArrowRight size={15} /></Link>
+            </div>}
+            {inventorySource !== "http" && demoRecipe && <div className="demo-product-recipe">
+              <small>Demo reçete · {demoRecipe.portion} · sürüm {demoRecipe.version}. Veritabanına bağlı değil.</small>
+              {demoRecipe.lines.map((line) => {
+                const ingredient = singleDemo.ingredients.find((entry) => entry.id === line.ingredientId)!;
+                return <div className="detail-row" key={line.ingredientId}>
+                  <span>{ingredient.name}</span><strong>{line.quantity} {ingredient.unit}</strong>
+                </div>;
+              })}
+            </div>}
             <div className="detail-row">
               <span>Seçenek grupları</span>
               <strong>
@@ -518,7 +569,7 @@ export function ProductDetail({
               <Check size={16} /> Kanal kapsamı
             </div>
             <div className="aside-check">
-              <Check size={16} /> Reçete bağlantısı
+              <Check size={16} /> {inventorySource === "http" ? "Reçete ve hammadde kalemleri" : "Reçete durumu ve örnek kalemler"}
             </div>
             <div className="aside-check muted">
               <Clock3 size={16} /> {source === "http" ? "Fiyat ve ilk POS yayını API'ye bağlı" : "Kayıt işlemleri planlandı"}

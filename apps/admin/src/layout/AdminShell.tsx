@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { sections } from "../data/catalog";
+import { isFutureSidebarItem } from "../data/featurePresentation";
 import type { ViewContext } from "../app/context";
 import { Icon, DemoBadge } from "../shared/ui";
 
@@ -100,12 +101,10 @@ export function Shell({
                       <Link
                         key={item.slug}
                         to={`/admin/${section.id}/${item.slug}`}
-                        className={
-                          location.pathname ===
-                          `/admin/${section.id}/${item.slug}`
-                            ? "active"
-                            : ""
-                        }
+                        className={[
+                          location.pathname === `/admin/${section.id}/${item.slug}` ? "active" : "",
+                          isFutureSidebarItem(section.id, item.slug) ? "nav-future" : "",
+                        ].filter(Boolean).join(" ")}
                       >
                         {item.label}
                       </Link>

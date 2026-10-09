@@ -124,10 +124,10 @@ describe("MockFeatureProvider", () => {
 
   it("dönen durum kopyaları sağlayıcının verisini değiştirmez", async () => {
     const provider = new MockFeatureProvider("normal", 0);
-    const original = await state(provider, moda, "inventory.items");
+    const original = await state(provider, moda, "integrations.delivery");
     original.blockers[0].message = "değiştirildi";
     original.version = 999;
-    const fresh = await state(provider, moda, "inventory.items");
+    const fresh = await state(provider, moda, "integrations.delivery");
     expect(fresh.version).toBe(1);
     expect(fresh.blockers[0].message).not.toBe("değiştirildi");
   });

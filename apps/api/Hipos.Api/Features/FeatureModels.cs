@@ -12,7 +12,8 @@ public sealed record FeatureDefinition(
     IReadOnlyList<string> Dependencies,
     string Icon,
     IReadOnlyList<string>? SetupRequirements = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ProviderRequired = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool ProviderRequired = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool DisableWithParent = false);
 
 public sealed record FeatureBlocker(string Code, string Message);
 

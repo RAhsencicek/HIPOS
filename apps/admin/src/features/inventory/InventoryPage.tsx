@@ -1,6 +1,8 @@
 import { Activity, ArrowRight, Boxes, Truck, Wallet } from "lucide-react";
 import { Link } from "react-router";
 import { formatMoney } from "../../data/catalog";
+import singleDemo from "../../../../../contracts/demo-single-branch.v1.json";
+import type { ViewContext } from "../../app/context";
 import {
   StatusPill,
   PageHeading,
@@ -8,8 +10,8 @@ import {
   DemoNotice,
 } from "../../shared/ui";
 
-export function InventoryPage() {
-  const stock = [
+export function InventoryPage({ ctx }: { ctx: ViewContext }) {
+  const legacyStock = [
     {
       name: "Mozzarella",
       amount: "4,2 kg",
@@ -30,6 +32,21 @@ export function InventoryPage() {
     },
     { name: "Zeytin", amount: "6 kg", threshold: "3 kg", status: "Yeterli" },
   ];
+  const single = ctx.scenarioId === "single";
+  const stock = single
+    ? singleDemo.ingredients.map((ingredient) => {
+        const quantity = singleDemo.stockMovements
+          .filter((movement) => movement.ingredientId === ingredient.id)
+          .reduce((sum, movement) => sum + movement.delta, 0);
+        return {
+          name: ingredient.name,
+          amount: `${quantity} ${ingredient.unit}`,
+          threshold: `${ingredient.criticalBelow} ${ingredient.unit}`,
+          status: quantity < ingredient.criticalBelow ? "Kritik" : "Yeterli",
+        };
+      })
+    : legacyStock;
+  const criticalCount = stock.filter((item) => item.status === "Kritik").length;
   return (
     <>
       <PageHeading
@@ -39,36 +56,37 @@ export function InventoryPage() {
         action={<StatusPill tone="purple">Prototip akışı</StatusPill>}
       />
       <DemoNotice>
-        Stok miktarları örnektir. Satın alma, sayım ve mal kabul işlemleri henüz
-        gerçek kayıt oluşturmaz.
+        {single
+          ? "Stok miktarları Mahalle Fırını demo hareketlerinden hesaplanır; henüz veritabanı stoğu değildir. Reçete ve sayım işlemleri etkinleştirilmedi."
+          : "Stok miktarları örnektir. Satın alma, sayım ve mal kabul işlemleri henüz gerçek kayıt oluşturmaz."}
       </DemoNotice>
       <div className="metric-grid compact-grid">
         <MetricCard
           icon={<Boxes size={23} />}
           title="STOK KALEMİ"
-          value="48"
-          foot="3 depoda örnek veri"
+          value={single ? String(stock.length) : "48"}
+          foot={single ? "Tek şubede demo stok kalemi" : "3 depoda örnek veri"}
           tone="blue"
         />
         <MetricCard
           icon={<Activity size={23} />}
           title="KRİTİK STOK"
-          value="2"
+          value={String(criticalCount)}
           foot="Eşik altındaki kalemler"
           tone="orange"
         />
         <MetricCard
           icon={<Truck size={23} />}
           title="BEKLEYEN TALEP"
-          value="4"
-          foot="Akış tasarımı"
+          value={single ? "Henüz yok" : "4"}
+          foot={single ? "Satın alma akışı planlandı" : "Akış tasarımı"}
           tone="purple"
         />
         <MetricCard
           icon={<Wallet size={23} />}
           title="STOK DEĞERİ"
-          value={formatMoney(184650)}
-          foot="Örnek hesaplama"
+          value={single ? "Hesaplanmadı" : formatMoney(184650)}
+          foot={single ? "Güvenilir alış maliyeti yok" : "Örnek hesaplama"}
           tone="green"
         />
       </div>

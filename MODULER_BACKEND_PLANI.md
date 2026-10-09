@@ -2,6 +2,8 @@
 
 Durum: Öncelik kararı. İlk pilot hesap akışı kontrollü ve küçük tutulur. Ana geliştirme hedefi, yönetim panelindeki iş alanlarının backend'de tam, şube kapsamına duyarlı ve birbirleriyle tutarlı çalışmasıdır. Bu belge **tamamlanmış özellik listesi değildir**; uygulama ve kabul sırasıdır.
 
+Güncel gerçekleşen şemalar, bağımlılıklar, API yüzeyleri ve açık servis kapatma sorunu [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) belgesinde tutulur. Aşağıdaki plan/tablolar ürün ve teknik karar bağlamıdır; güncel teslim durumunda kanonik belge ve [yol haritası](DURUM_VE_YOL_HARITASI.md) esas alınır.
+
 ## 1. Ne demek istiyoruz?
 
 “Modüler” iki şartı birlikte sağlamalı:
@@ -47,10 +49,10 @@ Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalış
 | Firma, marka, şube ve erişim | İşletme yapısı, kullanıcı üyeliği, kapsam | Bütün modüller | Demo kapsamı var; gerçek hesap/üyelik yok. |
 | Modül yönetimi | Tanım, şube tercihi, yaşam döngüsü, denetim | Bütün yeni iş komutları | Tercih PostgreSQL'de doğrulandı; taslak komutuyla ilk atomik bağlantı kuruldu. |
 | Ürün, menü ve fiyat | Ürün, kategori, seçenek, alerjen, kanal/şube görünürlüğü, fiyat sürümü, yayın | Satış, kampanya, reçete, merkez yayın | PostgreSQL okuması, panelde taslak/fiyat/ilk POS yayını, kategori API'si ve geçmiş okuması var; kategori panel yazması, tekrar yayın ve diğer işler planlı. |
-| Şube ve masa | Şube durumu, masa tanımı, masa planı | Adisyon ve rapor | Yönetimde görsel/örnek veri. |
+| Şube ve masa servisi | Masa ve garson kartı, açık masa-adisyon bağı | Satış adisyonunu okur; satışın varlık şartı değildir | `service` PostgreSQL şeması, kapılı API, demo seed ve yönetsel masa ayrıntısı var; gerçek servis POS akışı yok. |
 | Satış ve adisyon | Sipariş/adisyon yaşam döngüsü, kalem ve fiyat anlık görüntüsü | Menü, mutfak, ödeme, stok, rapor | Ayrı test POS'tan ilk kalıcı açık sipariş ve yöneticide HTTP salt okunur liste var; tam adisyon yaşam döngüsü yok. |
 | Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
-| Stok ve reçete | Hammadde, depo, hareket, reçete sürümü, maliyet | Menü, satış, satın alma, rapor | Yönetimde örnek ekran; gerçek stok hareketi yok. |
+| Stok ve reçete | Depo, hammadde/eşik, immutable hareket, reçete sürümü, snapshot/fiziksel/onaylı sayım | Menü, satış, satın alma, rapor | `inventory` migration/API/seed/panel + API ve PostgreSQL tarayıcı kabul akışı tamamlandı. İlk örnek tek depodur. Satıştan otomatik tüketim, satın alma belgesi, maliyet ve depo transferi planlıdır. |
 | Satın alma | Talep, onay, sipariş, mal kabul, tedarikçi | Stok, gider/borç | Planlı yönetsel akış. |
 | Kasa ve ödeme | Tahsilat durumu, vardiya, mutabakat, iade | Satış, finans, rapor | Test girişimi/sonucu PostgreSQL'de; kısmi, bekleyen ve belirsiz durumlar doğrulandı. Gerçek sağlayıcı, tahsilat ve kasa yok. |
 | Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Planlı. |
@@ -71,6 +73,8 @@ Bu liste uygulama sırasında alt capability'lere bölünecek. Örneğin “Stok
 - **Satış → ödeme → kapanış:** Belirsiz ödeme sonucu başarı sayılmaz; gerçekten doğrulanmış tahsilat olmadan adisyon kapanmaz. Tekrarlanan ödeme isteği çift tahsilat yaratmaz.
 - **Kaynak modüller → rapor:** Raporlar satış, ödeme ve stok için kendi kafasına göre başka formül üretmez; tanımlı kaynak kayıt/olaylardan projeksiyon kurar.
 - **Modül kapatma:** Yeni komut backend'de reddedilir. Devam eden işin güvenli bitişi ilgili modülün sorumluluğudur; geçmiş kayıt ve rapor okunabilir kalır.
+- **Masa servisi → satış:** Satış adisyonu masa kimliğine bağımlı değildir. Masa/garson bağı ayrı `service.assignments` kaydıdır. `branches.tables` kapanınca `service.waiters` otomatik kapanır; yeni masa ve bağ oluşturulamaz, mevcut bağ okunabilir ve güvenle kapatılabilir. `sales.pos_orders` açık kalır; self-servis sipariş açılabilir. Masa bağını kapatmak adisyonu veya ödeme durumunu değiştirmez.
+- **Personel → servis:** Personel kartı (`staff.records`) masa/garson özelliğinden bağımsızdır. `service.assignments.waiter_id`, firma ve şube kapsamındaki `service.employees.id` değerine bağlanır. Yönetim ve personel ekranında iş unvanı bulunur; POS yetkisi, vardiya veya bordro anlamına gelmez. Eski personel kayıtları migration ile korunur.
 
 Aynı işlemde kesin tutarlılık gereken adımlar tek veritabanı işlemiyle korunur. Sonradan/ayrı süreçte yapılabilecek yayılım için olay ve gerekirse outbox tasarlanır; olay, kaynak işlem kaydedilmeden “başarılı” ilan edilmez. İlk günden gereksiz mesaj altyapısı kurulmaz.
 
@@ -88,6 +92,8 @@ Aynı işlemde kesin tutarlılık gereken adımlar tek veritabanı işlemiyle ko
 [Katalog backend dilimi](KATALOG_BACKEND_SOZLESMESI.md) ürün listesi/detayı, şube görünürlüğü, mevcut şube fiyatı ve yönetsel ürün taslağı oluşturma/güncellemeyi doğruladı. Firma kategorisi okuması ve sürümlü, denetimli oluşturma/ad değiştirme API'si hazır. Fiyat sürümü ve ilk POS yayını ayrı `catalog.price_drafts`/`catalog.publishing` anahtarlarıyla aç/kapa, şube, sürüm ve denetim kaydına bağlıdır; panel formları ve geçmiş görünümü çalışır. Sırada kategori panel yazması, şube/kanal görünürlüğü, yeniden fiyatlandırma ve yayın vardır. Bunlar tamamlanmadan bütün katalog “tamamlandı” sayılmaz.
 
 ### C. Bağımlı alanları sırayla bağlama
+
+Servis dilimi: `branches.tables` ve `service.waiters` capability'leri masa ve adisyon bağını yönetir. Personel dizini artık ayrı `staff.records` capability'sidir; `service.waiters` tablosu çalışanları taşıyan `service.employees` tablosuna veri kaybetmeden dönüştürüldü. Bölüm/görev kartı, idempotent oluşturma, optimistic concurrency ile düzenleme, pasife alma/aktifleştirme, denetim, servis atamalarını koruma ve firma/şube izolasyonu API'de uygulanmıştır. Panelde yönetim, şefler, mutfak ekibi, servis, kasa ve destek için ayrı ızgaralar bulunur. API sözleşmesi ve manuel test [personel MVP rehberinde](PERSONEL_YONETIMI_MVP.md); masa/adisyon akışı [masa servisi rehberinde](MASA_SERVISI_TEST.md). Üretim oturumu/yetkisi, gerçek vardiya/puantaj, bordro, POS erişimi ve çok şubeli personel ataması eksiktir.
 
 Şube ve merkezi yayın; stok/reçete ve satın alma; satış/adisyon ile mutfak izleme; ödeme/kasa/finans; müşteri/kampanya; raporlama ve entegrasyonlar. Sıra iş kuralı ve bağımlılık netleştikçe gözden geçirilir. Yönetim paneli ilk kullanıcı yüzü olmaya devam eder; gelecekteki operasyon yüzlerinin backend sözleşmesi düşünülür ama ekranları bu aşamada yapılmaz.
 

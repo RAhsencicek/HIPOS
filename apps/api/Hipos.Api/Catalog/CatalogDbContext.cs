@@ -129,10 +129,15 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogPublicationRow> Publications => Set<CatalogPublicationRow>();
     public DbSet<CatalogDraftRow> Drafts => Set<CatalogDraftRow>();
     public DbSet<CatalogDraftAuditRow> DraftAudit => Set<CatalogDraftAuditRow>();
+    public DbSet<CatalogMenuRow> Menus => Set<CatalogMenuRow>();
+    public DbSet<CatalogMenuSectionRow> MenuSections => Set<CatalogMenuSectionRow>();
+    public DbSet<CatalogMenuItemRow> MenuItems => Set<CatalogMenuItemRow>();
+    public DbSet<CatalogMenuAuditRow> MenuAudit => Set<CatalogMenuAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("catalog");
+        CatalogMenuModel.Configure(modelBuilder);
         modelBuilder.Entity<CatalogProductRow>(entity =>
         {
             entity.ToTable("products", table =>

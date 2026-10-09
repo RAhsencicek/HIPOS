@@ -1,6 +1,6 @@
 # Yönetim Paneli — Teknik Mimari Kararları
 
-Durum: Kararlaştırılan teknoloji yönü ve hedef uygulama ilkeleri. İlk tasarım prototipi alan dosyalarına ayrıldı. Ürünler ve Menü için mock sağlayıcı sınırı kuruldu; diğer alanlar hâlâ görsel fixture kullanır. Modül tercihi için çalışan HTTP sağlayıcısı ve isteğe bağlı PostgreSQL kalıcılığı vardır; gerçek kimlik doğrulaması ve diğer iş alanlarının backend'i henüz yoktur. Ayrıntılı adımlar [UI Uygulama Planı](UI_UYGULAMA_PLANI.md) içindedir. Ürün kapsamı için [Ana Ürün Dokümanı](URUN_TANIMI.md) geçerlidir. Ayrıntılı API alanları henüz taslaktır.
+Bu belge teknoloji kararlarının kaydıdır; eski “yalnız modül tercihi kalıcıdır” ve “diğer alanlarda backend yoktur” ifadeleri güncel değildir. Uygulanmış şema, modül sahibi ve bağımlılıkları [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), bugünkü teslimler [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) içindedir.
 
 ## 1. Tasarım hedefleri
 
@@ -111,7 +111,7 @@ BranchFeatureState:
 
 ## 5. Veri ve API sınırı
 
-Hedef mimaride ekranlar doğrudan dağınık sabit veri dizilerini okumaz. Her alan bir veri erişim arayüzüne bağlanır; prototip veri sağlayıcısı bu arayüzü örnek senaryolarla doldurur. Gerçek API geldiğinde sağlayıcı değişir; sözleşme gelişirse ekran uyarlamaları kontrollü yapılır. Bu yaklaşım katalog okuması ve modül durumu için uygulandı. Modül tercihleri varsayılan olarak oturumluk mock üzerinde, yerel .NET sunucusunda bellek veya isteğe bağlı PostgreSQL deposunda değişir. PostgreSQL modu yalnız modül tercihi ve denetim kaydını kalıcı tutar. Diğer yönetim alanları bu turda taşınmadı ve görsel fixture'ları kullanıyor. Prototipte gerçek işletme kaydı oluşturmayan komutlar başarı sonucu üretmez.
+Hedef mimaride ekranlar alan sağlayıcıları üzerinden veri alır. Katalog, modül yönetimi, satış/adisyon, cari, masa servisi ve temel stok/reçete/sayım için HTTP/PostgreSQL dilimleri vardır. Envanter sağlayıcısı `VITE_INVENTORY_PROVIDER=http` ile açılır; varsayılan mock akış örnek veridir. Her sayfa kullandığı gerçek veya örnek kaynağı açıkça etiketlemelidir. Prototipte gerçek kayıt oluşturmayan komutlar başarı sonucu üretmez. Envanterin güncel tablo/API/kural kapsamı için kanonik backend belgesine bakın.
 
 Mock verinin hedef şekli, ilerideki ASP.NET Core API yanıtıyla aynı sözleşmeden türemelidir. Firma/marka/şube kapsamı, kimlikler, para ve miktar, liste sayfalaması, modül durumu ve hata biçimi [API ve Mock Veri Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) içinde ilk taslak olarak tanımlanmıştır. Katalog fixture'ları bu başlangıç biçimini kullanır; diğer görsel fixture'lar henüz kullanmaz. Gerçek API sözleşmesi OpenAPI ile doğrulanırken sürümlü olarak netleştirilir.
 
@@ -121,7 +121,7 @@ Gelecekte HTTP API sözleşmesi OpenAPI ile belgelenir. İstek ve yanıtlar firm
 
 Backend için çalışma kararı **.NET 10 + ASP.NET Core → Application/Domain → EF Core 10/Npgsql → PostgreSQL** zinciridir. Modüller tek uygulama ve ilk aşamada tek dağıtım birimi içinde kalır. NestJS ilk backend tercihi değildir; yalnız .NET prototipi somut teknik ölçütlerde başarısız olursa alternatif olarak değerlendirilir. Bu değişiklik kullanıcı kararıdır.
 
-`apps/api/Hipos.Api` bu zincirin modül ayarlarına odaklı ilk ASP.NET Core doğrulama dilimidir: modül tanımları, şube durumları, sürüm kontrollü komut, örnek kapsam/işlem izni ve denetim kaydı. `FeatureRules` API ve EF Core'dan bağımsızdır; bellek ve PostgreSQL depoları aynı kuralları kullanır. PostgreSQL deposu EF Core 10/Npgsql ile ayrı `modules` şemasına yazar. Aynı şubenin durum satırları işlem içinde kilitlenir; eski sürüm 409 ile reddedilir. Migration ayrı kurulum adımıdır; modül aç/kapa sırasında çalışmaz. Teste özel iş tamamlama olayı `draining → disabled` geçişini doğrular. `X-Demo-Actor` gerçek kimlik doğrulaması değildir; uygulama yalnız Development ortamında çalışır. Gerçek oturum, üretim yetkileri ve operasyon komutları bu prototipe dahil değildir.
+`apps/api/Hipos.Api` modüler monolit doğrulamasıdır. Bugünkü EF şemaları `modules`, `catalog`, `sales`, `cari` ve `service` alanlarına ayrılmıştır. `FeatureRules` depodan bağımsızdır; bellek ve PostgreSQL depoları aynı tercih kurallarını kullanır. Şube modül satırları işlem içinde kilitlenir; eski sürüm 409 ile reddedilir. Migration ayrı kurulum adımıdır. Bazı işlerde gerçek API komutları vardır; gerçek oturum/üyelik, üretim yetkisi ve tam restoran operasyonları yoktur. `X-Demo-Actor` gerçek kimlik doğrulaması değildir. Masa servisinin açık atamalarla `draining` ilişkisi henüz çözülmemiştir.
 
 Firma ve şube izolasyonu her sorgu/komut için sunucuda doğrulanır. PostgreSQL satır güvenliği ek savunma katmanı olarak değerlendirilebilir; uygulama düzeyi kapsam denetiminin yerine geçmez. Modül etkinliği ayrı tablolarda veya kayıtlarda saklanır; modül kapatmak şema migrasyonu ya da veri silme yapmaz. EF Core migrasyonları ürün sürümlerinde kontrollü olarak uygulanır, kullanıcı modül düğmesine bastığında değil. Hassas yönetsel işlemler için işlem geçmişi, idempotent ödeme komutları ve tutarlı rapor tanımları backend tasarımının parçasıdır.
 

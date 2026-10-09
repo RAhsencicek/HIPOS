@@ -1,6 +1,6 @@
 # Yönetim Paneli — API ve Mock Veri Sözleşmesi
 
-Durum: Frontend prototipi için başlangıç sözleşmesi. Modül diliminin geliştirme ortamına özel çalışan ASP.NET Core prototipi ve isteğe bağlı PostgreSQL kalıcılığı vardır; üretim backend'i veya kesin OpenAPI dosyası değildir. Alanlar gerçek API geliştirilirken sürümlü sözleşmeyle doğrulanır. Ürün kapsamı [Ana Ürün Dokümanı](URUN_TANIMI.md), mimari sınırlar [Teknik Mimari](TEKNIK_MIMARI.md) içindedir.
+Durum: Frontend prototipi için başlangıç sözleşmesi ve tarihsel API taslağı. Gerçekleşen endpoint/şema kapsamı için [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) esas alınır. Bu belge üretim backend'i veya kesin OpenAPI dosyası değildir. Ürün kapsamı [Ana Ürün Dokümanı](URUN_TANIMI.md), teknoloji kararları [Teknik Mimari](TEKNIK_MIMARI.md) içindedir.
 
 ## 1. Temel ilkeler
 
@@ -125,7 +125,7 @@ Toplu görünümde `scope.branchId` `null` olur. `items: []` geçerli boş durum
 
 `availability`: `real`, `backend_preview`, `prototype`, `planned`. `backend_preview`, geliştirme ortamında gerçek sunucu komutu bulunan ama gerçek kullanıcı kimliği/panel akışı veya yayın kapıları tamamlanmamış yetenektir; üretime hazır anlamına gelmez. `lifecycle`: `disabled`, `setup_required`, `provider_pending`, `ready`, `draining`. Bir özellik `prototype` durumundayken kullanıcı onu örnek olarak açabilir; `effectiveForNewWork` gerçek backend işlemi için `false` kalır. UI prototip akışını ayrıca gösterebilir. `desiredEnabled: true` tek başına kullanım izni değildir. Şimdiki mock tercihleri yalnız bellekte tutar; sayfa yenileme onları sıfırlar.
 
-Yerel .NET prototipi bu biçimde tanım ve durum listeleri ile sürüm kontrollü PUT komutunu sunar. `X-Demo-Actor` yalnız geliştirme testleri içindir, güvenilir kimlik doğrulaması değildir. Bellek modu yeniden başlatılınca sıfırlanır; PostgreSQL modunda modül tercihi/denetim kaydı, katalog okuması ve şube bazlı taslaklar kalıcı olabilir. Aynı şubenin modül ayarları PostgreSQL işleminde kilitlenir; farklı şubeler etkilenmez. `catalog.drafts` için ilk gerçek yeni iş komutu aynı modül kilidiyle bağlandı; diğer alanların yeni iş politikası prototiptir. `/_prototype/.../complete-one-work` yalnız testte devam eden bir işin bittiğini simüle eder; gerçek mutfak veya ödeme komutu değildir. Üretim kimlik doğrulaması ve operasyon komutları kapsam dışıdır.
+Yerel .NET prototipi tanım/durum listeleri ve sürüm kontrollü PUT komutunu sunar. `X-Demo-Actor` yalnız geliştirme testleri içindir, güvenilir kimlik doğrulaması değildir. **Bu belgenin ilk taslak döneminde** PostgreSQL kapsamı modül tercihi ve katalogla sınırlıydı; sonrasında `sales`, `cari` ve `service` şemaları da eklendi. Güncel şema, endpoint ve bağımlılık envanteri [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) içindedir. Bellek modu yeniden başlatılınca sıfırlanır; PostgreSQL modunda her dilimin kendi kalıcılık sınırı vardır. `/_prototype/.../complete-one-work` yalnız testte devam eden bir işin bittiğini simüle eder; gerçek mutfak veya ödeme komutu değildir. Üretim kimlik doğrulaması ve stok/sayım/reçete operasyonları kapsam dışıdır.
 
 Bağımlılık listesi katalogda gösterilir ve etkinleştirme öncesi denetlenir. Bağımlılıklar döngü oluşturamaz. Eksik bağımlılık kullanıcıya aktivasyon planı olarak gösterilir; sessizce başka şubelerde değişiklik yapılmaz.
 

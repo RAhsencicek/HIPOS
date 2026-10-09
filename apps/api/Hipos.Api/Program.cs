@@ -1,6 +1,9 @@
 using Hipos.Api.Features;
 using Hipos.Api.Catalog;
 using Hipos.Api.Sales;
+using Hipos.Api.Cari;
+using Hipos.Api.Service;
+using Hipos.Api.Inventory;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -23,6 +26,12 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "catalog")));
     builder.Services.AddDbContext<SalesDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sales")));
+    builder.Services.AddDbContext<CariDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "cari")));
+    builder.Services.AddDbContext<ServiceDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "service")));
+    builder.Services.AddDbContext<InventoryDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -41,12 +50,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddCors(options => options.AddPolicy("LocalPreview", policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173",
             "http://localhost:5174", "http://127.0.0.1:5174",
-            "http://localhost:5176", "http://127.0.0.1:5176")
+            "http://localhost:5176", "http://127.0.0.1:5176",
+            "http://localhost:5177", "http://127.0.0.1:5177")
         .WithHeaders("Content-Type", "X-Demo-Actor")
-        .WithMethods("GET", "PUT", "POST")));
+        .WithMethods("GET", "PUT", "POST", "DELETE")));
 var app = builder.Build();
 var catalogReady = false;
 var salesReady = false;
+var cariReady = false;
+var serviceReady = false;
+var inventoryReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -56,11 +69,24 @@ if (storage == "postgres")
     catalogReady = !(await catalogDb.Database.GetPendingMigrationsAsync()).Any();
     var salesDb = scope.ServiceProvider.GetRequiredService<SalesDbContext>();
     salesReady = !(await salesDb.Database.GetPendingMigrationsAsync()).Any();
+    var cariDb = scope.ServiceProvider.GetRequiredService<CariDbContext>();
+    cariReady = !(await cariDb.Database.GetPendingMigrationsAsync()).Any();
+    var serviceDb = scope.ServiceProvider.GetRequiredService<ServiceDbContext>();
+    serviceReady = salesReady && !(await serviceDb.Database.GetPendingMigrationsAsync()).Any();
+    var inventoryDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+    inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
+    if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
     featureRuntime.PaymentSimulatorReady = salesReady;
+    featureRuntime.ServiceTablesReady = serviceReady;
+    featureRuntime.InventoryReady = inventoryReady;
 }
 app.UseCors("LocalPreview");
+if (storage == "postgres") app.MapCariEndpoints(cariReady);
+if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
+if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
+if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

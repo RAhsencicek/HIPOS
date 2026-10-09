@@ -31,6 +31,7 @@ public static class FeatureRules
         {
             var dependents = FeatureCatalog.All.Where(item =>
                 item.Dependencies.Contains(key) &&
+                !item.DisableWithParent &&
                 states.TryGetValue(item.Key, out var state) && state.DesiredEnabled).Select(item => item.Name).ToArray();
             if (dependents.Length > 0)
                 return FeatureCommandResult.Rejected("DEPENDENT_ACTIVE", 409,
@@ -51,6 +52,21 @@ public static class FeatureRules
             Version = current.Version + 1,
             UpdatedAt = DateTimeOffset.UtcNow,
         });
+    }
+
+    public static IReadOnlyList<BranchFeatureState> AutoDisabledDependents(
+        IReadOnlyDictionary<string, BranchFeatureState> states, string parentKey)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return FeatureCatalog.All.Where(item => item.DisableWithParent && item.Dependencies.Contains(parentKey) &&
+                states.TryGetValue(item.Key, out var state) && state.DesiredEnabled)
+            .Select(item =>
+            {
+                var current = states[item.Key];
+                var lifecycle = current.InFlightWorkCount > 0 ? "draining" : "disabled";
+                return current with { DesiredEnabled = false, EffectiveForNewWork = false,
+                    Lifecycle = lifecycle, Blockers = Blockers(item, lifecycle), Version = current.Version + 1, UpdatedAt = now };
+            }).ToArray();
     }
 
     public static FeatureCommandResult CompleteOne(BranchFeatureState? current)

@@ -4,6 +4,7 @@ test("panel .NET sunucusuna bağlanır; tercih yenilemede kalır ve diğer şube
   page,
 }) => {
   await page.goto("/admin/settings/modules");
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await expect(
     page.getByText("Yerel .NET sunucu prototipine bağlı", { exact: false }),
   ).toBeVisible();
@@ -19,6 +20,7 @@ test("panel .NET sunucusuna bağlanır; tercih yenilemede kalır ve diğer şube
   ).toBeChecked();
 
   await page.reload();
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await page
     .getByRole("combobox", { name: "Şube seçimi" })
     .selectOption("moda");
@@ -41,6 +43,7 @@ test("iki yönetici ekranında eski sürüm reddedilir ve ikinci ekran güncelle
   try {
     for (const currentPage of [page, otherPage]) {
       await currentPage.goto("/admin/settings/modules");
+      await currentPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
       await currentPage
         .getByRole("combobox", { name: "Şube seçimi" })
         .selectOption("moda");

@@ -1,6 +1,6 @@
 # HIPOS — Bugünkü durum ve sonraki yol
 
-Durum tarihi: 7 Ekim 2026. Bu belge uygulanan ile planlananı ayırır. Kapsam yalnız ilk ürün yüzü olan **yönetim panelidir**; POS, garson, mutfak/KDS, kurye, QR müşteri ve kiosk ekranları sonraki ürünlerdir.
+Durum tarihi: 8 Ekim 2026. Bu belge uygulanan ile planlananı ayırır. İlk tanıtım odağı **tek şubeli işletmenin yönetim panelidir**; POS, garson, mutfak/KDS, kurye, QR müşteri ve kiosk ekranları sonraki ürünlerdir. Backend bağımlılıkları ve şema sahipliği [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), öncelik sırası [İlk Üç Aşama](ILK_UC_ASAMA.md) belgesindedir.
 
 ## 1. Ürün hedefi
 
@@ -12,37 +12,43 @@ Modülerlik iki ayrı konudur: kodun iş alanlarına ayrılması (**modüler mon
 
 | Alan | Bugünkü durum |
 | --- | --- |
+| Yönetici başlangıç ekranı | Tek şube yöneticisi için sade işletme özeti, ürün/cari/stok/modül kısayolları ve ürün duyuruları vardır. Açık adisyon/masa özeti API sağlayıcısı açıldığında veriyi okur; mock modda örnek veridir. |
 | Yönetim paneli | React + TypeScript + Vite ile ekran iskeleti, ortak shell, gezinme, tek/çok şube örnekleri hazır. Çoğu alan görsel prototip/fixture. |
-| Ürünler ve Menü | Ürün listesi/ayrıntısı ve şube kapsamlı kategori özeti varsayılan mock veya isteğe bağlı PostgreSQL API'sinden okunur. Panelde şube bazlı taslak oluşturma/güncelleme, fiyat sürümü, ilk POS yayını ve geçmiş okuma gerçek API'ye bağlıdır. Kategori oluşturma/ad değiştirme API'si vardır, panel formu henüz yoktur. |
+| Ürünler ve Menü | Menü genel bakışı, oluşturma/düzenleme, kategori/ürün seçimi ve sıralama, önizleme ve tek aktif menü seçimi PostgreSQL'e bağlıdır (`catalog.menus`). Menü fiyatı ortak ürün kaydından okunur; web/QR yayını yoktur. Ürün taslağı, fiyat sürümü, ilk POS yayını ve geçmiş API'ye bağlıdır. Kategori oluşturma/ad değiştirme API'si vardır, panel formu henüz yoktur. |
+| Tek şube demo ve reçete/stok/sayım | 6 ürün, 4 reçete, 4 cari ve 9 hammadde ortak kimlikli demo sözleşmesindedir. `VITE_INVENTORY_PROVIDER=http` ile hammadde/eşik, depo kapsamlı bakiye/hareket, reçete ve sayım PostgreSQL API'sinden okunur/yazılır. Dashboard kritik uyarıyı API'den alır; stok girişi/çıkışı, teorik üretim, sayım inceleme/onayı ve açık sayım kilidi API+PostgreSQL tarayıcı kabul testinden geçer. İlk demo Kadıköy Ana Depo'yu kullanır. Satıştan otomatik tüketim, satın alma belgesi ve barkod yoktur. |
+| Cari ilk kalıcı dilim | `VITE_CARI_PROVIDER=http` ile müşteri/tedarikçi kartı, düzenleme, manuel hareket ve tarih aralıklı ekstre yerel PostgreSQL'e bağlanır. Ayrı müşteri alacağı/tedarikçi borcu bakiyeleri hareketlerden hesaplanır. Varsayılan görünüm açıkça örnek veridir; finans ekranı bağlantısı henüz yoktur. |
+| Masa servisi ilk kalıcı dilim | `service` şemasında masa, garson kişi kartı, açık masa-adisyon bağı ve denetim izi vardır. `VITE_SERVICE_PROVIDER=http` ile masa planı gerçek PostgreSQL verisini ve sipariş ayrıntısını okur. Masa servisi kapanınca garson özelliği otomatik kapanır; satış/adisyon ve şube listesi bağımsız kalır. Başlangıç verisi 24 masa, 3 garson, 7 masalı ve 1 self-servis adisyondur. Gerçek servis POS arayüzü yoktur. |
 | Test POS, sipariş ve ödeme durumu | Yönetim panelinden ayrı, yalnız Development için `apps/pos` ekranı var. Yayınlanmış üründen gerçek PostgreSQL siparişi oluşur; fiyat ve ürün adı satış anında kopyalanır. `payments.simulator` ile kısmi/başarılı/başarısız/bekleyen/belirsiz test sonuçları kaydedilir. Yönetim Satışlar ekranı sipariş ve **simüle** ödeme durumunu salt okunur okur. Gerçek tahsilat, cihaz ve üretim yetkisi yok. |
 | Modül kataloğu | Tanım (`FeatureDefinition`) ve şube durumu (`BranchFeatureState`) ayrıldı. `desiredEnabled`, `effectiveForNewWork`, `lifecycle`, `blockers`, `version` ayrı alanlar. |
 | Modül ekranı | Şube bazlı aç/kapa önizlemesi, bağımlılık uyarıları, kurulum/sağlayıcı/kapanma durumları ve sürüm çakışmasında yenileme var. Kapalı modülün geçmiş/örnek okuması sürüyor. |
 | .NET API | ASP.NET Core 10 üzerinde modül listesi, durum, sürümlü tercih komutu, örnek kapsam/işlem izni, denetim kaydı ve yeni iş politikası uçları var. |
-| Depolama | Varsayılan modül belleği; isteğe bağlı EF Core 10 + Npgsql + PostgreSQL. Modül tercihleri, katalog taslakları, fiyat sürümleri, yayın kayıtları, test siparişleri ve simüle ödeme girişimleri kalıcıdır. `modules`, `catalog` ve `sales` şemaları ayrı migration ile kurulur. |
+| Depolama | Varsayılan modül belleği; isteğe bağlı EF Core 10 + Npgsql + PostgreSQL. Modül tercihleri, katalog taslakları, fiyat sürümleri, yayın kayıtları, test siparişleri, simüle ödeme girişimleri, cari, masa servisi ve reçete/stok/sayım verileri kalıcıdır. `modules`, `catalog`, `sales`, `cari`, `service` ve `inventory` şemaları ayrı migration ile kurulur. |
 | Eşzamanlılık | Aynı şubenin modül satırları işlem içinde kilitleniyor. Eski `expectedVersion` 409 döndürüyor. Bağımlılık ve yazma aynı işlemde. |
 | Testler | Tip/derleme, frontend birim ve tarayıcı testleri; API HTTP testi; panel–API tarayıcı testi; geçici gerçek PostgreSQL ile taslak → fiyat → yayın → sipariş → simüle ödeme zinciri, sunucu yeniden başlatma, şube ayrımı, tekrar istek, çakışma ve denetim kaydı testleri. |
 
 ## 3. Bu başarı neyi **henüz** kanıtlamaz?
 
 - `X-Demo-Actor` bir test başlığıdır; herkes taklit edebilir. Gerçek oturum veya kullanıcı yetkisi değildir. Sunucu bu nedenle yalnız Development ortamında açılır.
-- PostgreSQL modül tercihini, katalog kayıtlarını, ürün taslaklarını, fiyat/yayın anlık görüntülerini, **test POS siparişlerini ve simüle ödeme sonuçlarını** saklar. Gerçek tahsilat, kasa, stok, müşteri, rapor ve entegrasyon işlemleri backend'e bağlı değildir.
-- `effectiveForNewWork` etkin `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, `sales.pos_orders` ve `payments.simulator` için yeni komutu açabilir. Simülatör gerçek ödeme veya üretime hazır POS anlamına gelmez; diğer prototip/planlı özelliklerde `false` kalır.
+- PostgreSQL modül tercihini, katalog kayıtlarını, ürün taslaklarını, fiyat/yayın anlık görüntülerini, **test POS siparişlerini ve simüle ödeme sonuçlarını**, cari ve masa servisi bağlarını, ayrıca hammadde/reçete sürümü/stok hareketi/sayım verisini saklar. Cari gerçek tahsilat/fatura değildir; garson kartı çalışma süresi verisi değildir. Kasa, satın alma, barkodlu sayım, satıştan otomatik stok tüketimi, müşteri iletişim bilgileri, rapor ve entegrasyon işlemleri backend'e bağlı değildir.
+- `effectiveForNewWork` etkin `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, `sales.pos_orders`, `payments.simulator`, `branches.tables`, `service.waiters` ve `staff.records` için yeni komutu açabilir. Simülatör gerçek ödeme veya üretime hazır POS anlamına gelmez; diğer prototip/planlı özelliklerde `false` kalır.
 - `draining` geçişi test amaçlı olayla doğrulanmıştır. Gerçek devam eden mutfak, ödeme veya entegrasyon işlerinin sınırları henüz modellenmemiştir.
 - İlk yönetici rolleri aynı menüyü görür; gerçek firma/şube üyeliği ve işlem yetkisi henüz veritabanında değildir.
 - Kod iş alanlarına ayrılmaya başlamıştır; tam modüler monolit modül sınırları, modüller arası olaylar ve tüm alanların gerçek verisi henüz kurulmamıştır.
 - Gerçek sağlayıcı bağlantıları ve Türkiye mevzuatı uyumu yapılmış gibi gösterilmez.
 
-## 4. Sıradaki çalışma: modüler backend omurgası
+## 4. Sıradaki çalışma: tek şube işletme temelini tamamlamak
 
-Öncelik, modül düğmesini çoğaltmak değil, her yönetim alanının gerçek verisi ve komutlarıyla birlikte çalışan modüler monolit kurmaktır. Bugünkü 18 özellik tanımı bütün ekran capability'lerini kapsamaz. [Modüler Backend Planı](MODULER_BACKEND_PLANI.md) bu açığı, alan sahipliğini, bağımlılıkları ve kabul koşullarını açıklar.
+Öncelik, modül düğmesini çoğaltmak veya ödeme derinliğine saplanmak değil, tek şube işletme senaryosunu ortak veriler ve modüler backend kurallarıyla tamamlamaktır. Bugünkü 19 özellik tanımı bütün ekran capability'lerini kapsamaz. Güncel mimari/bağımlılık haritası [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), backlog'un ilk üç ürün dilimi [İlk Üç Aşama](ILK_UC_ASAMA.md) içindedir.
 
-İlk envanter, ortak tanım sözleşmesi, katalog taslağı, firma kategorisi, fiyat sürümü ve ilk POS yayını komutları kuruldu. Panel → Test POS → kalıcı sipariş → simüle ödeme → yöneticide salt okunur izleme uçtan uca doğrulandı. Sıradaki işler kategori panel formu, siparişin kapanış/iptal yaşam döngüsü ve gerçek sağlayıcıdan bağımsız ödeme adaptörü sınırıdır. Bu yayın akışı yalnız ilk POS yayınıdır; yayın sonrası fiyat değiştirme, yeniden yayın ve çok kanallı/merkezi yayın henüz yoktur. Her komut firma/şube kapsamı, modülün yeni işe uygunluğu, bağımlılık, eşzamanlılık ve denetim kaydını sunucuda doğrulamalı. Kapalı modül geçmiş kaydı silmemeli.
+İlk envanter, ortak tanım sözleşmesi, katalog taslağı, firma kategorisi, fiyat sürümü ve ilk POS yayını komutları kuruldu. Panel → Test POS → kalıcı sipariş → simüle ödeme → yöneticide salt okunur izleme uçtan uca doğrulandı. Buna masa/garson kartı, adisyona isteğe bağlı masa bağı, masaya tıklayınca sipariş detayı ve masa kapalıyken bağımsız self-servis satış testi eklendi. Cari kartı/hareketi, kart düzenleme ve devir/dönem/kapanış ekstresi ilk kalıcı dilimde hazır; finans ekranı bağlantısı ve pilot güvenlik kapısı açık. Reçete/hammadde/stok hareketi/sayım için migration, API, UI ve PostgreSQL kabul akışı da eklendi. Yakın sonraki ürün işi; şube listesi-kapasite-masa planı-veri bütünlüğü ve garson kartından sorumlu masaları görme kabul senaryolarıdır. Yayın sonrası fiyat değiştirme, yeniden yayın ve çok kanallı/merkezi yayın henüz yoktur. Her komut firma/şube kapsamı, eşzamanlılık ve denetim kaydını sunucuda doğrulamalı.
 
 Pilot hesap akışı **kontrollü ve dar kapsamlı** olacak: ilk firma ve sahibi HIPOS ekibi oluşturacak; herkese açık kayıt ve Google/Gmail girişi şimdilik yok. Bu öncelik değişimi güvenliği erteleme izni değildir. Gerçek verili pilot dış kullanıcıya açılmadan önce sunucu oturumu, firma/şube üyeliği ve işlem yetkisi uygulanmalı; seçili şube sunucuda bağımsız doğrulanmalı. İlk UI kararı değişmez: yönetici rolleri aynı ekranları görür. Ayrıntı [Kimlik ve Hesap Akışı](KIMLIK_VE_HESAP_AKISI.md) belgesindedir.
 
 Kimlik kapısının kabul koşulları: girişsiz istek 401; başka firmaya/şubeye okuma ve yazma 403; yetkili yönetici kendi şubesini görür; denetim kaydı demo başlık yerine gerçek kullanıcı kimliğini taşır. Parola saklama, oturum/CSRF koruması, parola sıfırlama ve e-posta doğrulama değerlendirilmeden “üretim girişi tamam” denmez.
 
 ## 5. Sonraki teknik/ürün dilimleri
+
+Aşağıdaki genişleme işleri, [tek şube → cari → reçete/stok/sayım](ILK_UC_ASAMA.md) sıralamasının yerine geçmez; ilk üç aşamadan sonraki teknik backlog'dur.
 
 1. **Modül kararını gerçek komutlara bağlama.** Her yeni iş komutu, şube kapsamı ve `effectiveForNewWork` durumunu sunucuda aynı tutarlı işlem sınırında denetlemeli. Kapatma geçmiş veriyi silmemeli; devam eden işin ne zaman tamamlandığı modül bazında tanımlanmalı. Teste özel tamamlama ucu üretimden çıkarılmalı.
 2. **Ürünler ve Menü'yü gerçek veriyle derinleştirme.** PostgreSQL okuması, taslak, fiyat sürümü, ilk yayın ve geçmiş panel akışı hazır. Sonra [katalog sözleşmesindeki](KATALOG_BACKEND_SOZLESMESI.md) kategori panel yazması, seçenek/alerjen, kanal görünürlüğü, yeniden fiyatlandırma ve yayını dar dilimler halinde tamamla.

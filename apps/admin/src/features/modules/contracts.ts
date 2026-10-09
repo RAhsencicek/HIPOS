@@ -17,6 +17,7 @@ export type FeatureDefinition = {
   icon: string;
   setupRequirements?: string[];
   providerRequired?: boolean;
+  disableWithParent?: boolean;
 };
 
 export type FeatureBlocker = { code: string; message: string };

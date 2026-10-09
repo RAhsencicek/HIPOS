@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
+import { verifyMenuApi, verifyMenuPanel } from "./menu.acceptance.mjs";
 
 const sharedCatalog = JSON.parse(await readFile(new URL("../../../contracts/feature-catalog.v1.json", import.meta.url), "utf8"));
 
@@ -193,6 +194,15 @@ test(
         `/api/v1/firms/${firmId}/catalog/categories${branchId ? `?branchId=${branchId}` : ""}`;
       assert.equal((await request(catalogPath(firm, moda))).data.code, "CATALOG_STORAGE_UNAVAILABLE");
       assert.equal((await request(categoryPath(firm, moda))).data.code, "CATALOG_STORAGE_UNAVAILABLE");
+      const cariPath = (firmId, branchId) => `/api/v1/firms/${firmId}/branches/${branchId}/caris`;
+      assert.equal((await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.code,
+        "CARI_STORAGE_UNAVAILABLE");
+      const servicePath = (firmId, branchId) => `/api/v1/firms/${firmId}/branches/${branchId}/service`;
+      assert.equal((await request(`${servicePath(single, singleBranch)}/tables`, "GET", undefined, "manager-single")).data.code,
+        "SERVICE_STORAGE_UNAVAILABLE");
+      const inventoryPath = (firmId, branchId) => `/api/v1/firms/${firmId}/branches/${branchId}/inventory`;
+      assert.equal((await request(`${inventoryPath(single, singleBranch)}/ingredients`, "GET", undefined, "manager-single")).data.code,
+        "INVENTORY_STORAGE_UNAVAILABLE");
       assert.equal((await request(`/api/v1/firms/${firm}/sales/orders?branchId=${moda}`)).data.code,
         "SALES_STORAGE_UNAVAILABLE");
       assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
@@ -247,6 +257,28 @@ test(
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "SalesDbContext"],
         { cwd: repo, env },
       );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "CariDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ServiceDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "20261008113750_InitService",
+        "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO service.waiters (id,firm_id,branch_id,name,is_active,updated_at)
+         VALUES ('legacy-waiter-preserved','${single}','${singleBranch}','Önceki Garson',true,'2026-10-08T09:00:00Z');`]);
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
+        { cwd: repo, env },
+      );
       const migratedCategory = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -254,6 +286,67 @@ test(
       ]);
       assert.equal(migratedCategory.stdout.trim(), "Eski Kategori");
       await startApi();
+      assert.equal((await request(`${servicePath(single, singleBranch)}/tables`, "GET", undefined, "manager-single")).data.tablesEnabled, true);
+      const preservedEmployee = (await request(`${servicePath(single, singleBranch)}/employees`, "GET", undefined, "manager-single")).data.items
+        .find((row) => row.id === "legacy-waiter-preserved");
+      assert.equal(preservedEmployee.name, "Önceki Garson");
+      assert.equal(preservedEmployee.department, "service");
+      assert.equal(preservedEmployee.jobTitle, "Garson");
+      assert.deepEqual((await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items, []);
+      assert.equal((await request(cariPath(single, singleBranch))).status, 403);
+      const newCari = await request(cariPath(single, singleBranch), "POST", {
+        name: "Test Karma Cari", types: ["customer", "supplier"],
+      }, "manager-single");
+      assert.equal(newCari.status, 201);
+      assert.equal(newCari.data.customerBalanceMinor, 0);
+      const cariId = newCari.data.id;
+      const movementPath = `${cariPath(single, singleBranch)}/${cariId}/movements`;
+      const firstCariMovement = { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11", kind: "customer",
+        deltaMinor: 30000, description: "Test alacak", expectedVersion: 1 };
+      assert.equal((await request(movementPath, "POST", firstCariMovement, "pos-single")).status, 403);
+      assert.equal((await request(movementPath, "POST", firstCariMovement, "manager-single")).status, 201);
+      assert.equal((await request(movementPath, "POST", firstCariMovement, "manager-single")).status, 200);
+      assert.equal((await request(movementPath, "POST", { ...firstCariMovement, deltaMinor: 20000 }, "manager-single")).data.code,
+        "MOVEMENT_ID_CONFLICT");
+      assert.equal((await request(movementPath, "POST", { ...firstCariMovement, requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12" }, "manager-single")).data.code,
+        "VERSION_CONFLICT");
+      assert.equal((await request(movementPath, "POST", { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa13",
+        kind: "supplier", deltaMinor: 50000, description: "Test borç", expectedVersion: 2 }, "manager-single")).status, 201);
+      const cariAfter = await request(`${cariPath(single, singleBranch)}/${cariId}`, "GET", undefined, "manager-single");
+      assert.equal(cariAfter.data.customerBalanceMinor, 30000);
+      assert.equal(cariAfter.data.supplierBalanceMinor, 50000);
+      assert.equal(cariAfter.data.version, 3);
+      const businessDay = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Istanbul",
+        year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const tomorrow = new Date(Date.parse(`${businessDay}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+      const statementPath = `${cariPath(single, singleBranch)}/${cariId}/statement`;
+      const sameDay = await request(`${statementPath}?from=${businessDay}&to=${businessDay}`, "GET", undefined, "manager-single");
+      assert.equal(sameDay.status, 200);
+      assert.equal(sameDay.data.timeZone, "Europe/Istanbul");
+      assert.equal(sameDay.data.openingCustomerBalanceMinor, 0);
+      assert.equal(sameDay.data.periodCustomerDeltaMinor, 30000);
+      assert.equal(sameDay.data.closingSupplierBalanceMinor, 50000);
+      assert.equal(sameDay.data.movements.length, 2);
+      const nextDay = await request(`${statementPath}?from=${tomorrow}&to=${tomorrow}`, "GET", undefined, "manager-single");
+      assert.equal(nextDay.data.openingCustomerBalanceMinor, 30000);
+      assert.equal(nextDay.data.periodCustomerDeltaMinor, 0);
+      assert.equal(nextDay.data.closingSupplierBalanceMinor, 50000);
+      assert.equal(nextDay.data.movements.length, 0);
+      assert.equal((await request(`${statementPath}?from=${tomorrow}&to=${businessDay}`, "GET", undefined, "manager-single")).data.code,
+        "INVALID_STATEMENT_RANGE");
+      assert.equal((await request(`${statementPath}?from=${businessDay}&to=${businessDay}`)).status, 403);
+      assert.equal((await request(`${cariPath(firm, moda)}/${cariId}`)).status, 404);
+      assert.equal((await request(`${cariPath(single, singleBranch)}/${cariId}`, "PUT", {
+        name: "Test Karma Cari", types: ["supplier"], isActive: true, expectedVersion: 3,
+      }, "manager-single")).data.code, "CARI_TYPE_IN_USE");
+      const inactiveCari = await request(`${cariPath(single, singleBranch)}/${cariId}`, "PUT", {
+        name: "Test Karma Cari Güncel", types: ["customer", "supplier"], isActive: false, expectedVersion: 3,
+      }, "manager-single");
+      assert.equal(inactiveCari.status, 200);
+      assert.equal(inactiveCari.data.isActive, false);
+      assert.equal((await request(movementPath, "POST", { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14",
+        kind: "customer", deltaMinor: 1000, description: "Pasif kart testi", expectedVersion: 4 }, "manager-single")).data.code,
+        "CARI_TYPE_UNAVAILABLE");
       assert.deepEqual((await request(catalogPath(firm, moda))).data.items, []);
       await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
@@ -267,10 +360,179 @@ test(
          VALUES
           ('${pizzaId}','${firm}',NULL,'Margherita Pizza','PZZ-001','pizza','Pizzalar','published',ARRAY['pos','qr'],'🍕',true,32000,'TRY','Pizza',ARRAY['Gluten'],ARRAY['Boyut'],ARRAY['${moda}','${besiktas}'],'2026-10-05T09:30:00Z',1),
           ('${cakeId}','${firm}',NULL,'Cheesecake','TTL-012','dessert','Tatlılar','draft',ARRAY['pos'],'🍰',false,22000,'TRY','Tatlı',ARRAY['Süt'],ARRAY[]::text[],ARRAY['${moda}'],'2026-10-05T09:30:00Z',1),
-          ('55555555-5555-4555-8555-555555555501','${single}',NULL,'Tek Şube Pizza','PZZ-001','pizza','Pizzalar','published',ARRAY['pos'],'🍕',false,30000,'TRY','Tek firma ürünü',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1);
+          ('55555555-5555-4555-8555-555555555501','${single}',NULL,'Tek Şube Pizza','PZZ-001','pizza','Pizzalar','published',ARRAY['pos'],'🍕',false,30000,'TRY','Tek firma ürünü',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1),
+          ('55555555-5555-4555-8555-555555555502','${single}',NULL,'Tavuklu Sandviç','SND-001','sandwich','Sandviçler','published',ARRAY['pos'],'🥪',false,26000,'TRY','Demo ürün',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1),
+          ('55555555-5555-4555-8555-555555555503','${single}',NULL,'San Sebastian Cheesecake','TTL-012','dessert','Tatlılar','published',ARRAY['pos'],'🍰',false,22000,'TRY','Demo ürün',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1),
+          ('55555555-5555-4555-8555-555555555504','${single}',NULL,'Filtre Kahve','ICK-010','drinks','İçecekler','published',ARRAY['pos'],'☕',false,12000,'TRY','Demo ürün',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1),
+          ('55555555-5555-4555-8555-555555555505','${single}',NULL,'Ev Yapımı Limonata','ICK-008','drinks','İçecekler','published',ARRAY['pos'],'🍋',false,12500,'TRY','Demo ürün',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1),
+          ('55555555-5555-4555-8555-555555555506','${single}',NULL,'Karışık Pizza','PZZ-002','pizza','Pizzalar','published',ARRAY['pos'],'🍕',false,41000,'TRY','Demo ürün',ARRAY[]::text[],ARRAY[]::text[],ARRAY['${singleBranch}'],'2026-10-05T09:30:00Z',1);
          INSERT INTO catalog.branch_prices (product_id,branch_id,amount_minor)
          VALUES ('${pizzaId}','${besiktas}',34000);`,
       ]);
+
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
+        cwd: repo,
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` },
+      });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
+        cwd: repo,
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` },
+      });
+      const seedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        "SELECT (SELECT count(*) FROM inventory.ingredients)||','||(SELECT count(*) FROM inventory.recipes)||','||(SELECT count(*) FROM inventory.movements)||','||(SELECT count(*) FROM inventory.counts)"]);
+      assert.equal(seedCounts.stdout.trim(), "21,4,39,1");
+
+      const singleInventory = inventoryPath(single, singleBranch);
+      const seededIngredients = (await request(`${singleInventory}/ingredients`, "GET", undefined, "manager-single")).data.items;
+      assert.equal(seededIngredients.length, 21);
+      assert.equal(seededIngredients.find((row) => row.id === "mozzarella").onHand, 800);
+      assert.equal(seededIngredients.find((row) => row.id === "mozzarella").warehouseId, "warehouse-kadikoy-main");
+      const critical = await request(`${singleInventory}/critical-stock?warehouseId=warehouse-kadikoy-main`, "GET", undefined, "manager-single");
+      assert.equal(critical.status, 200);
+      assert.equal(critical.data.source, "postgres");
+      assert.equal(critical.data.items.find((row) => row.id === "mozzarella").belowThresholdBy, 200);
+      assert.equal(critical.data.items.length, 8);
+      assert.equal(critical.data.items.find((row) => row.id === "cream").belowThresholdBy, 1000);
+      assert.equal((await request(`${singleInventory}/warehouses`, "GET", undefined, "manager-single")).data.items[0].name, "Kadıköy Ana Depo");
+      const estimates = await request(`${singleInventory}/production-estimates?warehouseId=warehouse-kadikoy-main`, "GET", undefined, "manager-single");
+      const initialPizzaEstimate = estimates.data.items.find((item) => item.productId === "55555555-5555-4555-8555-555555555501");
+      assert.equal(initialPizzaEstimate.status, "ready");
+      assert.equal(initialPizzaEstimate.theoreticalPortions, 6);
+      assert.equal(initialPizzaEstimate.limitingIngredientName, "Mozzarella");
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        "UPDATE inventory.recipe_lines SET unit='ml' WHERE recipe_id='recipe-margherita' AND ingredient_id='flour'"]);
+      const mismatchedEstimate = await request(`${singleInventory}/production-estimates?warehouseId=warehouse-kadikoy-main`, "GET", undefined, "manager-single");
+      const invalidPizzaEstimate = mismatchedEstimate.data.items.find((item) => item.productId === "55555555-5555-4555-8555-555555555501");
+      assert.equal(invalidPizzaEstimate.status, "unit_mismatch");
+      assert.equal(invalidPizzaEstimate.theoreticalPortions ?? null, null);
+      assert.equal(invalidPizzaEstimate.lines.find((line) => line.ingredientId === "flour").possiblePortions ?? null, null);
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        "UPDATE inventory.recipe_lines SET unit='g' WHERE recipe_id='recipe-margherita' AND ingredient_id='flour'"]);
+      const seededRecipes = (await request(`${singleInventory}/recipes`, "GET", undefined, "manager-single")).data.items;
+      assert.equal(seededRecipes.length, 4);
+      const pizzaProductId = "55555555-5555-4555-8555-555555555501";
+      const pizzaRecipePath = `${singleInventory}/recipes/${pizzaProductId}`;
+      const pizzaRecipe = await request(pizzaRecipePath, "GET", undefined, "manager-single");
+      assert.equal(pizzaRecipe.status, 200);
+      assert.deepEqual(pizzaRecipe.data.lines.map((line) => [line.ingredientName, line.quantity, line.unit]), [
+        ["Un", 250, "g"], ["Mozzarella", 120, "g"], ["Domates sosu", 80, "g"],
+      ]);
+      assert.equal((await request(`${inventoryPath(firm, moda)}/ingredients`, "GET", undefined, "manager-single")).status, 403);
+      const inventoryFeaturePath = (key) => `/api/v1/firms/${single}/branches/${singleBranch}/features/${key}`;
+      const inventoryItemsEnabled = await request(inventoryFeaturePath("inventory.items"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
+      assert.equal(inventoryItemsEnabled.status, 200);
+      assert.equal(inventoryItemsEnabled.data.effectiveForNewWork, true);
+      const inventoryRecipesEnabled = await request(inventoryFeaturePath("inventory.recipes"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
+      assert.equal(inventoryRecipesEnabled.data.effectiveForNewWork, true);
+      const inventoryCountsEnabled = await request(inventoryFeaturePath("inventory.counts"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
+      assert.equal(inventoryCountsEnabled.data.effectiveForNewWork, true);
+
+      const recipeBody = { requestId: "44444444-4444-4444-8444-444444444405", expectedVersion: 1, portion: "1 büyük pizza",
+        lines: [{ ingredientId: "flour", quantity: 260 }, { ingredientId: "tomato-sauce", quantity: 80 }, { ingredientId: "mozzarella", quantity: 120 }] };
+      const savedRecipe = await request(pizzaRecipePath, "PUT", recipeBody, "manager-single");
+      assert.equal(savedRecipe.status, 201);
+      assert.equal(savedRecipe.data.version, 2);
+      const savedRecipeReplay = await request(pizzaRecipePath, "PUT", recipeBody, "manager-single");
+      assert.equal(savedRecipeReplay.status, 200, JSON.stringify(savedRecipeReplay.data));
+      assert.equal((await request(pizzaRecipePath, "GET", undefined, "manager-single")).data.version, 2);
+
+      const countListPath = `${singleInventory}/counts`;
+      const demoCount = (await request(countListPath, "GET", undefined, "manager-single")).data.items
+        .find((row) => row.id === "count-mozzarella-demo");
+      assert.equal(demoCount.status, "draft");
+      assert.equal(demoCount.lines.length, 21);
+      assert.equal(demoCount.lines.find((line) => line.ingredientId === "mozzarella").systemQuantity, 800);
+      assert.equal(demoCount.lines.find((line) => line.ingredientId === "mozzarella").physicalQuantity, 700);
+      const approval = { requestId: "44444444-4444-4444-8444-444444444406", expectedVersion: demoCount.version };
+      const approvedCount = await request(`${countListPath}/${demoCount.id}/approve`, "POST", approval, "manager-single");
+      assert.equal(approvedCount.status, 200);
+      assert.equal(approvedCount.data.status, "approved");
+      assert.equal((await request(`${countListPath}/${demoCount.id}/approve`, "POST", approval, "manager-single")).status, 200);
+      assert.equal((await request(`${countListPath}/${demoCount.id}/approve`, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444407", expectedVersion: approvedCount.data.version,
+      }, "manager-single")).data.code, "COUNT_ALREADY_APPROVED");
+      assert.equal((await request(`${singleInventory}/ingredients`, "GET", undefined, "manager-single")).data.items
+        .find((row) => row.id === "mozzarella").onHand, 700);
+      const adjustmentCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM inventory.movements WHERE count_id='${demoCount.id}' AND ingredient_id='mozzarella' AND delta=-100 AND kind='count_adjustment'`]);
+      assert.equal(adjustmentCount.stdout.trim(), "1");
+
+      const newIngredient = { requestId: "44444444-4444-4444-8444-444444444401", name: "Test Malzeme", unit: "g", criticalBelow: 10 };
+      const createdIngredient = await request(`${singleInventory}/ingredients`, "POST", newIngredient, "manager-single");
+      assert.equal(createdIngredient.status, 201);
+      assert.equal((await request(`${singleInventory}/ingredients`, "POST", { ...newIngredient,
+        requestId: "44444444-4444-4444-8444-444444444402" }, "manager-single")).data.code, "INGREDIENT_EXISTS");
+      const thresholdUpdate = { requestId: "44444444-4444-4444-8444-444444444412", expectedVersion: createdIngredient.data.version,
+        unit: "g", criticalBelow: 12 };
+      assert.equal((await request(`${singleInventory}/ingredients/${createdIngredient.data.id}`, "PUT", thresholdUpdate, "manager-single")).status, 200);
+      assert.equal((await request(`${singleInventory}/ingredients/${createdIngredient.data.id}`, "PUT", { ...thresholdUpdate,
+        requestId: "44444444-4444-4444-8444-444444444413", expectedVersion: 2, criticalBelow: -1 }, "manager-single")).data.code,
+        "INVALID_INGREDIENT_SETTINGS");
+      const inbound = { requestId: "44444444-4444-4444-8444-444444444403", warehouseId: "warehouse-kadikoy-main", ingredientId: createdIngredient.data.id,
+        delta: 25, kind: "manual_in", description: "Kabul testi stok girişi" };
+      assert.equal((await request(`${singleInventory}/movements`, "POST", inbound, "manager-single")).status, 201);
+      assert.equal((await request(`${singleInventory}/movements`, "POST", inbound, "manager-single")).status, 200);
+      const movementAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM inventory.audit WHERE request_id='${inbound.requestId}' AND warehouse_id='warehouse-kadikoy-main' AND action='movement_added'`]);
+      assert.equal(movementAudit.stdout.trim(), "1");
+      assert.equal((await request(`${singleInventory}/movements`, "POST", { ...inbound, delta: 26 }, "manager-single")).data.code,
+        "MOVEMENT_ID_CONFLICT");
+      assert.equal((await request(`${singleInventory}/movements`, "POST", { ...inbound,
+        requestId: "44444444-4444-4444-8444-444444444404", delta: -26, kind: "manual_out" }, "manager-single")).data.code,
+        "NEGATIVE_STOCK");
+
+      const conflictCountCreated = await request(countListPath, "POST", { requestId: "44444444-4444-4444-8444-444444444408" }, "manager-single");
+      assert.equal(conflictCountCreated.status, 201);
+      let conflictCount = conflictCountCreated.data;
+      for (const line of conflictCount.lines) {
+        const result = await request(`${countListPath}/${conflictCount.id}/lines/${line.ingredientId}`, "PUT", {
+          physicalQuantity: line.systemQuantity, expectedVersion: conflictCount.version,
+        }, "manager-single");
+        assert.equal(result.status, 200);
+        conflictCount = result.data;
+      }
+      const lockedMovement = await request(`${singleInventory}/movements`, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444409", ingredientId: "flour", delta: 1,
+        kind: "manual_in", description: "Sayım sonrası kabul hareketi",
+      }, "manager-single");
+      assert.equal(lockedMovement.status, 409);
+      assert.equal(lockedMovement.data.code, "COUNT_IN_PROGRESS");
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO inventory.movements(id,firm_id,branch_id,warehouse_id,ingredient_id,delta,unit,kind,description,count_id,created_at,actor)
+         VALUES ('44444444-4444-4444-8444-444444444414','${single}','${singleBranch}','warehouse-kadikoy-main','flour',1,'g','manual_in','Out-of-band giriş',NULL,now(),'test'),
+                ('44444444-4444-4444-8444-444444444416','${single}','${singleBranch}','warehouse-kadikoy-main','flour',-1,'g','manual_out','Out-of-band ters hareket',NULL,now(),'test')`]);
+      assert.equal((await request(`${countListPath}/${conflictCount.id}/approve`, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444410", expectedVersion: conflictCount.version,
+      }, "manager-single")).data.code, "COUNT_STOCK_CHANGED");
+      const conflictAdjustments = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM inventory.movements WHERE count_id='${conflictCount.id}' AND kind='count_adjustment'`]);
+      assert.equal(conflictAdjustments.stdout.trim(), "0");
+
+      const itemsOffWhileCountOpen = await request(inventoryFeaturePath("inventory.items"), "PUT", {
+        desiredEnabled: false, expectedVersion: inventoryItemsEnabled.data.version,
+      }, "manager-single");
+      assert.equal(itemsOffWhileCountOpen.status, 409);
+      assert.equal(itemsOffWhileCountOpen.data.code, "INVENTORY_COUNT_OPEN");
+      const cancelRequest = { requestId: "44444444-4444-4444-8444-444444444415", expectedVersion: conflictCount.version };
+      const cancelled = await request(`${countListPath}/${conflictCount.id}/cancel`, "POST", cancelRequest, "manager-single");
+      assert.equal(cancelled.status, 200);
+      assert.equal(cancelled.data.status, "cancelled");
+      assert.equal((await request(`${countListPath}/${conflictCount.id}/cancel`, "POST", cancelRequest, "manager-single")).status, 200);
+
+      const itemsOff = await request(inventoryFeaturePath("inventory.items"), "PUT", {
+        desiredEnabled: false, expectedVersion: inventoryItemsEnabled.data.version,
+      }, "manager-single");
+      assert.equal(itemsOff.status, 200);
+      const inventoryStates = (await request(`/api/v1/firms/${single}/branches/${singleBranch}/features`, "GET", undefined, "manager-single")).data;
+      assert.equal(inventoryStates.find((row) => row.key === "inventory.recipes").desiredEnabled, false);
+      assert.equal(inventoryStates.find((row) => row.key === "inventory.counts").desiredEnabled, false);
+      assert.equal((await request(`${singleInventory}/ingredients`, "GET", undefined, "manager-single")).data.items.length, 22);
+      assert.equal((await request(`${singleInventory}/movements`, "POST", { ...inbound,
+        requestId: "44444444-4444-4444-8444-444444444411" }, "manager-single")).data.code, "FEATURE_DISABLED");
 
       const modaProducts = await request(catalogPath(firm, moda));
       const modaCategories = await request(categoryPath(firm, moda));
@@ -309,7 +571,7 @@ test(
       );
       assert.equal(
         (await request(catalogPath(single, singleBranch), "GET", undefined, "manager-single")).data.pageInfo.totalItems,
-        1,
+        6,
       );
 
       const draftId = "77777777-7777-4777-8777-777777777701";
@@ -332,8 +594,8 @@ test(
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
-        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http",
-          VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http", VITE_CARI_PROVIDER: "http",
+          VITE_INVENTORY_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -341,10 +603,39 @@ test(
       await waitForUi(uiBase, ui, () => uiOutput);
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
+      const cariPage = await browser.newPage();
+      page.setDefaultTimeout(5000);
+      cariPage.setDefaultTimeout(5000);
+      await cariPage.goto(`${uiBase}/admin/customers/accounts`);
+      await expect(cariPage.getByRole("heading", { name: "Cari hesaplar", level: 1 })).toBeVisible();
+      await cariPage.getByLabel("Ad / unvan").fill("Panel Cari Testi");
+      await cariPage.getByRole("button", { name: "Cari kartı kaydet" }).click();
+      await expect(cariPage.getByText("Cari kartı PostgreSQL'e kaydedildi.")).toBeVisible();
+      await cariPage.getByLabel("Tutar (₺)").fill("125.50");
+      await cariPage.getByLabel("Açıklama").fill("Panel test alacağı");
+      await cariPage.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Testi" })).toContainText("125,50");
+      await expect(cariPage.locator(".cari-statement")).toContainText("125,50");
+      await cariPage.getByLabel("Başlangıç tarihi").fill(tomorrow);
+      await cariPage.getByLabel("Bitiş tarihi").fill(tomorrow);
+      const statementRow = cariPage.locator(".cari-statement").getByRole("row").filter({ hasText: "Müşteri alacağı" });
+      await expect(statementRow).toContainText("125,50");
+      await expect(cariPage.locator(".cari-statement")).toContainText("Bu tarihlerde hareket yok");
+      await cariPage.getByRole("button", { name: "Cari kartını düzenle" }).click();
+      await cariPage.getByLabel("Unvan", { exact: true }).fill("Panel Cari Güncel");
+      await cariPage.getByLabel("Aktif").uncheck();
+      await cariPage.getByRole("button", { name: "Kart değişikliklerini kaydet" }).click();
+      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("Pasif");
+      await cariPage.reload();
+      await expect(cariPage.getByText("Panel Cari Güncel").first()).toBeVisible();
+      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("125,50");
+      await cariPage.close();
       await page.goto(`${uiBase}/admin/catalog/categories`);
+      await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
       await page.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
       await page.getByRole("row").filter({ hasText: "Tatlılar" }).waitFor();
       await page.goto(`${uiBase}/admin/catalog/products`);
+      await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
       await page.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
       await expect(page.getByRole("button", { name: "Yeni taslak" })).toBeEnabled();
       await page.getByRole("button", { name: "Yeni taslak" }).click();
@@ -375,6 +666,35 @@ test(
       await page.getByRole("button", { name: "Güncel taslağı yükle" }).click();
       await page.getByRole("heading", { name: "Harici Güncelleme", level: 1 }).waitFor();
       assert.equal((await request(`/api/v1/firms/${firm}/catalog/products/${browserDraft.id}?branchId=${moda}`)).data.name, "Harici Güncelleme");
+      const inventoryFeatureStates = await request(inventoryFeaturePath(""), "GET", undefined, "manager-single");
+      const currentItemsFeature = inventoryFeatureStates.data.find((state) => state.key === "inventory.items");
+      if (!currentItemsFeature.desiredEnabled) {
+        assert.equal((await request(inventoryFeaturePath("inventory.items"), "PUT", {
+          desiredEnabled: true, expectedVersion: currentItemsFeature.version,
+        }, "manager-single")).status, 200);
+      }
+      await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("single");
+      await page.goto(`${uiBase}/admin`);
+      await expect(page.getByRole("heading", { name: "Kritik stoklar" })).toBeVisible();
+      await expect(page.getByRole("row").filter({ hasText: "Mozzarella" })).toBeVisible();
+      await page.goto(`${uiBase}/admin/inventory/warehouse-stock`);
+      await expect(page.getByRole("heading", { name: "Depo stokları", level: 1 })).toBeVisible();
+      await expect(page.getByLabel("Fiziksel depo")).toContainText("Kadıköy Ana Depo");
+      await page.goto(`${uiBase}/admin/inventory/ingredients`);
+      await page.getByLabel("Hammadde adı").fill("Tarayıcı Panel Malzemesi");
+      await page.getByLabel("Kritik eşik", { exact: true }).fill("5");
+      await page.getByRole("button", { name: "PostgreSQL'e kaydet" }).click();
+      await expect(page.getByText("Hammadde kartı PostgreSQL'e kaydedildi.")).toBeVisible();
+      await expect(page.getByRole("row").filter({ hasText: "Tarayıcı Panel Malzemesi" })).toContainText("Kritik");
+      await page.locator("form.cari-form").nth(1).locator("select").first().selectOption({ label: "Tarayıcı Panel Malzemesi · 0 g" });
+      await page.getByLabel("Miktar", { exact: true }).fill("14");
+      await page.getByLabel("Açıklama", { exact: true }).fill("Panelden manuel stok girişi");
+      await page.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(page.getByText("Stok hareketi kalıcı deftere eklendi; bakiye hareket toplamından yeniden hesaplandı.")).toBeVisible();
+      await expect(page.getByRole("row").filter({ hasText: "Tarayıcı Panel Malzemesi" })).toContainText("14 g");
+      await page.goto(`${uiBase}/admin/inventory/recipes`);
+      await expect(page.getByText(/Teorik üretim kapasitesi:/).first()).toBeVisible();
+      await expect(page.getByText(/fire, bozulma/).first()).toBeVisible();
       await browser.close();
       browser = undefined;
       ui.kill("SIGTERM");
@@ -489,7 +809,7 @@ test(
         "DEPENDENT_ACTIVE",
       );
       assert.equal(
-        (await request(`${featurePath(moda)}/audit`)).data.length,
+        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => entry.actor !== "system:service-ready").length,
         4,
       );
 
@@ -508,7 +828,7 @@ test(
         2,
       );
       assert.equal(
-        (await request(`${featurePath(moda)}/audit`)).data.length,
+        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => entry.actor !== "system:service-ready").length,
         4,
       );
       const migrationCount = await runPg("psql", [
@@ -531,7 +851,7 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
-      assert.equal(catalogMigrationCount.stdout.trim(), "5");
+      assert.equal(catalogMigrationCount.stdout.trim(), "6");
       const salesMigrationCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -628,6 +948,165 @@ test(
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, items: [{ productId: pizzaId, quantity: 3 }],
       }, "pos-moda")).data.code, "ORDER_ID_CONFLICT");
+      const modaService = servicePath(firm, moda);
+      const personnelEnabled = (await request(featurePath(moda))).data.find((row) => row.key === "staff.records");
+      assert.equal(personnelEnabled.desiredEnabled, true);
+      assert.equal(personnelEnabled.effectiveForNewWork, true);
+      const employeeId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01";
+      const chefBody = { requestId: employeeId, name: "Demo Şef", department: "kitchen", jobTitle: "Baş Şef", phone: "0532 111 22 33" };
+      const chef = await request(`${modaService}/employees`, "POST", chefBody);
+      assert.equal(chef.status, 201);
+      assert.equal(chef.data.department, "kitchen");
+      assert.equal(chef.data.jobTitle, "Baş Şef");
+      assert.equal(chef.data.version, 1);
+      assert.equal((await request(`${modaService}/employees`, "POST", chefBody)).status, 200);
+      assert.equal((await request(`${modaService}/employees`, "POST", { ...chefBody, jobTitle: "Şef" })).data.code,
+        "EMPLOYEE_REQUEST_CONFLICT");
+      const changedChef = await request(`${modaService}/employees/${employeeId}`, "PUT", {
+        expectedVersion: 1, name: "Demo Şef", department: "kitchen", jobTitle: "Pastacı Şef", phone: "0532 111 22 33", isActive: true,
+      });
+      assert.equal(changedChef.status, 200);
+      assert.equal(changedChef.data.version, 2);
+      const inactiveChef = await request(`${modaService}/employees/${employeeId}`, "PUT", {
+        expectedVersion: 2, name: "Demo Şef", department: "kitchen", jobTitle: "Pastacı Şef", phone: "0532 111 22 33", isActive: false,
+      });
+      assert.equal(inactiveChef.data.isActive, false);
+      assert.equal((await request(`${modaService}/employees`)).data.items.find((row) => row.id === employeeId).isActive, false);
+      assert.equal((await request(`${modaService}/employees/${employeeId}`, "PUT", {
+        expectedVersion: 2, name: "Demo Şef", department: "kitchen", jobTitle: "Pastacı Şef", phone: "0532 111 22 33", isActive: true,
+      })).data.code, "VERSION_CONFLICT");
+      const activeChef = await request(`${modaService}/employees/${employeeId}`, "PUT", {
+        expectedVersion: 3, name: "Demo Şef", department: "kitchen", jobTitle: "Pastacı Şef", phone: "0532 111 22 33", isActive: true,
+      });
+      assert.equal(activeChef.data.isActive, true);
+      assert.equal(activeChef.data.version, 4);
+      const employeeAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM service.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND entity_id='${employeeId}' AND action LIKE 'employee_%'`]);
+      assert.equal(employeeAudit.stdout.trim(), "4");
+      assert.equal((await request(`${modaService}/tables`, "GET", undefined, "manager-single")).status, 403);
+      const table = await request(`${modaService}/tables`, "POST", { number: 12, name: "Masa 12" });
+      assert.equal(table.status, 201);
+      assert.equal((await request(`${modaService}/tables`, "POST", { number: 12, name: "Tekrar" })).data.code, "TABLE_EXISTS");
+      assert.equal((await request(`${modaService}/waiters`, "POST", { name: "Demo Garson" })).data.code, "FEATURE_DISABLED");
+      const waiterEnabled = await request(featurePath(moda, "service.waiters"), "PUT", { desiredEnabled: true, expectedVersion: 1 });
+      assert.equal(waiterEnabled.status, 200);
+      assert.equal(waiterEnabled.data.effectiveForNewWork, true);
+      const waiter = await request(`${modaService}/waiters`, "POST", { name: "Demo Garson" });
+      assert.equal(waiter.status, 201);
+      const assignment = { requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", tableId: table.data.id,
+        orderId, waiterId: waiter.data.id };
+      assert.equal((await request(`${modaService}/assignments`, "POST", assignment, "pos-besiktas")).status, 403);
+      assert.equal((await request(`${modaService}/assignments`, "POST", assignment, "pos-moda")).status, 201);
+      assert.equal((await request(`${modaService}/assignments`, "POST", assignment, "pos-moda")).status, 200);
+      const linkedEmployee = (await request(`${modaService}/employees`)).data.items.find((row) => row.id === waiter.data.id);
+      assert.equal((await request(`${modaService}/employees/${waiter.data.id}`, "PUT", {
+        expectedVersion: linkedEmployee.version, name: linkedEmployee.name, department: "kitchen", jobTitle: "Şef", phone: null, isActive: false,
+      })).data.code, "EMPLOYEE_HAS_OPEN_ASSIGNMENT");
+      const tableDetail = await request(`${modaService}/tables`);
+      assert.equal(tableDetail.data.items[0].assignment.waiterName, "Demo Garson");
+      assert.equal(tableDetail.data.items[0].assignment.items[0].productName, "Margherita Pizza");
+      assert.equal(tableDetail.data.items[0].assignment.items[0].quantity, 2);
+      assert.equal((await request(`${modaService}/tables/${table.data.id}`, "DELETE")).data.code, "TABLE_HAS_OPEN_CHECK");
+      const nextTable = await request(`${modaService}/tables`, "POST", { name: null });
+      assert.equal(nextTable.status, 201);
+      assert.equal(nextTable.data.number, 13);
+      assert.equal((await request(`${modaService}/tables/${table.data.id}`, "DELETE")).data.code, "ONLY_LAST_TABLE_CAN_BE_REMOVED");
+      const removedTable = await request(`${modaService}/tables/${nextTable.data.id}`, "DELETE");
+      assert.equal(removedTable.status, 200);
+      assert.equal(removedTable.data.isActive, false);
+      // Gerçek React ekranı aynı servis bağına dayanmalı; masa sayısı fixture'dan gelmemeli.
+      uiOutput = "";
+      ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
+        "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
+        cwd: join(repo, "apps/admin"),
+        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_SERVICE_PROVIDER: "http",
+          VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
+      ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
+      await waitForUi(uiBase, ui, () => uiOutput);
+      browser = await chromium.launch({ headless: true });
+      const servicePage = await browser.newPage();
+      await servicePage.goto(`${uiBase}/admin/branches/tables`);
+      await servicePage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await servicePage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await expect(servicePage.getByText("1/1 masada açık bağ")).toBeVisible();
+      await servicePage.getByRole("button", { name: "Masa 12, açık adisyon var" }).click();
+      await expect(servicePage.locator(".service-detail")).toContainText("Demo Garson");
+      await expect(servicePage.locator(".service-detail")).toContainText("2 × Margherita Pizza");
+      await servicePage.getByRole("button", { name: /Demo Garson/ }).click();
+      await expect(servicePage.locator(".service-table.waiter-match")).toHaveCount(1);
+      await expect(servicePage.locator(".service-waiter-chip[aria-pressed='true']")).toContainText("Demo Garson");
+      await servicePage.getByRole("button", { name: "Masa ekle" }).click();
+      await expect(servicePage.getByRole("button", { name: "Masa 13, açık adisyon yok" })).toBeVisible();
+      await expect(servicePage.getByRole("status").filter({ hasText: "Masa 13 eklendi" })).toBeVisible();
+      await servicePage.getByRole("button", { name: "Masa sil" }).click();
+      await expect(servicePage.getByRole("button", { name: "Masa 13, açık adisyon yok" })).toHaveCount(0);
+      await expect(servicePage.getByRole("button", { name: "Masa sil" })).toBeDisabled();
+      await expect(servicePage.getByText("Masa 12 silinemez.", { exact: false })).toBeVisible();
+      await servicePage.getByRole("link", { name: "Personel yönetimine git" }).click();
+      await expect(servicePage.getByRole("heading", { name: "Personel", level: 1 })).toBeVisible();
+      await expect(servicePage.locator(".personnel-chef-group")).toContainText("Demo Şef");
+      await servicePage.getByLabel("Ad soyad").fill("UI Mutfakçı");
+      await servicePage.locator(".personnel-form select").selectOption("kitchen");
+      await servicePage.getByLabel("Görev / unvan").fill("Hazırlık personeli");
+      await servicePage.getByRole("button", { name: "Personel kaydet" }).click();
+      await expect(servicePage.locator(".personnel-group-kitchen").filter({ hasText: "Mutfak Ekibi" })).toContainText("UI Mutfakçı");
+      await expect(servicePage.locator(".personnel-chef-group")).not.toContainText("UI Mutfakçı");
+      await servicePage.getByRole("link", { name: "Masa planına dön" }).click();
+      await expect(servicePage.getByRole("heading", { name: "Masa planı", level: 1 })).toBeVisible();
+      assert.equal((await request(`${modaService}/assignments`, "POST", {
+        ...assignment, requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef",
+      }, "pos-moda")).data.code, "TABLE_OCCUPIED");
+      const tablesOff = await request(featurePath(moda, "branches.tables"), "PUT", { desiredEnabled: false, expectedVersion: 2 });
+      assert.equal(tablesOff.status, 200);
+      const afterTablesOff = (await request(featurePath(moda))).data;
+      assert.equal(afterTablesOff.find((row) => row.key === "service.waiters").desiredEnabled, false);
+      assert.equal(afterTablesOff.find((row) => row.key === "staff.records").desiredEnabled, true);
+      assert.equal(afterTablesOff.find((row) => row.key === "sales.pos_orders").effectiveForNewWork, true);
+      await servicePage.reload();
+      await servicePage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await servicePage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await expect(servicePage.getByText("Masa servisi kapalı. Geçmiş masa kayıtları", { exact: false })).toBeVisible();
+      await expect(servicePage.getByText("Garson servisi kapalı. Yeni garson kartı", { exact: false })).toBeVisible();
+      assert.equal(await servicePage.getByRole("button", { name: "Masa kartı ekle" }).count(), 0);
+      assert.equal(await servicePage.getByRole("button", { name: "Kişi kartı ekle" }).count(), 0);
+      await servicePage.getByRole("button", { name: "Masa 12, açık adisyon var" }).click();
+      await expect(servicePage.locator(".service-detail")).toContainText("Masa servisi kapalı · geçmiş bağ");
+      await expect(servicePage.locator(".service-detail")).toContainText("Demo Garson");
+      await servicePage.getByRole("link", { name: "Şube Listesi" }).click();
+      await expect(servicePage.getByRole("heading", { name: "Şube listesi", level: 1 })).toBeVisible();
+      assert.equal(await servicePage.locator(".service-table-plan").count(), 0);
+      assert.equal(await servicePage.getByText("Bu özellik bu şubede kapalı").count(), 0);
+      await servicePage.getByRole("link", { name: "Masa Planı", exact: true }).click();
+      await expect(servicePage.getByRole("heading", { name: "Masa planı", level: 1 })).toBeVisible();
+      assert.equal((await request(`${modaService}/tables`, "POST", { number: 13, name: "Kapalı" })).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(`${modaService}/assignments`, "POST", {
+        ...assignment, requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeed", orderId: "88888888-8888-4888-8888-888888888805",
+      }, "pos-moda")).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(`${modaService}/assignments/${assignment.requestId}/close`, "POST", { expectedVersion: 1 }, "pos-moda")).status, 200);
+      assert.equal((await request(`${modaService}/tables`)).data.items[0].assignment ?? null, null);
+      const staffOff = await request(featurePath(moda, "staff.records"), "PUT", {
+        desiredEnabled: false, expectedVersion: personnelEnabled.version,
+      });
+      assert.equal(staffOff.status, 200);
+      assert.equal((await request(`${modaService}/employees`)).status, 200);
+      assert.equal((await request(`${modaService}/employees`, "POST", {
+        requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeee02", name: "Kapalı Personel", department: "service", jobTitle: "Garson", phone: null,
+      })).data.code, "FEATURE_DISABLED");
+      await servicePage.reload();
+      await servicePage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await servicePage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await servicePage.getByRole("button", { name: "Masa 12, açık adisyon yok" }).click();
+      await expect(servicePage.locator(".service-detail")).toContainText("Bu masada açık adisyon yok.");
+      await browser.close();
+      browser = undefined;
+      ui.kill("SIGTERM");
+      await new Promise((resolve) => ui.once("exit", resolve));
+      ui = undefined;
+      assert.equal((await request(`${posOrders(moda)}/${orderId}`)).data.status, "open");
       assert.equal((await request(salesList(moda))).data.items.length, 1);
       assert.deepEqual((await request(salesList(besiktas))).data.items, []);
       assert.equal((await request(salesList(), "GET", undefined, "manager-moda")).status, 403);
@@ -860,6 +1339,7 @@ test(
       browser = await chromium.launch({ headless: true });
       const catalogPage = await browser.newPage();
       await catalogPage.goto(`${uiBase}/admin/catalog/products`);
+      await catalogPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
       await catalogPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
       await catalogPage.getByRole("button", { name: "Yeni taslak" }).click();
       await catalogPage.getByLabel("Ürün adı").fill("Panelden Pizza");
@@ -939,11 +1419,29 @@ test(
       await waitForUi(uiBase, ui, () => uiOutput);
       const managerPage = await browser.newPage();
       await managerPage.goto(`${uiBase}/admin/sales`);
+      await managerPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await managerPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
       await managerPage.getByRole("heading", { name: "Canlı sipariş görünümü" }).waitFor();
       const paidRow = managerPage.getByRole("row").filter({ hasText: "Panelden Pizza" }).first();
       await paidRow.waitFor();
       await paidRow.getByText("Ödendi · simüle").waitFor();
       assert.equal(await managerPage.getByRole("button", { name: "Sipariş oluştur" }).count(), 0);
+      // Masa/garson kapalıyken yeni self-servis sipariş akışı etkilenmez.
+      assert.equal((await request(posOrders(moda), "POST", {
+        ...orderBody, orderId: "88888888-8888-4888-8888-888888888805",
+      }, "pos-moda")).status, 201);
+      assert.equal((await request(salesList(moda))).data.items.length, 3);
+      await verifyMenuApi({ request, firm, branch: moda, otherBranch: besiktas, pizzaId, cakeId,
+        sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+          "-d", "hipos_features", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", query])).stdout });
+      const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], { cwd: repo, env: menuSeedEnv });
+      for (let repetition = 0; repetition < 2; repetition++)
+        await execFile(process.execPath, [join(repo, "scripts/seed-menus.mjs")], { cwd: repo, env: menuSeedEnv });
+      const menuSeeds = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c", `SELECT count(*) FROM catalog.menus WHERE firm_id='${single}'`]);
+      assert.equal(menuSeeds.stdout.trim(), "2");
+      await verifyMenuPanel({ browser, uiBase, request, single, singleBranch });
       await browser.close();
       browser = undefined;
       ui.kill("SIGTERM");

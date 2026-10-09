@@ -4,6 +4,7 @@ test("modül tercihi yalnız seçilen şubeyi etkiler ve kalıcı işlem gibi su
   page,
 }) => {
   await page.goto("/admin/settings/modules");
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await page
     .getByRole("combobox", { name: "Şube seçimi" })
     .selectOption("moda");
@@ -34,6 +35,7 @@ test("kapalı modülde geçmiş ürün okunur, yeni iş önizlemesi kapatılır"
   page,
 }) => {
   await page.goto("/admin/settings/modules");
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await page
     .getByRole("combobox", { name: "Şube seçimi" })
     .selectOption("moda");
@@ -58,6 +60,7 @@ test("kapalı modülde geçmiş ürün okunur, yeni iş önizlemesi kapatılır"
 
 test("devam eden iş ve yetkisiz kapsam açıkça gösterilir", async ({ page }) => {
   await page.goto("/admin/kitchen?featureState=unauthorized");
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await page
     .getByRole("combobox", { name: "Şube seçimi" })
     .selectOption("atasehir");
@@ -65,6 +68,7 @@ test("devam eden iş ve yetkisiz kapsam açıkça gösterilir", async ({ page })
     "Bu şubenin verilerine erişim yok",
   );
   await page.goto("/admin/kitchen");
+  await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await page
     .getByRole("combobox", { name: "Şube seçimi" })
     .selectOption("atasehir");

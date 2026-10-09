@@ -1,4 +1,5 @@
 import type { Money, ProductStatus, SalesChannel } from "./contracts";
+import singleDemo from "../../../../../contracts/demo-single-branch.v1.json";
 
 export const catalogIds = {
   singleFirm: "11111111-1111-4111-8111-111111111111",
@@ -124,15 +125,6 @@ const seed = [
   optionGroups: readonly string[];
 }>;
 
-const singleProductIds = [
-  "55555555-5555-4555-8555-555555555501",
-  "55555555-5555-4555-8555-555555555502",
-  "55555555-5555-4555-8555-555555555503",
-  "55555555-5555-4555-8555-555555555504",
-  "55555555-5555-4555-8555-555555555505",
-  "55555555-5555-4555-8555-555555555506",
-];
-
 const multiProductIds = [
   "66666666-6666-4666-8666-666666666601",
   "66666666-6666-4666-8666-666666666602",
@@ -143,18 +135,21 @@ const multiProductIds = [
 ];
 
 export const catalogRecords: CatalogProductRecord[] = [
-  ...seed.map((item, index) => ({
+  ...singleDemo.products.map((item) => ({
     ...item,
-    id: singleProductIds[index],
+    id: item.id,
     firmId: catalogIds.singleFirm,
     brandId: null,
     branchIds: [catalogIds.singleBranch],
-    channels: [...item.channels],
+    category: singleDemo.categories.find((category) => category.id === item.categoryId)!,
+    status: "published" as const,
+    channels: ["pos" as const],
+    recipeLinked: false,
     allergens: [...item.allergens],
-    optionGroups: [...item.optionGroups],
-    basePrice: { amountMinor: item.amountMinor, currency: "TRY" as const },
+    optionGroups: [],
+    basePrice: { amountMinor: item.priceMinor, currency: "TRY" as const },
     branchPrices: {},
-    updatedAt: "2026-10-05T09:30:00Z",
+    updatedAt: "2026-10-08T09:00:00Z",
     version: 1,
   })),
   ...seed.map((item, index) => ({

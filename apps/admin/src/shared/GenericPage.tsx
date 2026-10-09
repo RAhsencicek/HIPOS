@@ -1,100 +1,88 @@
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 import type { NavSection } from "../data/catalog";
-import { Icon, DemoBadge, StatusPill, PageHeading } from "./ui";
+import { featurePresentation } from "../data/featurePresentation";
+import type { FeaturePresentation } from "../data/featurePresentation";
+import { Icon, StatusPill, PageHeading } from "./ui";
 
-export function GenericPage({
-  section,
-  slug,
-}: {
+type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http" };
+
+function tone(stage: FeaturePresentation["stage"]): "green" | "purple" | "orange" | "neutral" {
+  return stage === "working" ? "green" : stage === "demo" ? "purple" :
+    stage === "inactive" || stage === "setup" ? "orange" : "neutral";
+}
+
+export function GenericPage({ section, slug, sources }: {
   section: NavSection;
   slug?: string;
+  sources: Sources;
 }) {
   const item = section.items.find((entry) => entry.slug === slug);
-  const title = item?.label ?? section.label;
-  const readOnly = ["sales", "kitchen", "branches", "cash"].includes(
-    section.id,
-  );
-  const planned = ["cash", "finance", "customers", "central"].includes(
-    section.id,
-  );
-  return (
-    <>
-      <PageHeading
-        eyebrow={section.label.toLocaleUpperCase("tr-TR")}
-        title={title}
-        description={`${section.label} alanındaki yönetim işleri ve bağlı ekranlar.`}
-        action={
-          <StatusPill tone={readOnly ? "blue" : planned ? "neutral" : "purple"}>
-            {readOnly ? "Salt okunur" : planned ? "Planlandı" : "Prototip"}
-          </StatusPill>
-        }
-      />
-      <div className="generic-intro card">
-        <div className="generic-intro-icon">
-          <Icon name={section.icon} size={29} />
-        </div>
-        <div>
-          <span className="card-kicker">ÜRÜN KAPSAMI</span>
-          <h2>{title}</h2>
-          <p>
-            {readOnly
-              ? "Bu alanda yönetici durumu izler. Sipariş, mutfak, servis veya tahsilat işlemi yapmaz."
-              : planned
-                ? "Bu alan ürün haritasında yer alır. Gerçek kayıt ve backend akışı henüz uygulanmamıştır."
-                : "Bu alanın ekran ve akış tasarımı ilk frontend kapsamında görünür. Gerçek kaydetme henüz bağlı değildir."}
-          </p>
-          <div className="generic-tags">
-            <StatusPill tone="purple">Yönetim paneli</StatusPill>
-            <StatusPill tone="neutral">Şube kapsamı</StatusPill>
-            <DemoBadge compact />
-          </div>
-        </div>
+  const selected = item ? featurePresentation(section.id, item.slug, sources) : null;
+  return <>
+    <PageHeading
+      eyebrow={section.label.toLocaleUpperCase("tr-TR")}
+      title={item?.label ?? section.label}
+      description={item ? selected!.description : "Bu alanın bugün görülebilen ve sonraki aşamalarda gelecek alt ekranları."}
+      action={selected && <StatusPill tone={tone(selected.stage)}>{selected.label}</StatusPill>}
+    />
+    <div className="generic-intro card">
+      <div className="generic-intro-icon"><Icon name={section.icon} size={29} /></div>
+      <div>
+        <span className="card-kicker">{item ? "ÖZELLİK DURUMU" : "ALAN REHBERİ"}</span>
+        <h2>{item?.label ?? section.label}</h2>
+        <p>{item ? selected!.description : "Alt ekranlarda örnek ve çalışan işlevler, daha sonra gelecek işlerden ayrı gösterilir. Her ekran kendi durumunu açıkça belirtir."}</p>
+        {selected && <StatusPill tone={tone(selected.stage)}>{selected.label}</StatusPill>}
       </div>
+    </div>
+    <SectionDirectory section={section} slug={slug} sources={sources} />
+  </>;
+}
+
+export function SectionDirectory({ section, slug, sources }: {
+  section: NavSection;
+  slug?: string;
+  sources: Sources;
+}) {
+  const current = section.items.filter((entry) =>
+    featurePresentation(section.id, entry.slug, sources).stage !== "future");
+  const future = section.items.filter((entry) =>
+    featurePresentation(section.id, entry.slug, sources).stage === "future");
+
+  function tile(entry: NavSection["items"][number], index: number) {
+    const presentation = featurePresentation(section.id, entry.slug, sources);
+    return <Link
+      className={`card generic-tile ${entry.slug === slug ? "current" : ""} ${presentation.stage === "future" ? "future-tile" : ""}`}
+      to={`/admin/${section.id}/${entry.slug}`}
+      key={entry.slug}
+      aria-current={entry.slug === slug ? "page" : undefined}
+    >
+      <span className="tile-number">{String(index + 1).padStart(2, "0")}</span>
+      <div>
+        <strong>{entry.label}</strong>
+        <small>{presentation.description}</small>
+        <StatusPill tone={tone(presentation.stage)}>{presentation.label}</StatusPill>
+      </div>
+      <ArrowRight size={16} />
+    </Link>;
+  }
+
+  return <>
+    <section aria-labelledby="available-screens">
       <div className="generic-section-title">
-        <div>
-          <span className="card-kicker">ALT EKRANLAR</span>
-          <h2>Bu alanda neler var?</h2>
-        </div>
-        <span>{section.items.length} ekran</span>
+        <div><span className="card-kicker">ALT EKRANLAR</span><h2 id="available-screens">Bu alanda neler var?</h2></div>
+        <span>{current.length} ekran</span>
       </div>
-      <div className="generic-grid">
-        {section.items.map((entry, i) => (
-          <Link
-            className={`card generic-tile ${entry.slug === slug ? "current" : ""}`}
-            to={`/admin/${section.id}/${entry.slug}`}
-            key={entry.slug}
-          >
-            <span className="tile-number">
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <div>
-              <strong>{entry.label}</strong>
-              <small>
-                {readOnly
-                  ? "İzleme ekranı"
-                  : planned
-                    ? "Planlanan yönetim akışı"
-                    : "Ekran / akış tasarımı"}
-              </small>
-            </div>
-            <ArrowRight size={16} />
-          </Link>
-        ))}
+      {current.length ? <div className="generic-grid">{current.map(tile)}</div> :
+        <div className="card generic-empty">Bu alanda henüz etkin veya örnek gösterimli alt ekran yok.</div>}
+    </section>
+    <section className="future-section" aria-labelledby="future-screens">
+      <div className="generic-section-title">
+        <div><span className="card-kicker">YOL HARİTASI</span><h2 id="future-screens">Gelecekte neler olacak?</h2></div>
+        <span>{future.length} özellik</span>
       </div>
-      <div className="prototype-box">
-        <div className="prototype-icon">
-          <ShieldCheck size={20} />
-        </div>
-        <div>
-          <strong>Gerçek işlem durumu açıkça gösterilir</strong>
-          <p>
-            Bu ekrandaki planlı işlevler kayıt oluşturmaz. Backend bağlantısı
-            eklendiğinde gerçek işlem, hata ve yetki durumları aynı ürün
-            sözleşmesine göre çalışacaktır.
-          </p>
-        </div>
-      </div>
-    </>
-  );
+      {future.length ? <div className="generic-grid">{future.map(tile)}</div> :
+        <div className="card generic-empty">Bu alan için ayrıca listelenmiş gelecek özellik yok.</div>}
+    </section>
+  </>;
 }

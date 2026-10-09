@@ -17,6 +17,7 @@ const initiallyDesired = new Set([
   "catalog.pricing",
   "sales.monitoring",
   "branches.tables",
+  "staff.records",
   "kitchen.monitoring",
   "reports.sales",
 ]);

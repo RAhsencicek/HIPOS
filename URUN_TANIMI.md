@@ -1,5 +1,7 @@
 # Restoran Yönetim Platformu — Ana Ürün Dokümanı
 
+> Bu belge geniş ürün vizyonudur. Güncel backend, bağımlılıklar ve uygulama sınırları için [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md); teslim/kalan işler için [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) ve [İlk Üç Aşama](ILK_UC_ASAMA.md) esas alınır. Tek şube demo ürün detayındaki reçete `VITE_INVENTORY_PROVIDER=http` ile kalıcı API'den okunabilir; stok/sayım MVP'si PostgreSQL'e yazılır. Kapsam ve tamamlanmayan kısıtlar kanonik belgededir.
+
 Durum: İlk ürün tanımı. Bu belge, kesinleşen kararları kaydeder; `Açık karar` olarak işaretlenen konular henüz kararlaştırılmamıştır.
 
 ## 1. Ürünün amacı
@@ -8,9 +10,9 @@ Restoran işletmelerinin ayrı yazılımlarda yürüttüğü yönetim işlerini 
 
 Ürün tek şubeli işletmede sade, çok şubeli veya çok markalı işletmede kapsamı açık bir deneyim sunmalıdır. Ana ilke: Aynı yönetim paneli farklı ölçeklerde kullanılabilir; işletme büyüdüğünde veriyi veya arayüzü baştan kurmak gerekmez.
 
-### İlk projenin sınırı
+### İlk tanıtımın sınırı
 
-İlk proje **yalnızca yönetim panelinin frontend tasarımı ve kullanılabilir prototipidir**. Bilgi mimarisi, ekranlar, modül kataloğu, bağlam seçimi ve yönetici akışları burada ele alınır. İlk aşamada gerçek backend, ödeme veya dış sağlayıcı entegrasyonu varmış gibi davranılmaz.
+İlk tanıtım tek şubeli bir işletmenin yönetici başlangıç ekranı ve günlük yönetim temelidir. Ürün/katalog, cari, masa servisi, test POS, ödeme simülatörü ve temel reçete/stok/sayım dilimleri PostgreSQL'e bağlıdır; bu, uçtan uca veya üretime hazır restoran sistemi anlamına gelmez. Satıştan stok tüketimi, barkod, satın alma/depo, gerçek yetki ve tahsilat kapsam dışıdır. Ekran her veri alanında örnek, API, kapalı veya henüz etkin değil durumunu açıkça göstermelidir. Güncel gerçeklik için bu belgenin üstündeki kanonik backend ve durum belgelerine bakın.
 
 Gelecekte aynı ürün ailesine POS/kasa, garson, mutfak/KDS, kurye, QR/web müşteri, kiosk ve patron/mobil raporlama yüzleri eklenebilir. Bu yüzler ilk projenin kullanıcı ekranları değildir. İlk tasarımda bunlara ait verilerin ve durumların yönetim panelinde nasıl izleneceği düşünülür.
 

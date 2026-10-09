@@ -1,6 +1,6 @@
 # Yönetim Paneli — UI Sözleşmesi ve Uygulama Sırası
 
-Durum: 5 Ekim 2026 tarihinde kararlaştırılan frontend yönü. Bu belge hedef davranışı ve aşamaların kabul ölçütlerini tanımlar; bir aşamanın burada yazılması onun uygulandığı anlamına gelmez. İlk görsel prototipin sınırları [README](README.md) içinde açıklanır.
+Durum: 5 Ekim 2026 tarihli UI kararları ve uygulama geçmişi. Aşamaların burada yazılması tek başına tamamlandığı anlamına gelmez. Güncel ekran/backend durumu için [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) ve [Durum/Yol Haritası](DURUM_VE_YOL_HARITASI.md) esas alınır; bu belge yaşayan ürün durum panosu değildir.
 
 ## 1. Değişmeyen sınır
 
@@ -69,7 +69,7 @@ Bu belgedeki kapsam, route, dört durum ekseni ve ürün kimliği kararı sabitl
 
 ### Aşama 2 — Mock/API sağlayıcı sınırı
 
-Sözleşme tipleri ekran fixture'larından ayrılır. İlk dikey dilimde Ürünler ve Menü listesi/ayrıntısı doğrudan `data/catalog.ts` okumaz; `MockCatalogProvider` ve gelecekteki `HttpCatalogProvider` için aynı okuma arayüzü tanımlanır. Para tamsayı kuruşla, kimlikler opak string ile taşınır. Başarılı/boş/hata/yetkisiz/kapalı/kurulum/sağlayıcı bekleme senaryoları gerçek ağ sonucu gibi yanlış etiketlenmeden test edilir. **Durum: katalog okuma dilimi ve testleri tamamlandı; diğer alanların taşınması Aşama 4'e bırakıldı. HTTP sağlayıcısı henüz yazılmadı.**
+Sözleşme tipleri ekran fixture'larından ayrılır. **Tarihsel kayıt:** katalog sağlayıcı sınırı ve testleri bu aşamada tamamlandı; HTTP sağlayıcısı henüz yoktu. Sonraki dilimlerde katalog, satış, cari ve masa servisi için HTTP/PostgreSQL bağlantıları eklendi. Güncel modül/endpoint listesi [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) içindedir; bu eski aşama metnindeki “HTTP sağlayıcısı henüz yazılmadı” cümlesi artık geçerli değildir.
 
 ### Aşama 2B — Modül durumu ve aç/kapa sözleşmesi
 
@@ -87,6 +87,6 @@ Stok, satış izleme, şube durumu, rapor, kampanya ve merkezi yönetim aynı ek
 
 Route yönlendirmesi, kapsam değişimi, şube izolasyonu, kapalı modül, boş/hata ve “sahte kayıt yok” akışları otomatik test edilir. Katalog diliminin kapsam/durum/sahte kayıt testleri Aşama 2 ile birlikte eklendi; diğer alanların testleri kendi uygulama aşamalarında eklenir. API sözleşmesi backend ile sürümlenir; .NET modüler monolit aynı domain sınırlarını uygular.
 
-## 6. Bugün özellikle yapılmayanlar
+## 6. Bu belgenin tarihsel kapsam notu
 
-Bu kararlar gerçek ödeme, stok tüketimi, sipariş/kasa operasyonu, üretim yetki sistemi, sağlayıcı entegrasyonu veya bütün alanları kapsayan bir .NET backend'in hazır olduğu anlamına gelmez. Yalnız modül tercihi PostgreSQL prototipinde kalıcıdır. Katalog dışındaki görsel fixture'lar henüz hedef API DTO'larıyla bire bir aynı değildir; bu turda kapsam dışı tutuldu.
+Bu kararlar gerçek ödeme, satıştan stok tüketimi, üretim, yetki sistemi veya sağlayıcı entegrasyonunun hazır olduğu anlamına gelmez. Katalog, satış/test POS, cari, masa servisi ve temel stok/reçete/sayım PostgreSQL dilimleri vardır. Envanter paneli `VITE_INVENTORY_PROVIDER=http` ile gerçek API'ye bağlanır; mock varsayılandır. Güncel bağımlılık, kapsam ve veri sahipliği için [kanonik backend belgesine](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), elle deneme adımları için [stok test rehberine](STOK_REÇETE_SAYIM_MANUEL_TEST.md) bakın.

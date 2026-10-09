@@ -30,7 +30,7 @@ public sealed class InMemoryFeatureStore : IFeatureStore
     private static readonly HashSet<string> InitiallyDesired =
     [
         "catalog.products", "catalog.pricing", "sales.monitoring",
-        "branches.tables", "kitchen.monitoring", "reports.sales",
+        "branches.tables", "staff.records", "kitchen.monitoring", "reports.sales",
     ];
 
     private readonly object gate = new();
@@ -83,6 +83,13 @@ public sealed class InMemoryFeatureStore : IFeatureStore
                 return FeatureCommandResult.Success(Copy(current));
             states[(firmId, branchId, key)] = next;
             audit.Add(new FeatureAuditEvent(firmId, branchId, key, actor, next.DesiredEnabled, next.Version, next.UpdatedAt));
+            if (!next.DesiredEnabled)
+            foreach (var dependent in FeatureRules.AutoDisabledDependents(branchStates, key))
+            {
+                states[(firmId, branchId, dependent.Key)] = dependent;
+                audit.Add(new FeatureAuditEvent(firmId, branchId, dependent.Key,
+                    $"{actor}:dependency:{key}", false, dependent.Version, dependent.UpdatedAt));
+            }
             return FeatureCommandResult.Success(Copy(next));
         }
     }

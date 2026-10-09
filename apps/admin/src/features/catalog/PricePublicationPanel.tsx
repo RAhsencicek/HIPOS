@@ -132,7 +132,7 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
         {!hasPrice && <small>Yayın için önce fiyat geçmişinde geçerli sürüm görünmeli.</small>}
       </div>
       {(!canSetPrice || !canPublish) && <div className="notice" role="status">
-        {!canSetPrice ? "Fiyat Taslakları" : "Menü Yayınlama"} bu şubede yeni iş için hazır değil. Geçmiş okunabilir. <Link to="/admin/settings/modules">Modül ayarları</Link>
+        {!canSetPrice ? "Fiyat Taslakları" : "POS'a Ürün Yayını"} bu şubede yeni iş için hazır değil. Geçmiş okunabilir. <Link to="/admin/settings/modules">Modül ayarları</Link>
       </div>}
     </>}
     {error && <div className="notice" role="alert">
