@@ -52,7 +52,16 @@ function validate() {
     if (products.get(recipe.productId)?.recipeId !== recipe.id || recipe.version < 1) throw new Error(`Reçete geçersiz: ${recipe.id}`);
     for (const line of recipe.lines) if (!ingredients.has(line.ingredientId) || line.quantity <= 0) throw new Error(`Reçete kalemi geçersiz: ${recipe.id}`);
   }
-  for (const movement of demo.partyMovements) if (!parties.has(movement.partyId) || !Number.isSafeInteger(movement.deltaMinor) || movement.deltaMinor === 0 || movement.source !== "manual_demo" || !movement.description?.trim()) throw new Error(`Cari hareketi geçersiz: ${movement.id}`);
+  for (const movement of demo.partyMovements) {
+    const typedDelta = movement.entryType === "customer_charge" || movement.entryType === "supplier_debt" ? movement.deltaMinor > 0
+      : movement.entryType === "customer_collection" || movement.entryType === "supplier_payment" ? movement.deltaMinor < 0 : movement.entryType === "legacy_manual";
+    if (!parties.has(movement.partyId) || !Number.isSafeInteger(movement.deltaMinor) || movement.deltaMinor === 0 ||
+      movement.source !== "manual_demo" || !movement.description?.trim() || !movement.effectiveDate ||
+      !["customer", "supplier"].includes(movement.kind) || !typedDelta ||
+      movement.entryType.startsWith("customer_") && movement.kind !== "customer" ||
+      movement.entryType.startsWith("supplier_") && movement.kind !== "supplier" ||
+      !parties.get(movement.partyId).types.includes(movement.kind)) throw new Error(`Cari hareketi geçersiz: ${movement.id}`);
+  }
   const stock = new Map(demo.ingredients.map((item) => [item.id, 0]));
   for (const movement of demo.stockMovements) {
     if (!ingredients.has(movement.ingredientId) || !Number.isFinite(movement.delta) || movement.delta === 0 ||
@@ -120,13 +129,25 @@ if (serviceOnly) {
     statements.push(`INSERT INTO service.assignments (id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by) VALUES (${sqlString(assignment.id)},${firm},${branch},${sqlString(`table-${String(assignment.tableNumber).padStart(2, "0")}`)},${sqlString(order.id)},${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"},${sqlString(order.createdAt)},NULL,1,'demo-seed',NULL) ON CONFLICT (id) DO NOTHING;`);
   }
 } else if (cariOnly) {
-  for (const party of demo.parties) statements.push(
-    `INSERT INTO cari.parties (id,firm_id,branch_id,name,types,is_active,version,updated_at) VALUES (${sqlString(party.id)},${firm},${branch},${sqlString(party.name)},${sqlArray(party.types)},true,1,${sqlString(now)}) ON CONFLICT (id) DO NOTHING;`
-  );
+  for (const party of demo.parties) {
+    const id = sqlString(party.id);
+    const phone = party.phone ? sqlString(party.phone) : "NULL";
+    const email = party.email ? sqlString(party.email) : "NULL";
+    const note = party.note ? sqlString(party.note) : "NULL";
+    statements.push(`INSERT INTO cari.parties (id,firm_id,branch_id,name,types,phone,email,note,is_active,version,updated_at) VALUES (${id},${firm},${branch},${sqlString(party.name)},${sqlArray(party.types)},${phone},${email},${note},true,1,${sqlString(now)}) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM cari.parties WHERE id=${id} AND firm_id=${firm} AND branch_id=${branch} AND name=${sqlString(party.name)} AND types=${sqlArray(party.types)}) THEN RAISE EXCEPTION 'Demo cari kimliği farklı içerikle kullanılıyor: ${party.id}'; END IF; END $$;`);
+  }
   for (const movement of demo.partyMovements) {
     const party = demo.parties.find((item) => item.id === movement.partyId);
-    const kind = party.types[0];
-    statements.push(`INSERT INTO cari.movements (id,firm_id,branch_id,party_id,kind,delta_minor,currency,description,source,actor,created_at) VALUES (${sqlString(movement.id)},${firm},${branch},${sqlString(movement.partyId)},${sqlString(kind)},${movement.deltaMinor},'TRY',${sqlString(movement.description)},'demo_seed','demo-seed',${sqlString(now)}) ON CONFLICT (id) DO NOTHING;`);
+    const id = sqlString(movement.id);
+    const kind = sqlString(movement.kind ?? party.types[0]);
+    const entryType = sqlString(movement.entryType ?? "legacy_manual");
+    const reference = movement.reference ? sqlString(movement.reference) : "NULL";
+    const effectiveDate = sqlString(movement.effectiveDate ?? now.slice(0, 10));
+    const detail = sqlString(`${movement.entryType}: ${movement.description} · ${movement.deltaMinor} kuruş`);
+    statements.push(`INSERT INTO cari.movements (id,firm_id,branch_id,party_id,kind,entry_type,delta_minor,currency,description,reference,effective_date,source,actor,created_at) VALUES (${id},${firm},${branch},${sqlString(movement.partyId)},${kind},${entryType},${movement.deltaMinor},'TRY',${sqlString(movement.description)},${reference},${effectiveDate},'manual','demo-seed',${sqlString(now)}) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM cari.movements WHERE id=${id} AND firm_id=${firm} AND branch_id=${branch} AND party_id=${sqlString(movement.partyId)} AND kind=${kind} AND entry_type=${entryType} AND delta_minor=${movement.deltaMinor} AND effective_date=${effectiveDate}) THEN RAISE EXCEPTION 'Demo cari hareket kimliği farklı içerikle kullanılıyor: ${movement.id}'; END IF; END $$;`);
+    statements.push(`INSERT INTO cari.audit (firm_id,branch_id,party_id,action,actor,detail,occurred_at) SELECT ${firm},${branch},${sqlString(movement.partyId)},'movement_added','demo-seed',${detail},${sqlString(now)} WHERE NOT EXISTS (SELECT 1 FROM cari.audit WHERE firm_id=${firm} AND branch_id=${branch} AND party_id=${sqlString(movement.partyId)} AND action='movement_added' AND detail=${detail});`);
   }
 } else if (inventoryOnly) {
   const warehouseId = sqlString(demo.warehouse.id);

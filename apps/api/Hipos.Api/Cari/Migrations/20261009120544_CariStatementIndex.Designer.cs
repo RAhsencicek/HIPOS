@@ -3,6 +3,7 @@ using System;
 using Hipos.Api.Cari;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Hipos.Api.Cari.Migrations
 {
     [DbContext(typeof(CariDbContext))]
-    partial class CariDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261009120544_CariStatementIndex")]
+    partial class CariStatementIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -172,8 +175,6 @@ namespace Hipos.Api.Cari.Migrations
                             t.HasCheckConstraint("ck_movement_kind", "kind IN ('customer', 'supplier')");
 
                             t.HasCheckConstraint("ck_movement_nonzero", "delta_minor <> 0");
-
-                            t.HasCheckConstraint("ck_movement_source", "source IN ('manual', 'integration', 'sales', 'purchase', 'opening_balance', 'adjustment')");
                         });
                 });
 

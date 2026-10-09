@@ -14,7 +14,14 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             .ToListAsync(cancellationToken);
         var byKey = rows.ToDictionary(row => row.Key);
         return FeatureCatalog.All.Where(definition => byKey.ContainsKey(definition.Key))
-            .Select(definition => byKey[definition.Key].ToState()).ToArray();
+            .Select(definition =>
+            {
+                var state = byKey[definition.Key].ToState();
+                return IsCariFeature(definition.Key) && !runtime.CariReady
+                    ? state with { EffectiveForNewWork = false, Lifecycle = "setup_required",
+                        Blockers = [new FeatureBlocker("CARI_STORAGE_UNAVAILABLE", "Cari hareket defteri migration'ı uygulanmalı.")] }
+                    : state;
+            }).ToArray();
     }
 
     public async Task<IReadOnlyList<FeatureAuditEvent>> AuditAsync(
@@ -43,6 +50,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         if (IsInventoryFeature(key) && command.DesiredEnabled && !runtime.InventoryReady)
             return FeatureCommandResult.Rejected("INVENTORY_STORAGE_UNAVAILABLE", 503,
                 "Stok/reçete/sayım için inventory migration'ı gerekli.");
+        if (IsCariFeature(key) && command.DesiredEnabled && !runtime.CariReady)
+            return FeatureCommandResult.Rejected("CARI_STORAGE_UNAVAILABLE", 503,
+                "Cari hareket defteri migration'ı gerekli.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Bütün şube satırları kilitlenir: bağımlılık kontrolü ile yazma tek atomik işlem olur.
         var rows = await db.BranchFeatureStates.FromSqlInterpolated(
@@ -52,13 +62,16 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             await inventoryDb.Counts.AsNoTracking().AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.Status == "draft", cancellationToken))
             return FeatureCommandResult.Rejected("INVENTORY_COUNT_OPEN", 409,
                 "Depoda açık sayım/onay bekliyor. Sayımı onaylayın veya iptal edin; sonra modülü kapatabilirsiniz.");
-        var states = rows.ToDictionary(row => row.Key, row => row.ToState());
+        var currentKeys = FeatureCatalog.All.Select(definition => definition.Key).ToHashSet(StringComparer.Ordinal);
+        var states = rows.Where(row => currentKeys.Contains(row.Key))
+            .ToDictionary(row => row.Key, row => row.ToState());
         var result = FeatureRules.SetDesired(states, key, command,
             (IsCatalogWrite(key) && runtime.CatalogDraftsReady) ||
             (key == "sales.pos_orders" && runtime.SalesOrdersReady) ||
             (key == "payments.simulator" && runtime.PaymentSimulatorReady) ||
             (key is "branches.tables" or "service.waiters" or "staff.records" && runtime.ServiceTablesReady) ||
-            (IsInventoryFeature(key) && runtime.InventoryReady));
+            (IsInventoryFeature(key) && runtime.InventoryReady) ||
+            (IsCariFeature(key) && runtime.CariReady));
         if (result.Failure is not null || result.State is null) return result;
         var next = result.State;
         if (next.Version == states[key].Version) return result; // Aynı tercih tekrarlandı: audit veya yazma yok.
@@ -100,7 +113,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             (key != "sales.pos_orders" || runtime.SalesOrdersReady) &&
             (key != "payments.simulator" || runtime.PaymentSimulatorReady) &&
             (key != "branches.tables" && key != "service.waiters" && key != "staff.records" || runtime.ServiceTablesReady) &&
-            (!IsInventoryFeature(key) || runtime.InventoryReady),
+            (!IsInventoryFeature(key) || runtime.InventoryReady) &&
+            (!IsCariFeature(key) || runtime.CariReady),
             cancellationToken);
 
     private static bool IsCatalogWrite(string key) =>
@@ -108,6 +122,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
 
     private static bool IsInventoryFeature(string key) =>
         key is "inventory.items" or "inventory.recipes" or "inventory.counts";
+
+    private static bool IsCariFeature(string key) => key == "cari.management";
 
     public async Task<FeatureCommandResult> CompleteOneInFlightWorkAsync(
         string firmId, string branchId, string key, CancellationToken cancellationToken)
@@ -134,6 +150,26 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
 
 public static class FeatureDbInitializer
 {
+    public static async Task PromoteCariAsync(FeatureDbContext db, CancellationToken cancellationToken)
+    {
+        var rows = await db.BranchFeatureStates.Where(row =>
+            row.Key == "cari.management" && row.DesiredEnabled &&
+            row.Lifecycle == "ready" && !row.EffectiveForNewWork).ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            row.EffectiveForNewWork = true;
+            row.Version++;
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+            db.FeatureAudit.Add(new FeatureAuditRow
+            {
+                FirmId = row.FirmId, BranchId = row.BranchId, FeatureKey = row.Key,
+                Actor = "system:cari-ready", DesiredEnabled = true,
+                Version = row.Version, OccurredAt = row.UpdatedAt,
+            });
+        }
+        if (rows.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
     public static async Task PromoteServiceTablesAsync(FeatureDbContext db, CancellationToken cancellationToken)
     {
         var rows = await db.BranchFeatureStates.Where(row => (row.Key == "branches.tables" || row.Key == "staff.records") &&
@@ -158,6 +194,7 @@ public static class FeatureDbInitializer
     {
         if ((await db.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
             throw new InvalidOperationException("Modül veritabanı şeması güncel değil. Önce 'dotnet ef database update' çalıştırın.");
+        await MigrateCariCapabilitiesAsync(db, cancellationToken);
         var demo = new InMemoryFeatureStore();
         var branches = new (string FirmId, string BranchId)[]
         {
@@ -179,5 +216,31 @@ public static class FeatureDbInitializer
                         {state.Version}, {state.UpdatedAt})
                 ON CONFLICT (firm_id, branch_id, feature_key) DO NOTHING
                 """, cancellationToken);
+    }
+
+    private static async Task MigrateCariCapabilitiesAsync(FeatureDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            WITH migrated AS (
+                INSERT INTO modules.branch_feature_states
+                    (firm_id, branch_id, feature_key, desired_enabled, effective_for_new_work,
+                     lifecycle, in_flight_work_count, version, updated_at)
+                SELECT firm_id, branch_id, 'cari.management',
+                       bool_or(desired_enabled),
+                       bool_or(desired_enabled AND effective_for_new_work AND lifecycle = 'ready'),
+                       CASE WHEN bool_or(desired_enabled) THEN 'ready' ELSE 'disabled' END,
+                       0, 1, max(updated_at)
+                FROM modules.branch_feature_states
+                WHERE feature_key IN ('cari.customers', 'cari.suppliers')
+                GROUP BY firm_id, branch_id
+                ON CONFLICT (firm_id, branch_id, feature_key) DO NOTHING
+                RETURNING firm_id, branch_id, desired_enabled, version, updated_at
+            )
+            INSERT INTO modules.feature_audit
+                (firm_id, branch_id, feature_key, actor, desired_enabled, version, occurred_at)
+            SELECT firm_id, branch_id, 'cari.management', 'system:cari-capability-migration',
+                   desired_enabled, version, updated_at
+            FROM migrated
+            """, cancellationToken);
     }
 }

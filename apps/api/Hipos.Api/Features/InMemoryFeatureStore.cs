@@ -31,6 +31,7 @@ public sealed class InMemoryFeatureStore : IFeatureStore
     [
         "catalog.products", "catalog.pricing", "sales.monitoring",
         "branches.tables", "staff.records", "kitchen.monitoring", "reports.sales",
+        "cari.management",
     ];
 
     private readonly object gate = new();

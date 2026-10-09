@@ -23,7 +23,7 @@ HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;User
 HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:cari
 ```
 
-Seed dört kurgusal cari kartı ve dört örnek hareket ekler; mevcut satırları değiştirmez. Buradaki yerel veritabanında 8 Ekim 2026'da 4 kart ve 4 hareket doğrulandı. Başka bilgisayarda veya Docker veritabanında bu komutları ayrıca çalıştırın. `HIPOS_DEMO_DATABASE_URL` yoksa seed durur. Cari migration'ını API çalışırken uyguladıysanız API'yi yeniden başlatın.
+Seed sekiz kurgusal cari kartı ve on beş örnek hareket ekler; tekrar çalıştırıldığında var olan kayıtları değiştirmez. Demo; müşteri alacağı, kısmi tahsilat, tedarikçi borcu ve kısmi ödeme örneklerini içerir. Yeni migration eski hareketleri `legacy_manual` olarak korur ve tarihlerini İstanbul gününe göre doldurur. Başka bilgisayarda veya Docker veritabanında bu komutları ayrıca çalıştırın. `HIPOS_DEMO_DATABASE_URL` yoksa seed durur. Cari migration'ını API çalışırken uyguladıysanız API'yi yeniden başlatın.
 
 Masa servisi için **SalesDbContext ve ServiceDbContext migration'ları** gerekir. Katalog seed'inden sonra ayrı servis seed'i 24 masa, 3 kurgusal garson kişi kartı, 8 adisyon (7 masalı, 1 self-servis) ve 7 açık masa-adisyon bağı yükler:
 
@@ -119,7 +119,7 @@ Komut yalnız açıkça belirtilen yerel `hipos_features` veritabanına yazar; s
 
 Yönetici ekranını deneyip doğrulamak için [Stok, Reçete ve Sayım elle test rehberini](STOK_REÇETE_SAYIM_MANUEL_TEST.md) izleyin.
 
-Cari ekranını da PostgreSQL'e bağlamak için panel komutuna `VITE_CARI_PROVIDER=http` ekleyin ve yukarıdaki cari seed'ini uygulayın. Cari kartı oluşturma, unvan/tür/aktiflik düzenleme ve manuel bakiye hareketi çalışır; bunlar gerçek tahsilat/fatura oluşturmaz. Ekstre İstanbul takvim günlerine göre devir + dönem hareketi + kapanış bakiyesi gösterir. Finans alt ekranları, otomatik belge bağlantısı ve gerçek oturum/yetki henüz yapılmamıştır. Elle arayüz testi için [Cari test rehberi](CARI_MANUEL_TEST.md) kullanın.
+Cari ekranını PostgreSQL'e bağlamak için panel komutuna `VITE_CARI_PROVIDER=http` ekleyin ve cari migration/seed adımlarını uygulayın. **Ayarlar → Modüller ve Özellikler** içindeki tek `Cari Hesap Yönetimi` seçeneği yönetici tarafından manuel kart/hareket yazımını açar veya kapatır. Kart türü Müşteri, Tedarikçi veya ikisi birden seçilebilir; türler ayrı capability değildir. Modül kapalıyken mevcut kartlar, hareketler, ekstre ve hareketlerden hesaplanan bakiyeler okunur kalır. Hareket kaynağı modeli manuel, entegrasyon, satış, satın alma, açılış bakiyesi ve düzeltme değerlerini ayırt eder; bu sürümde yalnız manuel hareket oluşturulur. Tahsilat/ödeme banka/POS hareketi veya fatura değildir; vadeli belge, ödeme dağıtımı, satın alma-stok bağlantısı ve gerçek oturum/yetki sonraki aşamalardır. Elle arayüz testi için [Cari test rehberi](CARI_MANUEL_TEST.md) ve [Cari Hesaplar MVP sözleşmesi](CARI_HESAPLAR_MVP.md) kullanın.
 
 Migration **ayrı komutla** uygulanır; modül düğmesi migration veya tablo silme işlemi yapmaz. [compose.yaml](compose.yaml) yalnız yerel geliştirme içindir; örnek parolası üretimde kullanılmaz. Sunucu yalnız Development ortamında açılır; `X-Demo-Actor` başlığı gerçek kimlik doğrulaması değildir. Katalog, satış veya cari migration'ı eksikse ilgili API açık bir `503` döner. `VITE_SALES_PROVIDER` verilmezse yönetimdeki eski satış görünümü açıkça örnek veridir.
 

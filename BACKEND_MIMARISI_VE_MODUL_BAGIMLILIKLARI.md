@@ -28,7 +28,7 @@ API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm w
 | Ürünler ve Menü | `catalog` | Kategori, ürün, fiyat sürümü, yayın anlık görüntüsü, taslak, menü, menüye özel adlandırılmış bölümler ve sıralı ürün bağları | Liste/detay, taslak, fiyat sürümü ve ilk yayın yanında; mevcut ürünleri farklı katalog kategorilerinden seçip özel menü başlığı altında yeniden kullanma, menü sıralama ve aktif menü seçimi API’ye bağlı. Menü yeni ürün/fiyat kopyası üretmez. |
 | Satış ve Adisyon | `sales` | Sipariş, kalemler, fiyat anlık görüntüsü, simüle ödeme girişimi | API'de Test POS/servis siparişleri PostgreSQL'de ve salt okunur izlenir; bu şema şimdilik yalnız açık sipariş ve simüle ödeme durumlarını destekler, kapanış/tahsilat yoktur. Mock panelde Satış Özeti, Adisyonlar ve Açık Adisyonlar birbirinden ayrı, örnek veri etiketiyle gösterilir. Mock kapanış/ürün/garson ayrıntıları veritabanına yazılmaz. |
 | Personel ve Masa Servisi | `service` | Şube kapsamlı personel, masa, personel-adisyon bağı ve audit | `staff.records` personel kartını; `branches.tables`/`service.waiters` masa-servis bağını yönetir. Panel bölüm/görev kartı CRUD ve ayrı çalışan ızgaraları sunar. Bordro, puantaj, POS kimliği yok. |
-| Cari | `cari` | Müşteri/tedarikçi kartı, manuel hareket ve ekstre | İlk PostgreSQL dilimi çalışıyor; gerçek ödeme/fatura bağlantısı yok. |
+| Cari | `cari` | Müşteri/tedarikçi kartı ve iletişimi, semantik hareket defteri, ekstre, audit | PostgreSQL'de kalıcı; müşteri ve tedarikçi capability'leri ayrı. Tahsilat/ödeme elle girilen işletme kaydıdır; banka/POS/fatura değildir. |
 | Reçete ve stok | `inventory` | Depo, hammadde/eşik, değiştirilemez hareket defteri, reçete sürümleri, sayım snapshot/onayı ve denetim | `InventoryDbContext` migration, API, demo seed ve PostgreSQL kabul testi var. İlk örnek tek şube/tek depo; depo kimliği hareket/sayım kapsamındadır. Satıştan otomatik tüketim ve satın alma belgesi yok. |
 | Mutfak/KDS, satın alma, kasa, finans, rapor | henüz yok | İlgili iş verileri | Örnek/planlanan alanlar; çalışan backend olarak sunulmaz. |
 
@@ -84,6 +84,8 @@ Masa servisini kapatma, devam eden açık masa-adisyon bağlarını şu an `drai
 - **Satış → ödeme:** Mevcut ödeme simülatörü yalnız durum senaryosu yazar. Banka, nakit tahsilat, kasa veya mali belge oluşturmaz.
 - **Satış → stok:** Reçete/satış bağlantısı ve otomatik stok tüketim anı kararlaştırılmadı; bu aşamada stok azaltılmaz.
 - **Cari → finans/satın alma:** Müşteri alacağı ve tedarikçi borcu manuel cari hareketlerinden ayrı hesaplanır. Otomatik fatura/ödeme bağlantısı yoktur.
+- **Cari hareket semantiği:** `customer_charge/customer_collection` müşteri alacağını artırır/azaltır; `supplier_debt/supplier_payment` tedarikçi borcunu artırır/azaltır. Düzeltmeler ayrı hareket türüdür; eski imzalı hareketler `legacy_manual` olarak saklanır. Vade, fatura tahsisi, e-fatura, banka/kasa/POS tahsilatı ve raporlama yoktur.
+- **Cari modül kapatma:** `cari.management` kapandığında yeni manuel cari kartı, kart düzenleme ve manuel hareket yazımı durur; mevcut kart, bakiye ve ekstre okunur. Cari türü (müşteri/tedarikçi/ikisi) modül anahtarından bağımsız kart verisidir. Entegrasyon ve satış/satın alma kaynaklarının ileride ayrı yazma kanalı olması gerekir. Capability değişikliği schema migration çalıştırmaz ve kayıt silmez.
 - **Modül kapatma:** Tercih yeni iş kabulünü durdurur; tablo silme, geçmiş silme veya migration değildir. Geçmiş okuma davranışı modül sözleşmesinde belirtilmelidir.
 
 ## API yüzeyleri

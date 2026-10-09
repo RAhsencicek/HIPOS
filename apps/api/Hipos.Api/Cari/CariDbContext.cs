@@ -10,6 +10,9 @@ public sealed class CariPartyRow
     public string BranchId { get; set; } = "";
     public string Name { get; set; } = "";
     public string[] Types { get; set; } = [];
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Note { get; set; }
     public bool IsActive { get; set; } = true;
     public int Version { get; set; } = 1;
     public DateTimeOffset UpdatedAt { get; set; }
@@ -22,9 +25,12 @@ public sealed class CariMovementRow
     public string BranchId { get; set; } = "";
     public string PartyId { get; set; } = "";
     public string Kind { get; set; } = "";
+    public string EntryType { get; set; } = "legacy_manual";
     public long DeltaMinor { get; set; }
     public string Currency { get; set; } = "TRY";
     public string Description { get; set; } = "";
+    public string? Reference { get; set; }
+    public DateOnly EffectiveDate { get; set; }
     public string Source { get; set; } = "manual";
     public string Actor { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
@@ -60,6 +66,9 @@ public sealed class CariDbContext(DbContextOptions<CariDbContext> options) : DbC
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(160);
             entity.Property(row => row.Types).HasColumnName("types");
+            entity.Property(row => row.Phone).HasColumnName("phone").HasMaxLength(32);
+            entity.Property(row => row.Email).HasColumnName("email").HasMaxLength(160);
+            entity.Property(row => row.Note).HasColumnName("note").HasMaxLength(500);
             entity.Property(row => row.IsActive).HasColumnName("is_active");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
@@ -71,6 +80,8 @@ public sealed class CariDbContext(DbContextOptions<CariDbContext> options) : DbC
             {
                 table.HasCheckConstraint("ck_movement_nonzero", "delta_minor <> 0");
                 table.HasCheckConstraint("ck_movement_kind", "kind IN ('customer', 'supplier')");
+                table.HasCheckConstraint("ck_movement_entry_type", "entry_type IN ('customer_charge', 'customer_collection', 'supplier_debt', 'supplier_payment', 'adjustment_increase', 'adjustment_decrease', 'legacy_manual')");
+                table.HasCheckConstraint("ck_movement_source", "source IN ('manual', 'integration', 'sales', 'purchase', 'opening_balance', 'adjustment')");
                 table.HasCheckConstraint("ck_movement_currency", "currency = 'TRY'");
             });
             entity.HasKey(row => row.Id);
@@ -79,14 +90,17 @@ public sealed class CariDbContext(DbContextOptions<CariDbContext> options) : DbC
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.PartyId).HasColumnName("party_id").HasMaxLength(80);
             entity.Property(row => row.Kind).HasColumnName("kind").HasMaxLength(16);
+            entity.Property(row => row.EntryType).HasColumnName("entry_type").HasMaxLength(32);
             entity.Property(row => row.DeltaMinor).HasColumnName("delta_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.Description).HasColumnName("description").HasMaxLength(500);
+            entity.Property(row => row.Reference).HasColumnName("reference").HasMaxLength(80);
+            entity.Property(row => row.EffectiveDate).HasColumnName("effective_date").HasColumnType("date");
             entity.Property(row => row.Source).HasColumnName("source").HasMaxLength(24);
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(80);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.HasOne<CariPartyRow>().WithMany().HasForeignKey(row => row.PartyId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.PartyId, row.CreatedAt });
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.PartyId, row.EffectiveDate, row.CreatedAt });
         });
         modelBuilder.Entity<CariAuditRow>(entity =>
         {

@@ -8,4 +8,5 @@ public sealed class FeatureRuntimeCapabilities
     public bool PaymentSimulatorReady { get; set; }
     public bool ServiceTablesReady { get; set; }
     public bool InventoryReady { get; set; }
+    public bool CariReady { get; set; }
 }

@@ -49,16 +49,31 @@
     { "id": "recipe-lemonade", "productId": "55555555-5555-4555-8555-555555555505", "version": 1, "portion": "1 bardak", "lines": [{ "ingredientId": "lemon", "quantity": 1 }, { "ingredientId": "sugar", "quantity": 20 }, { "ingredientId": "water", "quantity": 250 }] }
   ],
   "parties": [
-    { "id": "party-ahmet", "name": "Ahmet Yılmaz", "types": ["customer"] },
-    { "id": "party-beta", "name": "Beta Ofis", "types": ["customer"] },
-    { "id": "party-abc", "name": "ABC Gıda", "types": ["supplier"] },
-    { "id": "party-coffee", "name": "Kahve Tedarik", "types": ["supplier"] }
+    { "id": "party-ahmet", "name": "Ahmet Yılmaz", "types": ["customer"], "phone": "+90 555 010 10 01", "note": "Örnek bireysel müşteri hesabı" },
+    { "id": "party-beta", "name": "Beta Ofis", "types": ["customer"], "phone": "+90 555 010 10 02", "email": "satinalma@beta.example", "note": "Toplu öğle yemeği siparişleri" },
+    { "id": "party-abc", "name": "ABC Gıda", "types": ["supplier"], "phone": "+90 555 010 20 01", "email": "muhasebe@abcgida.example", "note": "Kuru gıda tedariki" },
+    { "id": "party-coffee", "name": "Kahve Tedarik", "types": ["supplier"], "phone": "+90 555 010 20 02", "note": "Kahve ve sarf malzemesi" },
+    { "id": "party-moda-office", "name": "Moda Ofis", "types": ["customer"], "phone": "+90 555 010 10 03", "email": "ofis@moda.example", "note": "Toplantı ikramı ve paket sipariş" },
+    { "id": "party-marmara-dairy", "name": "Marmara Süt Ürünleri", "types": ["supplier"], "phone": "+90 555 010 20 03", "note": "Günlük süt ürünü teslimatı" },
+    { "id": "party-kadikoy-produce", "name": "Kadıköy Sebze Hali", "types": ["supplier"], "phone": "+90 555 010 20 04", "note": "Sebze ve meyve alımları" },
+    { "id": "party-local-butcher", "name": "Mahalle Kasabı", "types": ["supplier"], "phone": "+90 555 010 20 05", "note": "Et ürünleri tedariki" }
   ],
   "partyMovements": [
-    { "id": "pm-beta-1", "partyId": "party-beta", "deltaMinor": 300000, "description": "Örnek kurumsal satış alacağı", "source": "manual_demo" },
-    { "id": "pm-beta-2", "partyId": "party-beta", "deltaMinor": -100000, "description": "Örnek alacak kapama", "source": "manual_demo" },
-    { "id": "pm-abc-1", "partyId": "party-abc", "deltaMinor": 1250000, "description": "Örnek alış borcu", "source": "manual_demo" },
-    { "id": "pm-abc-2", "partyId": "party-abc", "deltaMinor": -300000, "description": "Örnek borç kapama", "source": "manual_demo" }
+    { "id": "pm-beta-1", "partyId": "party-beta", "kind": "customer", "entryType": "legacy_manual", "deltaMinor": 300000, "effectiveDate": "2026-10-08", "description": "Örnek kurumsal satış alacağı", "source": "manual_demo" },
+    { "id": "pm-beta-2", "partyId": "party-beta", "kind": "customer", "entryType": "legacy_manual", "deltaMinor": -100000, "effectiveDate": "2026-10-08", "description": "Örnek alacak kapama", "source": "manual_demo" },
+    { "id": "pm-abc-1", "partyId": "party-abc", "kind": "supplier", "entryType": "legacy_manual", "deltaMinor": 1250000, "effectiveDate": "2026-10-08", "description": "Örnek alış borcu", "source": "manual_demo" },
+    { "id": "pm-abc-2", "partyId": "party-abc", "kind": "supplier", "entryType": "legacy_manual", "deltaMinor": -300000, "effectiveDate": "2026-10-08", "description": "Örnek borç kapama", "source": "manual_demo" },
+    { "id": "pm-ahmet-charge-1", "partyId": "party-ahmet", "kind": "customer", "entryType": "customer_charge", "deltaMinor": 142500, "effectiveDate": "2026-10-07", "reference": "DEMO-AD-1042", "description": "Örnek toplu öğle yemeği alacağı", "source": "manual_demo" },
+    { "id": "pm-ahmet-collection-1", "partyId": "party-ahmet", "kind": "customer", "entryType": "customer_collection", "deltaMinor": -42500, "effectiveDate": "2026-10-08", "reference": "TAH-DEMO-001", "description": "Örnek kısmi tahsilat kaydı", "source": "manual_demo" },
+    { "id": "pm-moda-charge-1", "partyId": "party-moda-office", "kind": "customer", "entryType": "customer_charge", "deltaMinor": 218000, "effectiveDate": "2026-10-08", "reference": "DEMO-AD-1051", "description": "Toplantı ikramı · örnek alacak kaydı", "source": "manual_demo" },
+    { "id": "pm-moda-collection-1", "partyId": "party-moda-office", "kind": "customer", "entryType": "customer_collection", "deltaMinor": -100000, "effectiveDate": "2026-10-08", "reference": "TAH-DEMO-002", "description": "Kısmi tahsilat · örnek kayıt", "source": "manual_demo" },
+    { "id": "pm-abc-debt-1", "partyId": "party-abc", "kind": "supplier", "entryType": "supplier_debt", "deltaMinor": 485000, "effectiveDate": "2026-10-07", "reference": "DEMO-ALI-201", "description": "Kuru gıda teslimatı · örnek borç kaydı", "source": "manual_demo" },
+    { "id": "pm-abc-payment-1", "partyId": "party-abc", "kind": "supplier", "entryType": "supplier_payment", "deltaMinor": -180000, "effectiveDate": "2026-10-08", "reference": "ODE-DEMO-001", "description": "Kısmi tedarikçi ödeme kaydı", "source": "manual_demo" },
+    { "id": "pm-coffee-debt-1", "partyId": "party-coffee", "kind": "supplier", "entryType": "supplier_debt", "deltaMinor": 176000, "effectiveDate": "2026-10-08", "reference": "DEMO-ALI-208", "description": "Kahve ve sarf teslimatı · örnek borç", "source": "manual_demo" },
+    { "id": "pm-coffee-payment-1", "partyId": "party-coffee", "kind": "supplier", "entryType": "supplier_payment", "deltaMinor": -76000, "effectiveDate": "2026-10-08", "reference": "ODE-DEMO-002", "description": "Örnek kısmi ödeme kaydı", "source": "manual_demo" },
+    { "id": "pm-dairy-debt-1", "partyId": "party-marmara-dairy", "kind": "supplier", "entryType": "supplier_debt", "deltaMinor": 265000, "effectiveDate": "2026-10-08", "reference": "DEMO-ALI-214", "description": "Süt ürünü teslimatı · örnek borç", "source": "manual_demo" },
+    { "id": "pm-produce-debt-1", "partyId": "party-kadikoy-produce", "kind": "supplier", "entryType": "supplier_debt", "deltaMinor": 138000, "effectiveDate": "2026-10-08", "reference": "DEMO-ALI-219", "description": "Günlük sebze teslimatı · örnek borç", "source": "manual_demo" },
+    { "id": "pm-butcher-debt-1", "partyId": "party-local-butcher", "kind": "supplier", "entryType": "supplier_debt", "deltaMinor": 325000, "effectiveDate": "2026-10-09", "reference": "DEMO-ALI-223", "description": "Et ürünü teslimatı · örnek borç", "source": "manual_demo" }
   ],
   "stockMovements": [
     { "id": "sm-flour-open", "ingredientId": "flour", "delta": 20000, "source": "opening_demo" },

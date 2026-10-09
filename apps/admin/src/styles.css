@@ -2473,6 +2473,49 @@ td.strong {
   margin: 8px 0 10px;
 }
 
+.cari-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.cari-kpi { min-width: 0; padding: 18px 20px; display: grid; gap: 8px; }
+.cari-kpi > span { color: #717182; font-size: 10px; font-weight: 750; letter-spacing: .08em; }
+.cari-kpi > strong { color: #29263a; font-size: clamp(19px, 2.1vw, 27px); letter-spacing: -.04em; }
+.cari-kpi > small { color: #777783; line-height: 1.45; }
+.cari-recent-card { display: grid; grid-template-columns: minmax(210px, .7fr) 1.3fr; gap: 22px; padding: 18px 20px; margin-bottom: 16px; }
+.cari-recent-card h2 { margin-top: 6px; line-height: 1.4; }
+.cari-recent-list { display: grid; }
+.cari-recent-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 0; border-bottom: 1px solid #f0eff3; }
+.cari-recent-row:last-child { border-bottom: 0; }
+.cari-recent-row > div { display: grid; gap: 4px; }
+.cari-recent-row small { color: #777783; }
+.cari-amount-positive { color: #385f4d; white-space: nowrap; }
+.cari-amount-negative { color: #8a5b38; white-space: nowrap; }
+.cari-workspace { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); align-items: start; gap: 16px; margin-bottom: 16px; }
+.cari-list-card { min-width: 0; overflow: hidden; }
+.cari-record-count { color: #777783; font-size: 12px; }
+.cari-list-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; padding: 0 20px 14px; }
+.cari-search { display: grid; flex: 1; min-width: 180px; gap: 6px; color: #596273; font-size: 12px; }
+.cari-search input { height: 38px; border: 1px solid #d7dbe2; border-radius: 8px; padding: 8px 10px; background: #fff; font: inherit; }
+.cari-list-tools .cari-check { display: flex; align-items: center; gap: 7px; color: #596273; font-size: 12px; }
+.cari-list-tools .cari-check input { width: 15px; height: 15px; }
+.cari-party-select { display: grid; gap: 5px; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; }
+.cari-party-select strong { color: #303044; }
+.cari-party-select small { color: #777783; }
+.cari-row-selected { background: #f7f5ff; }
+.cari-empty { padding: 18px 20px; color: #777783; }
+.cari-create-card h2 { margin: 5px 0 6px; }
+.cari-create-card > .card-note { margin-bottom: 5px; }
+.cari-form textarea { width: 100%; border: 1px solid #d7dbe2; border-radius: 8px; padding: 8px 10px; background: #fff; color: #1f2937; font: inherit; resize: vertical; }
+.cari-form .cari-wide-field { flex: 1 0 100%; }
+.cari-disabled-hint { display: block; margin-top: 9px; color: #945e48; font-size: 12px; line-height: 1.5; }
+.cari-balance-strip { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.cari-balance-strip > div { display: grid; gap: 6px; min-width: 190px; padding: 12px 14px; border: 1px solid #eceaf3; border-radius: 10px; background: #fbfaff; }
+.cari-balance-strip small { color: #777783; font-size: 10px; font-weight: 750; letter-spacing: .06em; }
+.cari-balance-strip strong { color: #2f2b43; font-size: 18px; }
+.cari-entry-form { align-items: end; padding: 18px; border: 1px solid #eae7f2; border-radius: 12px; background: #fbfaff; }
+.cari-entry-form label { flex: 1 1 210px; }
+.cari-entry-form .primary-button { min-height: 39px; }
+.cari-statement .cari-form input { min-height: 38px; }
+@media (max-width: 960px) { .cari-workspace { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .cari-summary-grid { grid-template-columns: 1fr; } .cari-recent-card { grid-template-columns: 1fr; } .cari-recent-row { align-items: start; } }
+
 .inventory-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
 .inventory-toolbar a { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e7e7eb; border-radius: 8px; padding: 9px 12px; color: #61558f; font-size: 12px; text-decoration: none; }
 .inventory-toolbar a:hover { border-color: #b9adee; background: #fbfaff; }

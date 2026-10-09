@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": 10,
+  "catalogVersion": 12,
   "definitions": [
     { "key": "catalog.products", "name": "Ürün ve Menü", "category": "Menü", "description": "Ürünleri, kategorileri ve menü yayınlarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "book-open" },
     { "key": "catalog.menus", "name": "Menü Yönetimi", "category": "Menü", "description": "Menüye özel bölümler oluşturun, katalog ürünlerini yeniden kullanın ve seçili şubede tek menüyü yayına alın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products"], "disableWithParent": true, "icon": "book-open" },
@@ -14,6 +14,7 @@
     { "key": "branches.tables", "name": "Masa Servisi", "category": "Operasyon", "description": "Masa kartlarını ve masaya bağlı açık adisyonları yönetin. Masa kapanınca genel adisyon akışı çalışmaya devam eder.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["sales.monitoring"], "icon": "layout-grid" },
     { "key": "service.waiters", "name": "Garson Ataması", "category": "Operasyon", "description": "Masa adisyonlarına isteğe bağlı garson atayın. Masa servisi kapanınca bu tercih de otomatik kapanır; geçmiş atamalar okunur.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["branches.tables"], "disableWithParent": true, "icon": "users-round" },
     { "key": "staff.records", "name": "Personel Kayıtları", "category": "Operasyon", "description": "Şube kapsamındaki personel kartlarını bölüm ve görev bazında yönetin. Bu modül vardiya, bordro ve uygulama erişim yetkisi vermez.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "users-round" },
+    { "key": "cari.management", "name": "Cari Hesap Yönetimi", "category": "Cari Yönetimi", "description": "Müşteri ve tedarikçi carilerini tek ekrandan yönetin; yönetici tarafından manuel kart ve hareket girişi yapın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "contact-round" },
     { "key": "kitchen.monitoring", "name": "Mutfak İzleme", "category": "Operasyon", "description": "Hazırlık ve gecikme durumunu görün.", "scopeType": "branch", "availability": "prototype", "dependencies": ["sales.monitoring"], "icon": "chef-hat" },
     { "key": "inventory.items", "name": "Stok Takibi", "category": "Stok ve Tedarik", "description": "Hammadde kartı, stok hareketi ve mevcut miktarı yönetin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "boxes" },
     { "key": "inventory.recipes", "name": "Reçete", "category": "Stok ve Tedarik", "description": "Katalog ürününe bağlı, sürümlü hammadde reçeteleri yönetin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products", "inventory.items"], "disableWithParent": true, "icon": "notebook-tabs" },

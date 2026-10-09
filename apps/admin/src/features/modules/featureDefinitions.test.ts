@@ -3,7 +3,7 @@ import { featureCatalogVersion, featureDefinitions } from "./featureDefinitions"
 
 describe("paylaşılan modül sözleşmesi", () => {
   it("sürümü, tekil anahtarları ve geçerli bağımlılıkları korur", () => {
-    expect(featureCatalogVersion).toBe(9);
+    expect(featureCatalogVersion).toBe(12);
     const keys = featureDefinitions.map((definition) => definition.key);
     expect(keys.length).toBeGreaterThan(0);
     expect(new Set(keys).size).toBe(keys.length);

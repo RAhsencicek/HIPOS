@@ -3,6 +3,7 @@ import {
   Boxes,
   ChartNoAxesCombined,
   ChefHat,
+  ContactRound,
   HeartHandshake,
   Landmark,
   LayoutDashboard,
@@ -43,6 +44,7 @@ const iconMap: Record<string, LucideIcon> = {
   "notebook-tabs": NotebookTabs,
   truck: Truck,
   "heart-handshake": HeartHandshake,
+  "contact-round": ContactRound,
   "plug-zap": PlugZap,
 };
 

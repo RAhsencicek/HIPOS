@@ -75,7 +75,9 @@ if (storage == "postgres")
     serviceReady = salesReady && !(await serviceDb.Database.GetPendingMigrationsAsync()).Any();
     var inventoryDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
     inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
+    featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
+    if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
     featureRuntime.PaymentSimulatorReady = salesReady;

@@ -80,9 +80,9 @@ export async function verifyMenuPanel({ browser, uiBase, request, single, single
   await page.getByRole("button", { name: "Özel başlık ekle" }).click();
   await page.getByRole("button", { name: /Ürün seç/ }).click();
   await page.getByLabel("Ürün kataloğunda ara").fill("Pizza");
-  await page.getByRole("checkbox", { name: /Karışık Pizza/ }).check();
+  await page.getByRole("button", { name: /Karışık Pizza/ }).click();
   await page.getByLabel("Ürün kataloğunda ara").fill("Cheesecake");
-  await page.getByRole("checkbox", { name: /San Sebastian Cheesecake/ }).check();
+  await page.getByRole("button", { name: /San Sebastian Cheesecake/ }).click();
   await page.getByRole("button", { name: "Seçimi tamamla" }).click();
   await page.getByRole("button", { name: "San Sebastian Cheesecake ürününü yukarı taşı" }).click();
   await page.getByRole("button", { name: "Değişiklikleri kaydet" }).click();

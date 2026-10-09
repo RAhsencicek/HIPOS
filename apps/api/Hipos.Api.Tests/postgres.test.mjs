@@ -187,6 +187,12 @@ test(
           env,
         },
       );
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO modules.branch_feature_states
+          (firm_id,branch_id,feature_key,desired_enabled,effective_for_new_work,lifecycle,in_flight_work_count,version,updated_at)
+         VALUES ('${single}','${singleBranch}','cari.customers',true,true,'ready',0,3,'2026-10-08T10:00:00Z'),
+                ('${single}','${singleBranch}','cari.suppliers',false,false,'disabled',0,2,'2026-10-08T11:00:00Z');`]);
       await startApi();
       const catalogPath = (firmId, branchId) =>
         `/api/v1/firms/${firmId}/catalog/products${branchId ? `?branchId=${branchId}` : ""}`;
@@ -259,6 +265,17 @@ test(
       );
       await execFile(
         "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "20261008100143_InitCari", "--project", project, "--context", "CariDbContext"],
+        { cwd: repo, env },
+      );
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO cari.parties (id,firm_id,branch_id,name,types,is_active,version,updated_at)
+         VALUES ('legacy-party-preserved','${single}','${singleBranch}','Önceki Cari',ARRAY['customer'],true,1,'2026-10-08T09:00:00Z');
+         INSERT INTO cari.movements (id,firm_id,branch_id,party_id,kind,delta_minor,currency,description,source,actor,created_at)
+         VALUES ('legacy-movement-preserved','${single}','${singleBranch}','legacy-party-preserved','customer',7250,'TRY','Migration öncesi kayıt','demo_seed','demo-seed','2026-10-08T22:00:00Z');`]);
+      await execFile(
+        "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "CariDbContext"],
         { cwd: repo, env },
       );
@@ -292,7 +309,12 @@ test(
       assert.equal(preservedEmployee.name, "Önceki Garson");
       assert.equal(preservedEmployee.department, "service");
       assert.equal(preservedEmployee.jobTitle, "Garson");
-      assert.deepEqual((await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items, []);
+      const migratedCari = await request(cariPath(single, singleBranch), "GET", undefined, "manager-single");
+      assert.equal(migratedCari.data.items.length, 1);
+      assert.equal(migratedCari.data.items[0].movements[0].entryType, "legacy_manual");
+      assert.equal(migratedCari.data.items[0].movements[0].effectiveDate, "2026-10-09");
+      assert.equal(migratedCari.data.items[0].movements[0].source, "manual");
+      assert.equal(migratedCari.data.items[0].customerBalanceMinor, 7250);
       assert.equal((await request(cariPath(single, singleBranch))).status, 403);
       const newCari = await request(cariPath(single, singleBranch), "POST", {
         name: "Test Karma Cari", types: ["customer", "supplier"],
@@ -305,6 +327,7 @@ test(
         deltaMinor: 30000, description: "Test alacak", expectedVersion: 1 };
       assert.equal((await request(movementPath, "POST", firstCariMovement, "pos-single")).status, 403);
       assert.equal((await request(movementPath, "POST", firstCariMovement, "manager-single")).status, 201);
+      assert.equal((await request(movementPath, "POST", firstCariMovement, "manager-single")).data.entryType, "legacy_manual");
       assert.equal((await request(movementPath, "POST", firstCariMovement, "manager-single")).status, 200);
       assert.equal((await request(movementPath, "POST", { ...firstCariMovement, deltaMinor: 20000 }, "manager-single")).data.code,
         "MOVEMENT_ID_CONFLICT");
@@ -315,6 +338,7 @@ test(
       const cariAfter = await request(`${cariPath(single, singleBranch)}/${cariId}`, "GET", undefined, "manager-single");
       assert.equal(cariAfter.data.customerBalanceMinor, 30000);
       assert.equal(cariAfter.data.supplierBalanceMinor, 50000);
+      assert.equal(cariAfter.data.movements[0].source, "manual");
       assert.equal(cariAfter.data.version, 3);
       const businessDay = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Istanbul",
         year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -347,6 +371,73 @@ test(
       assert.equal((await request(movementPath, "POST", { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa14",
         kind: "customer", deltaMinor: 1000, description: "Pasif kart testi", expectedVersion: 4 }, "manager-single")).data.code,
         "CARI_TYPE_UNAVAILABLE");
+
+      const semanticParty = await request(cariPath(single, singleBranch), "POST", {
+        name: "Kuzey Ofis Catering", types: ["customer"], phone: "+90 555 010 30 01",
+        email: "ofis@kuzey.example", note: "Haftalık öğle yemeği",
+      }, "manager-single");
+      assert.equal(semanticParty.status, 201);
+      assert.equal(semanticParty.data.phone, "+90 555 010 30 01");
+      const semanticMovementPath = `${cariPath(single, singleBranch)}/${semanticParty.data.id}/movements`;
+      const charge = { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21", kind: "customer",
+        entryType: "customer_charge", amountMinor: 12500, description: "Öğle yemeği hesabı",
+        effectiveDate: businessDay, reference: "AD-205", expectedVersion: 1 };
+      assert.equal((await request(semanticMovementPath, "POST", charge, "manager-single")).status, 201);
+      assert.equal((await request(semanticMovementPath, "POST", charge, "manager-single")).status, 200);
+      const collection = { requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22", kind: "customer",
+        entryType: "customer_collection", amountMinor: 2500, description: "Kısmi tahsilat elle kaydedildi",
+        effectiveDate: businessDay, reference: "TAH-12", expectedVersion: 2 };
+      assert.equal((await request(semanticMovementPath, "POST", collection, "manager-single")).data.deltaMinor, -2500);
+      assert.equal((await request(semanticMovementPath, "POST", { ...collection, amountMinor: 2000 }, "manager-single")).data.code,
+        "MOVEMENT_ID_CONFLICT");
+      assert.equal((await request(semanticMovementPath, "POST", { ...collection, requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa23",
+        kind: "supplier", expectedVersion: 3 }, "manager-single")).data.code, "INVALID_CARI_MOVEMENT");
+      const semanticRead = await request(`${cariPath(single, singleBranch)}/${semanticParty.data.id}`, "GET", undefined, "manager-single");
+      assert.equal(semanticRead.data.customerBalanceMinor, 10000);
+      assert.equal(semanticRead.data.movements[0].entryType, "customer_charge");
+      assert.equal(semanticRead.data.movements[0].reference, "AD-205");
+      const summary = await request(`${cariPath(single, singleBranch)}/summary`, "GET", undefined, "manager-single");
+      assert.equal(summary.data.source, "postgres");
+      assert.equal(summary.data.customerReceivableMinor, 47250);
+
+      const featureSettingsPath = `/api/v1/firms/${single}/branches/${singleBranch}/features`;
+      const cariFeatures = (await request(featureSettingsPath, "GET", undefined, "manager-single")).data;
+      const cariFeature = cariFeatures.find((row) => row.key === "cari.management");
+      assert.equal(cariFeature.effectiveForNewWork, true);
+      assert.equal(cariFeatures.some((row) => row.key === "cari.customers" || row.key === "cari.suppliers"), false);
+      const migratedCariFeature = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT desired_enabled::text||','||effective_for_new_work::text FROM modules.branch_feature_states WHERE firm_id='${single}' AND branch_id='${singleBranch}' AND feature_key='cari.management'`]);
+      assert.equal(migratedCariFeature.stdout.trim(), "true,true");
+      const disabledCariFeature = await request(`${featureSettingsPath}/cari.management`, "PUT", {
+        desiredEnabled: false, expectedVersion: cariFeature.version,
+      }, "manager-single");
+      assert.equal(disabledCariFeature.status, 200);
+      assert.equal((await request(`${cariPath(single, singleBranch)}/${semanticParty.data.id}`, "GET", undefined, "manager-single")).status, 200);
+      assert.equal((await request(semanticMovementPath, "POST", { ...collection,
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa24", expectedVersion: 3 }, "manager-single")).data.code, "FEATURE_DISABLED");
+      const partyEditWhileOff = await request(`${cariPath(single, singleBranch)}/${semanticParty.data.id}`, "PUT", {
+        name: "Değişmemeli", types: ["customer", "supplier"], isActive: true, expectedVersion: 3,
+      }, "manager-single");
+      assert.equal(partyEditWhileOff.data.code, "FEATURE_DISABLED");
+      const partyWhileOff = await request(cariPath(single, singleBranch), "POST", {
+        name: "Kapalı Modül Testi", types: ["supplier"],
+      }, "manager-single");
+      assert.equal(partyWhileOff.data.code, "FEATURE_DISABLED");
+      const reenablingCari = await request(`${featureSettingsPath}/cari.management`, "PUT", {
+        desiredEnabled: true, expectedVersion: disabledCariFeature.data.version,
+      }, "manager-single");
+      assert.equal(reenablingCari.status, 200);
+      assert.equal(reenablingCari.data.effectiveForNewWork, true);
+      const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
+      const seededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
+      assert.equal(seededCariCounts.stdout.trim(), "11,20");
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
+      const reseededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
+      assert.equal(reseededCariCounts.stdout.trim(), "11,20");
       assert.deepEqual((await request(catalogPath(firm, moda))).data.items, []);
       await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
@@ -606,9 +697,19 @@ test(
       const cariPage = await browser.newPage();
       page.setDefaultTimeout(5000);
       cariPage.setDefaultTimeout(5000);
+      await cariPage.goto(`${uiBase}/admin/customers/customers`);
+      await expect(cariPage.getByRole("heading", { name: "Müşteriler", level: 1 })).toBeVisible();
+      await cariPage.getByLabel("Ad / unvan").fill("Panel Filtre Dışı Tedarikçi");
+      await cariPage.locator(".cari-create-card").getByLabel("Hesap türü").selectOption("supplier");
+      await cariPage.getByRole("button", { name: "Cari kartı kaydet" }).click();
+      await expect(cariPage.getByText(/Cari Hesaplar listesine geçerek bulabilirsiniz/)).toBeVisible();
+      const crossFilterParty = (await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items
+        .find((party) => party.name === "Panel Filtre Dışı Tedarikçi");
+      assert.deepEqual(crossFilterParty.types, ["supplier"]);
       await cariPage.goto(`${uiBase}/admin/customers/accounts`);
       await expect(cariPage.getByRole("heading", { name: "Cari hesaplar", level: 1 })).toBeVisible();
       await cariPage.getByLabel("Ad / unvan").fill("Panel Cari Testi");
+      await cariPage.locator(".cari-create-card").getByLabel("Hesap türü").selectOption("both");
       await cariPage.getByRole("button", { name: "Cari kartı kaydet" }).click();
       await expect(cariPage.getByText("Cari kartı PostgreSQL'e kaydedildi.")).toBeVisible();
       await cariPage.getByLabel("Tutar (₺)").fill("125.50");
@@ -616,10 +717,30 @@ test(
       await cariPage.getByRole("button", { name: "Hareketi kaydet" }).click();
       await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Testi" })).toContainText("125,50");
       await expect(cariPage.locator(".cari-statement")).toContainText("125,50");
+      await cariPage.getByLabel("İşlem türü").selectOption("customer_collection");
+      await cariPage.getByLabel("Tutar (₺)").fill("25.50");
+      await cariPage.getByLabel("Açıklama").fill("Panel test tahsilat kaydı");
+      await cariPage.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Testi" })).toContainText("100,00");
+      const movementAccountType = cariPage.locator(".cari-entry-form").getByLabel("Hesap türü");
+      await movementAccountType.selectOption("supplier");
+      await cariPage.getByLabel("İşlem türü").selectOption("supplier_debt");
+      await cariPage.getByLabel("Tutar (₺)").fill("450.00");
+      await cariPage.getByLabel("Açıklama").fill("Panel tedarikçi borcu");
+      await cariPage.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(cariPage.locator(".cari-balance-strip")).toContainText("450,00");
+      await movementAccountType.selectOption("supplier");
+      await cariPage.getByLabel("İşlem türü").selectOption("supplier_payment");
+      await cariPage.getByLabel("Tutar (₺)").fill("100.00");
+      await cariPage.getByLabel("Açıklama").fill("Panel tedarikçi ödemesi");
+      await cariPage.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(cariPage.locator(".cari-balance-strip")).toContainText("350,00");
+      await expect(cariPage.locator(".cari-balance-strip")).toContainText("100,00");
       await cariPage.getByLabel("Başlangıç tarihi").fill(tomorrow);
       await cariPage.getByLabel("Bitiş tarihi").fill(tomorrow);
       const statementRow = cariPage.locator(".cari-statement").getByRole("row").filter({ hasText: "Müşteri alacağı" });
-      await expect(statementRow).toContainText("125,50");
+      await expect(statementRow).toContainText("100,00");
+      await expect(cariPage.locator(".cari-statement").getByRole("row").filter({ hasText: "Tedarikçi borcu" })).toContainText("350,00");
       await expect(cariPage.locator(".cari-statement")).toContainText("Bu tarihlerde hareket yok");
       await cariPage.getByRole("button", { name: "Cari kartını düzenle" }).click();
       await cariPage.getByLabel("Unvan", { exact: true }).fill("Panel Cari Güncel");
@@ -627,8 +748,9 @@ test(
       await cariPage.getByRole("button", { name: "Kart değişikliklerini kaydet" }).click();
       await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("Pasif");
       await cariPage.reload();
+      await cariPage.getByLabel("Pasifleri göster").check();
       await expect(cariPage.getByText("Panel Cari Güncel").first()).toBeVisible();
-      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("125,50");
+      await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("100,00");
       await cariPage.close();
       await page.goto(`${uiBase}/admin/catalog/categories`);
       await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
@@ -809,7 +931,7 @@ test(
         "DEPENDENT_ACTIVE",
       );
       assert.equal(
-        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => entry.actor !== "system:service-ready").length,
+        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => !entry.actor.startsWith("system:")).length,
         4,
       );
 
@@ -828,7 +950,7 @@ test(
         2,
       );
       assert.equal(
-        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => entry.actor !== "system:service-ready").length,
+        (await request(`${featurePath(moda)}/audit`)).data.filter((entry) => !entry.actor.startsWith("system:")).length,
         4,
       );
       const migrationCount = await runPg("psql", [
@@ -851,7 +973,7 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
-      assert.equal(catalogMigrationCount.stdout.trim(), "6");
+      assert.equal(catalogMigrationCount.stdout.trim(), "7");
       const salesMigrationCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -1421,7 +1543,7 @@ test(
       await managerPage.goto(`${uiBase}/admin/sales`);
       await managerPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
       await managerPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
-      await managerPage.getByRole("heading", { name: "Canlı sipariş görünümü" }).waitFor();
+      await managerPage.getByRole("heading", { name: "Satış Özeti" }).waitFor();
       const paidRow = managerPage.getByRole("row").filter({ hasText: "Panelden Pizza" }).first();
       await paidRow.waitFor();
       await paidRow.getByText("Ödendi · simüle").waitFor();
@@ -1450,7 +1572,7 @@ test(
     } catch (error) {
       const pgOutput = await readFile(log, "utf8").catch(() => "");
       throw new Error(
-        `${error.message}\nAPI (son bölüm): ${apiOutput.slice(-12000)}\nUI: ${uiOutput}\nPostgreSQL (son bölüm): ${pgOutput.slice(-4000)}`,
+        `${error.stack ?? error.message}\nAPI (son bölüm): ${apiOutput.slice(-12000)}\nUI: ${uiOutput}\nPostgreSQL (son bölüm): ${pgOutput.slice(-4000)}`,
       );
     } finally {
       await browser?.close();
