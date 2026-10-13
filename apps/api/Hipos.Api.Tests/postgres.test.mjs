@@ -794,6 +794,8 @@ test(
       cariPage.setDefaultTimeout(5000);
       cashPage.setDefaultTimeout(5000);
       await cashPage.goto(`${uiBase}/admin/cash/summary`);
+      await expect(cashPage.locator('.nav-children a[href="/admin/cash/summary"]')).not.toHaveClass(/nav-future/);
+      await expect(cashPage.locator('.nav-children a[href="/admin/cash/refunds"]')).toHaveClass(/nav-future/);
       await expect(cashPage.locator(".feature-stage-notice")).toContainText("Çalışıyor");
       await expect(cashPage.locator(".feature-stage-notice")).toContainText("POS/kart tahsilatı");
       await expect(cashPage.getByRole("heading", { name: "Kasa özeti", level: 1 })).toBeVisible();

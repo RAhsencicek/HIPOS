@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { featurePresentation } from "./featurePresentation";
+import { featurePresentation, isFutureSidebarItem } from "./featurePresentation";
 
 const mockSources = {
   catalogSource: "mock" as const,
@@ -27,5 +27,14 @@ describe("alt ekran durum sözleşmesi", () => {
 
     expect(presentation.stage).toBe("future");
     expect(presentation.label).toBe("Gelecek planı");
+  });
+
+  it("yan menüde etkin kasa ekranlarını kırmızı gelecek rengi dışında tutar", () => {
+    const httpSources = { ...mockSources, cashSource: "http" as const };
+
+    expect(isFutureSidebarItem("cash", "movements", httpSources)).toBe(false);
+    expect(isFutureSidebarItem("cash", "summary", httpSources)).toBe(false);
+    expect(isFutureSidebarItem("cash", "refunds", httpSources)).toBe(true);
+    expect(isFutureSidebarItem("cash", "movements", mockSources)).toBe(true);
   });
 });

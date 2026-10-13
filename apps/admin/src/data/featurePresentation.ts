@@ -8,6 +8,15 @@ export type FeaturePresentation = {
 
 type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http"; inventorySource?: "mock" | "http"; cashSource?: "mock" | "http" };
 
+const configuredSources: Sources = {
+  catalogSource: import.meta.env.VITE_CATALOG_PROVIDER === "http" ? "http" : "mock",
+  featureSource: import.meta.env.VITE_FEATURE_PROVIDER === "http" ? "http" : "mock",
+  cariSource: import.meta.env.VITE_CARI_PROVIDER === "http" ? "http" : "mock",
+  serviceSource: import.meta.env.VITE_SERVICE_PROVIDER === "http" ? "http" : "mock",
+  inventorySource: import.meta.env.VITE_INVENTORY_PROVIDER === "http" ? "http" : "mock",
+  cashSource: import.meta.env.VITE_CASH_PROVIDER === "http" ? "http" : "mock",
+};
+
 // Alt ekranların görünür olgunluğu. Burada bulunmayan yol gelecekteki ürün planıdır.
 const demoRoutes = new Set([
   "overview/daily",
@@ -91,7 +100,7 @@ export function featurePresentation(section: string, item: string, sources: Sour
   return { stage: "future", label: "Gelecek planı", description: routeDescriptions[key] ?? futureBySection[section] ?? "Bu özellik ürün yol haritasındadır; bu sürümde işlem veya güvenilir veri sunmaz." };
 }
 
-export function isFutureSidebarItem(section: string, item: string): boolean {
-  const stage = featurePresentation(section, item, { catalogSource: "mock", featureSource: "mock" }).stage;
+export function isFutureSidebarItem(section: string, item: string, sources: Sources = configuredSources): boolean {
+  const stage = featurePresentation(section, item, sources).stage;
   return stage === "future" || stage === "inactive";
 }
