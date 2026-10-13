@@ -24,6 +24,7 @@
     "demo:seed:menus": "node scripts/seed-menus.mjs",
     "demo:seed:cari": "node scripts/seed-demo.mjs --cari",
     "demo:seed:service": "node scripts/seed-demo.mjs --service",
-    "demo:seed:inventory": "node scripts/seed-demo.mjs --inventory"
+    "demo:seed:inventory": "node scripts/seed-demo.mjs --inventory",
+    "demo:seed:cash": "node scripts/seed-demo.mjs --cash"
   }
 }

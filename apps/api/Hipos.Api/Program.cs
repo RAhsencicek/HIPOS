@@ -4,6 +4,7 @@ using Hipos.Api.Sales;
 using Hipos.Api.Cari;
 using Hipos.Api.Service;
 using Hipos.Api.Inventory;
+using Hipos.Api.Cash;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -32,6 +33,8 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "service")));
     builder.Services.AddDbContext<InventoryDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
+    builder.Services.AddDbContext<CashDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "cash")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -60,6 +63,7 @@ var salesReady = false;
 var cariReady = false;
 var serviceReady = false;
 var inventoryReady = false;
+var cashReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -75,6 +79,8 @@ if (storage == "postgres")
     serviceReady = salesReady && !(await serviceDb.Database.GetPendingMigrationsAsync()).Any();
     var inventoryDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
     inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
+    var cashDb = scope.ServiceProvider.GetRequiredService<CashDbContext>();
+    cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -83,11 +89,14 @@ if (storage == "postgres")
     featureRuntime.PaymentSimulatorReady = salesReady;
     featureRuntime.ServiceTablesReady = serviceReady;
     featureRuntime.InventoryReady = inventoryReady;
+    featureRuntime.CashReady = cashReady;
+    if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");
 if (storage == "postgres") app.MapCariEndpoints(cariReady);
 if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
 if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
+if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));

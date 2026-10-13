@@ -6,7 +6,7 @@ export type FeaturePresentation = {
   description: string;
 };
 
-type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http"; inventorySource?: "mock" | "http" };
+type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http"; inventorySource?: "mock" | "http"; cashSource?: "mock" | "http" };
 
 // Alt ekranların görünür olgunluğu. Burada bulunmayan yol gelecekteki ürün planıdır.
 const demoRoutes = new Set([
@@ -68,6 +68,9 @@ export function featurePresentation(section: string, item: string, sources: Sour
     return { stage: "working", label: "Çalışıyor", description: "Menü taslağı, özel bölüm, ikonlu ürün seçimi ve şubede tek yayındaki menü PostgreSQL'e bağlıdır. QR ve web yayını sonraki ürün aşamasıdır." };
   if (key === "overview/daily")
     return { stage: "demo", label: "Karma kaynak görünümü", description: "Satış, masa ve kritik stok kartları sağlayıcı açıksa yerel API'den; diğer alanlar örnek işletme verisinden gelir. Her kart kendi veri kaynağını belirtir." };
+  if (section === "cash" && sources.cashSource === "http" &&
+    ["summary", "movements", "shifts", "opening-closing"].includes(item))
+    return { stage: "working", label: "Çalışıyor", description: "Kasa vardiyası, elle girilen nakit hareketleri ve fiziksel kapanış sayımı şube kapsamlı PostgreSQL API'sine bağlıdır. POS/kart tahsilatı ve mali muhasebe entegrasyonu yoktur." };
   if (section === "inventory" && sources.inventorySource === "http" &&
     ["summary", "critical", "ingredients", "movements", "counts", "recipes"].includes(item))
     return { stage: "working", label: "Çalışıyor", description: "Hammadde, reçete sürümleri, hareket defteri ve sayım akışı kalıcı inventory PostgreSQL şemasına bağlıdır. Yeni işlemler şube modül durumuna göre açılır; bu geliştirme önizlemesi üretim yetkilendirmesi değildir." };

@@ -46,7 +46,8 @@ public sealed class InMemoryFeatureStore : IFeatureStore
             var setupPreview = branchId == ModaBranch && definition.Key == "inventory.items";
             var providerPreview = branchId == ModaBranch && definition.Key == "integrations.delivery";
             var drainingPreview = branchId == AtasehirBranch && definition.Key == "kitchen.monitoring";
-            var desired = InitiallyDesired.Contains(definition.Key) || setupPreview || providerPreview;
+            var desired = InitiallyDesired.Contains(definition.Key) || setupPreview || providerPreview ||
+                branchId == SingleBranch && definition.Key == "cash.management";
             var lifecycle = drainingPreview ? "draining" : setupPreview ? "setup_required" :
                 providerPreview ? "provider_pending" : desired ? "ready" : "disabled";
             var blockers = FeatureRules.Blockers(definition, lifecycle);

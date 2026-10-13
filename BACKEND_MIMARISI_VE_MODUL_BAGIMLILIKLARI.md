@@ -30,7 +30,8 @@ API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm w
 | Personel ve Masa Servisi | `service` | Şube kapsamlı personel, masa, personel-adisyon bağı ve audit | `staff.records` personel kartını; `branches.tables`/`service.waiters` masa-servis bağını yönetir. Panel bölüm/görev kartı CRUD ve ayrı çalışan ızgaraları sunar. Bordro, puantaj, POS kimliği yok. |
 | Cari | `cari` | Müşteri/tedarikçi kartı ve iletişimi, semantik hareket defteri, ekstre, audit | PostgreSQL'de kalıcı; müşteri ve tedarikçi capability'leri ayrı. Tahsilat/ödeme elle girilen işletme kaydıdır; banka/POS/fatura değildir. |
 | Reçete ve stok | `inventory` | Depo, hammadde/eşik, değiştirilemez hareket defteri, reçete sürümleri, sayım snapshot/onayı ve denetim | `InventoryDbContext` migration, API, demo seed ve PostgreSQL kabul testi var. İlk örnek tek şube/tek depo; depo kimliği hareket/sayım kapsamındadır. Satıştan otomatik tüketim ve satın alma belgesi yok. |
-| Mutfak/KDS, satın alma, kasa, finans, rapor | henüz yok | İlgili iş verileri | Örnek/planlanan alanlar; çalışan backend olarak sunulmaz. |
+| Kasa yönetimi | `cash` | Kasa kaydı, vardiya, değiştirilemez nakit hareketi, fiziksel kapanış sayımı/farkı, POS olay kimliği zarfı ve audit | `cash.management` tek şube önizlemesinde migration/API/seed/panel ve PostgreSQL kabul testiyle çalışır. Manuel nakit defteridir; POS/kart tahsilatı, mali belge, gerçek auth/rol yoktur. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md). |
+| Mutfak/KDS, satın alma, finans, rapor | henüz yok | İlgili iş verileri | Örnek/planlanan alanlar; çalışan backend olarak sunulmaz. |
 
 ### Capability bağımlılıkları
 
@@ -82,6 +83,7 @@ Masa servisini kapatma, devam eden açık masa-adisyon bağlarını şu an `drai
 - **Satış → servis:** Servis modülü siparişi okuyup ayrı `service.assignments` kaydıyla masaya bağlar. Satış tablosunun sahibi satış modülüdür.
 - **Servis → garson:** Atama isteğe bağlı garson kimliği taşır; garson çalışma süresi takip edilmez.
 - **Satış → ödeme:** Mevcut ödeme simülatörü yalnız durum senaryosu yazar. Banka, nakit tahsilat, kasa veya mali belge oluşturmaz.
+- **Kasa → satış/POS:** Kasa ilk sürümde satış modülünden bağımsız manuel nakit vardiyasıdır. Simüle ödeme kasa kaydı üretmez. Gerçek POS olayları daha sonra sağlayıcı kimliği/idempotency ile bağlanmalıdır; kart tahsilatı fiziksel kasa nakdi değildir.
 - **Satış → stok:** Reçete/satış bağlantısı ve otomatik stok tüketim anı kararlaştırılmadı; bu aşamada stok azaltılmaz.
 - **Cari → finans/satın alma:** Müşteri alacağı ve tedarikçi borcu manuel cari hareketlerinden ayrı hesaplanır. Otomatik fatura/ödeme bağlantısı yoktur.
 - **Cari hareket semantiği:** `customer_charge/customer_collection` müşteri alacağını artırır/azaltır; `supplier_debt/supplier_payment` tedarikçi borcunu artırır/azaltır. Düzeltmeler ayrı hareket türüdür; eski imzalı hareketler `legacy_manual` olarak saklanır. Vade, fatura tahsisi, e-fatura, banka/kasa/POS tahsilatı ve raporlama yoktur.
@@ -99,16 +101,17 @@ Temel endpoint envanteri:
 - `/api/v1/firms/{firmId}/branches/{branchId}/caris...`: cari kart, hareket ve ekstre.
 - `/api/v1/firms/{firmId}/branches/{branchId}/service/...`: masa/garson listesi ve oluşturma, atama ve atamayı kapatma.
 - `/api/v1/firms/{firmId}/branches/{branchId}/inventory/...`: hammadde, hareket, reçete sürümü ve sayım/tekil onaylı düzeltme.
+- `/api/v1/firms/{firmId}/branches/{branchId}/cash/...`: kasa/shift özeti, hareket ve vardiya geçmişi, vardiya açma, manuel hareket ve fiziksel sayımla kapama. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md).
 
 İstek kapsamı her API’de sunucuda doğrulanmalıdır. Bugünkü aktör başlığı sahte/Development kimliğidir; gerçek üyelik ve rol modeli gelene kadar pilot işletmeye açılmaz. Ayrıntılı rotalar ilgili dilim belgelerinde ve kaynak kodda bulunur.
 
 ## Migration ve demo veri kaynağı
 
-EF migration context’leri: `FeatureDbContext` → `modules`, `CatalogDbContext` → `catalog`, `SalesDbContext` → `sales`, `CariDbContext` → `cari`, `ServiceDbContext` → `service`, `InventoryDbContext` → `inventory`. Inventory ürün kimlikleri katalog ürünlerine referans verir; hareket defteri ve reçete/sayım tablolarının sahibi envanter modülüdür. Service migration satış şemasındaki sipariş kimliğine referans verir; servis kayıtları satış kaydının sahibi olmaz.
+EF migration context’leri: `FeatureDbContext` → `modules`, `CatalogDbContext` → `catalog`, `SalesDbContext` → `sales`, `CariDbContext` → `cari`, `ServiceDbContext` → `service`, `InventoryDbContext` → `inventory`, `CashDbContext` → `cash`. Inventory ürün kimlikleri katalog ürünlerine referans verir; hareket defteri ve reçete/sayım tablolarının sahibi envanter modülüdür. Service migration satış şemasındaki sipariş kimliğine referans verir; servis kayıtları satış kaydının sahibi olmaz. Kasa hareketi kendi firması/şubesi/kasası/vardiyasına composite FK ile bağlanır; POS event identity alanları gelecekteki adaptörler için ayrılmıştır.
 
-`contracts/demo-single-branch.v1.json` tek şube demo kimliklerinin kaynağıdır. `npm run demo:check` sözleşme tutarlılığını denetler. `demo:seed`, `demo:seed:cari`, `demo:seed:service`, `demo:seed:inventory` yalnız `HIPOS_DEMO_DATABASE_URL` açıkça verilmiş yerel `hipos_features` veritabanına yazar. Inventory seed'inden önce catalog ve inventory migration’ları uygulanmalı, reçete ürünleri katalogda bulunmalıdır. Seed komutları var olan satırları değiştirmez.
+`contracts/demo-single-branch.v1.json` tek şube demo kimliklerinin kaynağıdır. `npm run demo:check` sözleşme tutarlılığını denetler. `demo:seed`, `demo:seed:cari`, `demo:seed:service`, `demo:seed:inventory`, `demo:seed:cash` yalnız `HIPOS_DEMO_DATABASE_URL` açıkça verilmiş yerel `hipos_features` veritabanına yazar. Inventory seed'inden önce catalog ve inventory migration’ları uygulanmalı, reçete ürünleri katalogda bulunmalıdır; kasa seed'inden önce `CashDbContext` migration'ı uygulanmalıdır. Seed komutları var olan satırları değiştirmez.
 
-Kurulum ve komutların güncel kopyası [README](README.md) içindedir. Elle masa denemesi [MASA_SERVISI_TEST](MASA_SERVISI_TEST.md), cari denemesi [CARI_MANUEL_TEST](CARI_MANUEL_TEST.md), inventory panel denemesi [STOK_REÇETE_SAYIM_MANUEL_TEST](STOK_REÇETE_SAYIM_MANUEL_TEST.md) içindedir. Inventory API kabulü geçici PostgreSQL entegrasyon testinde geçmiştir.
+Kurulum ve komutların güncel kopyası [README](README.md) içindedir. Elle masa denemesi [MASA_SERVISI_TEST](MASA_SERVISI_TEST.md), cari denemesi [CARI_MANUEL_TEST](CARI_MANUEL_TEST.md), inventory panel denemesi [STOK_REÇETE_SAYIM_MANUEL_TEST](STOK_REÇETE_SAYIM_MANUEL_TEST.md), kasa panel denemesi [KASA_MANUEL_TEST](KASA_MANUEL_TEST.md) içindedir. Inventory ve kasa API kabulü geçici PostgreSQL entegrasyon testinde doğrulanır.
 
 ## Yönetici başlangıç ekranı
 

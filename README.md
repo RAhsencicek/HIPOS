@@ -4,6 +4,12 @@ Restoran yönetim platformunun yönetim paneli ve modül davranışını doğrul
 
 ## Çalıştırma
 
+### macOS'ta çift tıklayarak başlatma
+
+Repo klasöründeki [`HIPOS-Baslat.command`](HIPOS-Baslat.command) dosyasına çift tıklayın. Script Docker Desktop'ı gerekirse açar; yerel PostgreSQL'i başlatır, altı veritabanı migration'ını uygular, demo seed'lerini (eksik kayıtları ekleyecek şekilde) çalıştırır ve PostgreSQL API'si, yönetim paneli ve geliştirme Test POS'u açar. Yönetim paneli otomatik tarayıcıda açılır. Durdurmak için başlatma Terminal penceresinde `Ctrl+C` kullanabilir veya [`HIPOS-Durdur.command`](HIPOS-Durdur.command) dosyasına çift tıklayabilirsiniz. Durdurma scripti HIPOS süreçlerini doğrulayarak kapatır ve varsayılan olarak yalnız HIPOS PostgreSQL konteynerini de durdurur; **veritabanı volume'unu silmez**. Önce neyi kapatacağını görmek için `./HIPOS-Durdur.command --dry-run`; veritabanı açık kalsın istiyorsanız `./HIPOS-Durdur.command --keep-db` çalıştırın.
+
+Gereksinimler: Docker Desktop, Node.js 22+, .NET 10 SDK ve `psql`. İlk çalıştırmada `node_modules` yoksa script `npm install` yapar. Seed komutları yalnız `127.0.0.1:5433/hipos_features` yerel geliştirme veritabanını kabul eder; kayıtları silmez veya mevcut demo kayıtlarını güncellemez. İlk açılış biraz zaman alabilir. Portlardan biri kullanımda ise script ikinci bir kopya açmak yerine durur; açık HIPOS süreçlerini kapatıp tekrar deneyin. Ayrıntılı elle çalıştırma adımları aşağıda duruyor.
+
 Yeni tek şubeli ürün odağı ve ilk üç uygulama dilimi: [İlk Üç Aşama](ILK_UC_ASAMA.md). Panel artık Mahalle Fırını tek şube örneğiyle açılır. Demo verisinin ürün, cari, reçete ve stok bağlantıları [ortak dosyada](contracts/demo-single-branch.v1.json) tanımlıdır. Cari yanında reçete, hammadde, stok hareketi ve onaylı sayım için PostgreSQL dilimi vardır; kapsamı ve sınırları aşağıda açıklanır.
 
 Backend teknolojileri, bağımlılık grafiği, şema sahipliği, modül kapatma davranışı ve gerçek/örnek/planlı sınırları için [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) ana referanstır. Diğer belgeler belirli bir dilimin test rehberi veya tarihsel ürün/UI kararıdır.
@@ -121,6 +127,19 @@ Yönetici ekranını deneyip doğrulamak için [Stok, Reçete ve Sayım elle tes
 
 Cari ekranını PostgreSQL'e bağlamak için panel komutuna `VITE_CARI_PROVIDER=http` ekleyin ve cari migration/seed adımlarını uygulayın. **Ayarlar → Modüller ve Özellikler** içindeki tek `Cari Hesap Yönetimi` seçeneği yönetici tarafından manuel kart/hareket yazımını açar veya kapatır. Kart türü Müşteri, Tedarikçi veya ikisi birden seçilebilir; türler ayrı capability değildir. Modül kapalıyken mevcut kartlar, hareketler, ekstre ve hareketlerden hesaplanan bakiyeler okunur kalır. Hareket kaynağı modeli manuel, entegrasyon, satış, satın alma, açılış bakiyesi ve düzeltme değerlerini ayırt eder; bu sürümde yalnız manuel hareket oluşturulur. Tahsilat/ödeme banka/POS hareketi veya fatura değildir; vadeli belge, ödeme dağıtımı, satın alma-stok bağlantısı ve gerçek oturum/yetki sonraki aşamalardır. Elle arayüz testi için [Cari test rehberi](CARI_MANUEL_TEST.md) ve [Cari Hesaplar MVP sözleşmesi](CARI_HESAPLAR_MVP.md) kullanın.
 
+## Kalıcı kasa vardiyası ve nakit defteri
+
+Kasa ilk sürümde tek şubeli işletmede POS olmadan elle işletilir. Önce migration ve kurgusal geçmişi seed edin:
+
+```bash
+HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CashDbContext
+HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:cash
+```
+
+API'yi yeniden başlatın. `HIPOS-Baslat.command` artık `VITE_CASH_PROVIDER=http` ile paneli kasa API'sine bağlar; elle panel başlatıyorsanız `VITE_CASH_PROVIDER=http VITE_FEATURE_PROVIDER=http npm run dev` kullanın. **Kasalar → Kasa Özeti** vardiya açma ve nakit akışını; **Kasa Hareketleri** değiştirilemez defteri; **Kasa Vardiyaları / Açılış-Kapanış** sayım ve farkı gösterir. Modüller içinde `Kasa Vardiyası ve Nakit Defteri` capability'si yönetilir. Kapanış farkında açıklama zorunludur. Modül kapalıyken geçmiş okunur ve açık vardiya güvenle kapatılabilir; yeni vardiya/hareket başlatılamaz.
+
+İki kapanmış geçmiş vardiya ve altı hareket kurgusal örnek veridir; yeni işlemler kalıcı PostgreSQL kayıtlarıdır. Ekranda POS entegrasyonu olmadığı açıkça belirtilir. Test ödeme simülatörü kasa bakiyesi oluşturmaz; kart/yemek kartı tahsilatı, adisyon kapama ve muhasebe bu ilk dilimin kapsamında değildir. Şema sağlayıcı ve harici POS olay kimliğini tanıyacak alanlara sahiptir; dış entegrasyon endpoint'i henüz etkin değildir. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md) ve [elle test rehberi](KASA_MANUEL_TEST.md).
+
 Migration **ayrı komutla** uygulanır; modül düğmesi migration veya tablo silme işlemi yapmaz. [compose.yaml](compose.yaml) yalnız yerel geliştirme içindir; örnek parolası üretimde kullanılmaz. Sunucu yalnız Development ortamında açılır; `X-Demo-Actor` başlığı gerçek kimlik doğrulaması değildir. Katalog, satış veya cari migration'ı eksikse ilgili API açık bir `503` döner. `VITE_SALES_PROVIDER` verilmezse yönetimdeki eski satış görünümü açıkça örnek veridir.
 
 Sunucu sözleşmesi ve HTTP testleri:
@@ -143,7 +162,7 @@ npm run test:db
 - Şube bazlı modül kataloğu ve bağımlılık gösteren açma/kapama önizlemesi
 - Kapalı modülde geçmiş okuması, yeni iş önizlemesini kapatma ve gerçek işlem olmadığına dair açık etiketler
 
-Varsayılan panel verileri örnektir. Modül seçimleri tarayıcı oturumunda, .NET bellek modunda sunucu belleğinde veya PostgreSQL modunda veritabanında tutulur. HTTP/PostgreSQL dilimleri katalog taslak/fiyat/ilk yayın, cari, masa servisi ve test POS sipariş/simüle ödeme kapsamlarını içerir; sınırlar için [backend belgesine](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) bakın. Sipariş ve simüle ödeme yalnız ayrı Test POS ekranından oluşturulur; yeniden yayın, gerçek ödeme ve dış sağlayıcı bağlantısı henüz yoktur.
+Varsayılan panel verileri örnektir. Modül seçimleri tarayıcı oturumunda, .NET bellek modunda sunucu belleğinde veya PostgreSQL modunda veritabanında tutulur. HTTP/PostgreSQL dilimleri katalog, cari, masa servisi, stok/reçete/sayım ve manuel kasa vardiyası/nakit defterini kapsar; sınırlar için [backend belgesine](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) bakın. Sipariş ve simüle ödeme yalnız ayrı Test POS ekranından oluşturulur; gerçek POS/kart tahsilatı, banka ve dış sağlayıcı bağlantısı henüz yoktur.
 
 Bu sürüm geliştirme prototipidir. Ekran kodu alan dosyalarına ayrıldı ve yollar `/admin` altında toplandı. Yönetici başlangıç ekranı API sağlayıcısı açıldığında açık adisyon ve masa özetlerini okur; mock modda bunları örnek diye etiketler. **Ürünler ve Menü**, **Cari**, **Satışlar**, **Masa Planı** ve **Stok/Reçete/Sayım** ilgili HTTP sağlayıcıları açıldığında PostgreSQL verisini kullanır; sağlayıcı kapalıysa ekran örnek gösterimdir. Gerçek kullanıcı girişi ve tam işletme operasyonları henüz yoktur. Katalogdaki `catalogState` sorgu parametresi yalnız mock durum önizlemesi içindir.
 

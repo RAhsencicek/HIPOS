@@ -11,39 +11,53 @@ function ScopeNotice({ ctx }: { ctx: ViewContext }) {
     <div className="card generic-empty">Bu alanın bağlı demo verisi yalnız Mahalle Fırını · Kadıköy Şubesi için hazırlandı. Çok şubeli senaryoda burada kalıcı cari, reçete veya stok kaydı yok.</div>;
 }
 
-export function CarilerDemoPage({ ctx, kind }: {
+export function CarilerDemoPage({ ctx, kind, view: requestedView }: {
   ctx: ViewContext;
   kind: "customer" | "supplier" | "all";
+  view?: "customers" | "accounts" | "history" | "suppliers";
 }) {
-  const title = kind === "customer" ? "Müşteriler" : kind === "supplier" ? "Tedarikçiler" : "Cari hesaplar";
+  const view = requestedView ?? (kind === "customer" ? "customers" : kind === "supplier" ? "suppliers" : "accounts");
+  const title = view === "history" ? "Müşteri geçmişi" : view === "customers" ? "Müşteriler" : view === "suppliers" ? "Tedarikçiler" : "Cari hesaplar";
   const parties = ctx.scenarioId === "single"
     ? singleDemo.parties.filter((party) => kind === "all" || party.types.includes(kind))
     : [];
   const ids = new Set(parties.map((party) => party.id));
   const movements = singleDemo.partyMovements.filter((movement) => ids.has(movement.partyId));
   return <>
-    <PageHeading eyebrow="CARİ VE MÜŞTERİLER" title={title}
-      description="Müşteri ve tedarikçi kartları ile örnek hareketlerden hesaplanan bakiyeler."
+    <PageHeading eyebrow={view === "history" ? "MÜŞTERİLER" : "CARİ VE MÜŞTERİLER"} title={title}
+      description={view === "customers" ? "Örnek müşteri kartları ve iletişim rehberi. Hesap hareketleri Cari Hesaplar bölümünde ayrı tutulur."
+        : view === "history" ? "Örnek müşteri cari hareketleri. Ürün bazlı sipariş/adisyon geçmişi henüz bağlı değil."
+        : "Müşteri ve tedarikçi kartları ile örnek hareketlerden hesaplanan bakiyeler."}
       action={<StatusPill tone="purple">Örnek gösterim</StatusPill>} />
     <DemoNotice>Cari kartları ve hareketleri kurgusal demo verisidir. Bu ekranda kayıt, gerçek tahsilat veya fatura oluşturulmaz.</DemoNotice>
     <ScopeNotice ctx={ctx} />
-    {ctx.scenarioId === "single" && <>
+    {ctx.scenarioId === "single" && view === "history" && <section className="card content-card cari-history-card">
+      <div className="card-heading padded"><div><span className="card-kicker">CARİ HAREKET GEÇMİŞİ</span><h2>Müşteri hesap hareketleri</h2></div></div>
+      <div className="table-scroll"><table><thead><tr><th>CARİ</th><th>AÇIKLAMA</th><th>KAYNAK</th><th>BAKİYE ETKİSİ</th></tr></thead>
+        <tbody>{movements.filter((movement) => movement.kind === "customer").map((movement) => <tr key={movement.id}>
+          <td>{parties.find((party) => party.id === movement.partyId)?.name}</td><td>{movement.description}</td><td>Örnek demo</td>
+          <td>{movement.deltaMinor > 0 ? "+" : "−"}{money(Math.abs(movement.deltaMinor))}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <p className="card-note cari-history-note">Bu görünüm cari hesap hareketlerini gösterir; sipariş/adisyon geçmişi henüz bağlı değil.</p>
+    </section>}
+    {ctx.scenarioId === "single" && view !== "history" && <>
       <section className="card content-card">
-        <div className="card-heading padded"><div><span className="card-kicker">CARİ KARTLARI</span><h2>{title}</h2></div></div>
-        <div className="table-scroll"><table><thead><tr><th>AD / UNVAN</th><th>TÜR</th><th>HAREKET</th><th>BAKİYE</th></tr></thead>
+        <div className="card-heading padded"><div><span className="card-kicker">{view === "customers" ? "MÜŞTERİ REHBERİ" : "CARİ KARTLARI"}</span><h2>{title}</h2></div></div>
+        <div className="table-scroll"><table><thead><tr><th>AD / UNVAN</th><th>TÜR</th>{view === "accounts" && <><th>HAREKET</th><th>BAKİYE</th></>}</tr></thead>
           <tbody>{parties.map((party) => {
             const partyMovements = movements.filter((movement) => movement.partyId === party.id);
             const balance = partyMovements.reduce((sum, movement) => sum + movement.deltaMinor, 0);
             return <tr key={party.id}>
               <td><strong>{party.name}</strong></td>
               <td>{party.types.includes("supplier") ? "Tedarikçi" : "Müşteri"}</td>
-              <td>{partyMovements.length} örnek hareket</td>
-              <td><strong>{money(balance)}</strong><small>{party.types.includes("supplier") ? "İşletmenin borcu" : "İşletmenin alacağı"}</small></td>
+              {view === "accounts" && <><td>{partyMovements.length} örnek hareket</td>
+              <td><strong>{money(balance)}</strong><small>{party.types.includes("supplier") ? "İşletmenin borcu" : "İşletmenin alacağı"}</small></td></>}
             </tr>;
           })}</tbody>
         </table></div>
       </section>
-      <section className="card content-card">
+      {view === "accounts" && <section className="card content-card">
         <div className="card-heading padded"><div><span className="card-kicker">HAREKET GEÇMİŞİ</span><h2>Örnek cari hareketleri</h2></div></div>
         <div className="table-scroll"><table><thead><tr><th>CARİ</th><th>AÇIKLAMA</th><th>KAYNAK</th><th>BAKİYE ETKİSİ</th></tr></thead>
           <tbody>{movements.map((movement) => <tr key={movement.id}>
@@ -52,7 +66,7 @@ export function CarilerDemoPage({ ctx, kind }: {
             <td>{movement.deltaMinor > 0 ? "+" : "−"}{money(Math.abs(movement.deltaMinor))}</td>
           </tr>)}</tbody>
         </table></div>
-      </section>
+      </section>}
     </>}
   </>;
 }

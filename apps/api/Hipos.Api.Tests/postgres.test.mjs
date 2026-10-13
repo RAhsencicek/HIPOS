@@ -209,6 +209,8 @@ test(
       const inventoryPath = (firmId, branchId) => `/api/v1/firms/${firmId}/branches/${branchId}/inventory`;
       assert.equal((await request(`${inventoryPath(single, singleBranch)}/ingredients`, "GET", undefined, "manager-single")).data.code,
         "INVENTORY_STORAGE_UNAVAILABLE");
+      assert.equal((await request(`/api/v1/firms/${single}/branches/${singleBranch}/cash/overview`, "GET", undefined, "manager-single")).data.code,
+        "CASH_STORAGE_UNAVAILABLE");
       assert.equal((await request(`/api/v1/firms/${firm}/sales/orders?branchId=${moda}`)).data.code,
         "SALES_STORAGE_UNAVAILABLE");
       assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
@@ -294,6 +296,11 @@ test(
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "CashDbContext"],
         { cwd: repo, env },
       );
       const migratedCategory = await runPg("psql", [
@@ -401,6 +408,93 @@ test(
       assert.equal(summary.data.customerReceivableMinor, 47250);
 
       const featureSettingsPath = `/api/v1/firms/${single}/branches/${singleBranch}/features`;
+      const cashPath = `/api/v1/firms/${single}/branches/${singleBranch}/cash`;
+      const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
+      const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        "SELECT (SELECT count(*) FROM cash.registers)||','||(SELECT count(*) FROM cash.shifts)||','||(SELECT count(*) FROM cash.movements)"]);
+      assert.equal(cashSeedCounts.stdout.trim(), "1,2,6");
+      const cashOverview = await request(`${cashPath}/overview`, "GET", undefined, "manager-single");
+      assert.equal(cashOverview.status, 200);
+      assert.equal(cashOverview.data.source, "postgres");
+      assert.equal(cashOverview.data.simulated, false);
+      assert.equal(cashOverview.data.registers.length, 1);
+      assert.equal(cashOverview.data.openShifts.length, 0);
+      assert.equal((await request(`${cashPath}/overview`, "GET", undefined, "viewer-multi")).status, 403);
+      const cashStates = await request(featureSettingsPath, "GET", undefined, "manager-single");
+      const cashFeature = cashStates.data.find((row) => row.key === "cash.management");
+      assert.equal(cashFeature.effectiveForNewWork, true);
+      const cashRegisterId = cashOverview.data.registers[0].id;
+      const openCash = { requestId: "99999999-9999-4999-8999-999999999f01", registerId: cashRegisterId, openingCashMinor: 100000 };
+      const openedCash = await request(`${cashPath}/shifts`, "POST", openCash, "manager-single");
+      assert.equal(openedCash.status, 201);
+      assert.equal(openedCash.data.shift.status, "open");
+      assert.equal(openedCash.data.shift.openingCashMinor, 100000);
+      assert.equal((await request(`${cashPath}/shifts`, "POST", openCash, "manager-single")).status, 200);
+      assert.equal((await request(`${cashPath}/shifts`, "POST", { ...openCash,
+        requestId: "99999999-9999-4999-8999-999999999f02" }, "manager-single")).data.code, "SHIFT_ALREADY_OPEN");
+      const cashShiftId = openedCash.data.shift.id;
+      const cashMovementPath = `${cashPath}/shifts/${cashShiftId}/movements`;
+      const cashIn = { requestId: "99999999-9999-4999-8999-999999999f03", kind: "manual_in",
+        amountMinor: 85000, category: "cash_sale", description: "Öğle vardiyası nakit satış toplamı" };
+      assert.equal((await request(cashMovementPath, "POST", cashIn, "pos-single")).status, 403);
+      assert.equal((await request(cashMovementPath, "POST", cashIn, "manager-single")).status, 201);
+      assert.equal((await request(cashMovementPath, "POST", cashIn, "manager-single")).status, 200);
+      assert.equal((await request(cashMovementPath, "POST", { ...cashIn, amountMinor: 85001 }, "manager-single")).data.code,
+        "IDEMPOTENCY_CONFLICT");
+      const cashOut = { requestId: "99999999-9999-4999-8999-999999999f04", kind: "manual_out",
+        amountMinor: 12000, category: "expense", description: "Mutfak için küçük sarf alımı" };
+      assert.equal((await request(cashMovementPath, "POST", cashOut, "manager-single")).status, 201);
+      assert.equal((await request(cashMovementPath, "POST", { ...cashOut, requestId: "99999999-9999-4999-8999-999999999f05",
+        amountMinor: 200000 }, "manager-single")).data.code, "INSUFFICIENT_CASH");
+      const openAfterMovement = await request(`${cashPath}/overview`, "GET", undefined, "manager-single");
+      assert.equal(openAfterMovement.data.openShifts[0].shift.expectedCashMinor, 173000);
+      assert.equal(openAfterMovement.data.openShifts[0].cashInMinor, 85000);
+      assert.equal(openAfterMovement.data.openShifts[0].cashOutMinor, 12000);
+      const closeCash = { requestId: "99999999-9999-4999-8999-999999999f06", expectedVersion: 3,
+        countedCashMinor: 172000, note: "Kapanışta 10 TL fark sayıldı." };
+      assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", {
+        ...closeCash, requestId: "99999999-9999-4999-8999-999999999f07", note: null,
+      }, "manager-single")).data.code, "CASH_DIFFERENCE_NOTE_REQUIRED");
+      const closedCash = await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "manager-single");
+      assert.equal(closedCash.status, 200);
+      assert.equal(closedCash.data.shift.expectedCashMinor, 173000);
+      assert.equal(closedCash.data.shift.differenceMinor, -1000);
+      assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "manager-single")).status, 200);
+      assert.equal((await request(cashMovementPath, "POST", { ...cashIn,
+        requestId: "99999999-9999-4999-8999-999999999f08" }, "manager-single")).data.code, "SHIFT_CLOSED");
+      const openedBeforeDisable = await request(`${cashPath}/shifts`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f09", registerId: cashRegisterId, openingCashMinor: 20000,
+      }, "manager-single");
+      assert.equal(openedBeforeDisable.status, 201);
+      const cashDisabled = await request(`${featureSettingsPath}/cash.management`, "PUT", {
+        desiredEnabled: false, expectedVersion: cashFeature.version,
+      }, "manager-single");
+      assert.equal(cashDisabled.status, 200);
+      assert.equal((await request(`${cashPath}/shifts`, "POST", { ...openCash,
+        requestId: "99999999-9999-4999-8999-999999999f0a" }, "manager-single")).data.code, "FEATURE_DISABLED");
+      const pendingShiftClose = await request(`${cashPath}/shifts/${openedBeforeDisable.data.shift.id}/close`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f0b", expectedVersion: 1, countedCashMinor: 20000,
+      }, "manager-single");
+      assert.equal(pendingShiftClose.status, 200, "Modül kapatılınca açık vardiya güvenli biçimde kapatılabilmeli.");
+      assert.equal((await request(`${cashPath}/shifts`, "GET", undefined, "manager-single")).data.total, 4);
+      const cashMovements = await request(`${cashPath}/movements?shiftId=${cashShiftId}`, "GET", undefined, "manager-single");
+      assert.equal(cashMovements.data.total, 3);
+      const immutableCashMovement = cashIn.requestId;
+      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `UPDATE cash.movements SET description='değiştirildi' WHERE id='${immutableCashMovement}'`]));
+      const cashAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM cash.audit WHERE firm_id='${single}' AND branch_id='${singleBranch}'`]);
+      assert.equal(Number(cashAuditCount.stdout.trim()) >= 12, true);
+      const cashReenabled = await request(`${featureSettingsPath}/cash.management`, "PUT", {
+        desiredEnabled: true, expectedVersion: cashDisabled.data.version,
+      }, "manager-single");
+      assert.equal(cashReenabled.status, 200);
+      assert.equal(cashReenabled.data.effectiveForNewWork, true);
       const cariFeatures = (await request(featureSettingsPath, "GET", undefined, "manager-single")).data;
       const cariFeature = cariFeatures.find((row) => row.key === "cari.management");
       assert.equal(cariFeature.effectiveForNewWork, true);
@@ -686,7 +780,7 @@ test(
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
         env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http", VITE_CARI_PROVIDER: "http",
-          VITE_INVENTORY_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+          VITE_INVENTORY_PROVIDER: "http", VITE_CASH_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -695,10 +789,34 @@ test(
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
       const cariPage = await browser.newPage();
+      const cashPage = await browser.newPage();
       page.setDefaultTimeout(5000);
       cariPage.setDefaultTimeout(5000);
+      cashPage.setDefaultTimeout(5000);
+      await cashPage.goto(`${uiBase}/admin/cash/summary`);
+      await expect(cashPage.locator(".feature-stage-notice")).toContainText("Çalışıyor");
+      await expect(cashPage.locator(".feature-stage-notice")).toContainText("POS/kart tahsilatı");
+      await expect(cashPage.getByRole("heading", { name: "Kasa özeti", level: 1 })).toBeVisible();
+      await expect(cashPage.getByText(/geçmiş vardiyalar kurgusal örnek veri/)).toBeVisible();
+      await expect(cashPage.locator(".cash-open-form")).toBeVisible();
+      await cashPage.getByLabel("Açılış nakdi (TL)").fill("1000,00");
+      await cashPage.getByRole("button", { name: "Vardiyayı aç" }).click();
+      await expect(cashPage.getByText("Kasa vardiyası açıldı ve açılış nakdi kaydedildi.")).toBeVisible();
+      await cashPage.getByLabel("Tutar (TL)").fill("250,00");
+      await cashPage.getByLabel("Açıklama").fill("Panel öğle servisi nakit satış toplamı");
+      await cashPage.getByRole("button", { name: "Hareketi kaydet" }).click();
+      await expect(cashPage.getByText("Nakit hareketi değiştirilemez kasa defterine kaydedildi.")).toBeVisible();
+      await cashPage.goto(`${uiBase}/admin/cash/opening-closing`);
+      await expect(cashPage.getByRole("heading", { name: "Vardiya açılış / kapanış", level: 1 })).toBeVisible();
+      await cashPage.getByLabel("Kasada sayılan (TL)").fill("1250,00");
+      await cashPage.getByRole("button", { name: "Say ve vardiyayı kapat" }).click();
+      await expect(cashPage.getByText("Vardiya kapatıldı; sayım farkı ve açıklaması saklandı.")).toBeVisible();
+      await cashPage.goto(`${uiBase}/admin/cash/movements`);
+      await expect(cashPage.getByText("Panel öğle servisi nakit satış toplamı")).toBeVisible();
       await cariPage.goto(`${uiBase}/admin/customers/customers`);
       await expect(cariPage.getByRole("heading", { name: "Müşteriler", level: 1 })).toBeVisible();
+      await expect(cariPage.getByText("İletişim kartları bu ekrandan yönetilir")).toBeVisible();
+      await expect(cariPage.locator(".cari-entry-form")).toHaveCount(0);
       await cariPage.getByLabel("Ad / unvan").fill("Panel Filtre Dışı Tedarikçi");
       await cariPage.locator(".cari-create-card").getByLabel("Hesap türü").selectOption("supplier");
       await cariPage.getByRole("button", { name: "Cari kartı kaydet" }).click();
@@ -708,6 +826,7 @@ test(
       assert.deepEqual(crossFilterParty.types, ["supplier"]);
       await cariPage.goto(`${uiBase}/admin/customers/accounts`);
       await expect(cariPage.getByRole("heading", { name: "Cari hesaplar", level: 1 })).toBeVisible();
+      await expect(cariPage.locator(".cari-entry-form")).toBeVisible();
       await cariPage.getByLabel("Ad / unvan").fill("Panel Cari Testi");
       await cariPage.locator(".cari-create-card").getByLabel("Hesap türü").selectOption("both");
       await cariPage.getByRole("button", { name: "Cari kartı kaydet" }).click();
@@ -751,6 +870,12 @@ test(
       await cariPage.getByLabel("Pasifleri göster").check();
       await expect(cariPage.getByText("Panel Cari Güncel").first()).toBeVisible();
       await expect(cariPage.getByRole("row").filter({ hasText: "Panel Cari Güncel" })).toContainText("100,00");
+      await cariPage.goto(`${uiBase}/admin/customers/history`);
+      await expect(cariPage.getByRole("heading", { name: "Müşteri geçmişi", level: 1 })).toBeVisible();
+      await expect(cariPage.getByRole("heading", { name: "Müşteri hesap hareketleri", level: 2 })).toBeVisible();
+      await expect(cariPage.locator(".cari-history-tools")).toBeVisible();
+      await expect(cariPage.locator(".cari-workspace")).toHaveCount(0);
+      await expect(cariPage.getByText("Ürün bazlı sipariş/adisyon geçmişi henüz satış kayıtlarıyla ilişkilendirilmedi.")).toBeVisible();
       await cariPage.close();
       await page.goto(`${uiBase}/admin/catalog/categories`);
       await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");

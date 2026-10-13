@@ -27,6 +27,7 @@ import { GenericPage, SectionDirectory } from "../shared/GenericPage";
 import { CarilerDemoPage, RecipesDemoPage, StockDemoPage } from "../features/demo/DemoBusinessPages";
 import { CarilerHttpPage } from "../features/demo/CarilerHttpPage";
 import { InventoryHttpPage } from "../features/inventory/InventoryHttpPage";
+import { CashManagementPage } from "../features/cash/CashManagementPage";
 
 const sectionFeatureKey: Record<string, string> = {
   catalog: "catalog.products",
@@ -34,7 +35,7 @@ const sectionFeatureKey: Record<string, string> = {
   inventory: "inventory.items",
   kitchen: "kitchen.monitoring",
   reports: "reports.sales",
-  cash: "cash.monitoring",
+  cash: "cash.management",
   finance: "finance.expenses",
 };
 
@@ -116,6 +117,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const cariSource: "http" | "mock" = import.meta.env.VITE_CARI_PROVIDER === "http" ? "http" : "mock";
   const serviceSource: "http" | "mock" = import.meta.env.VITE_SERVICE_PROVIDER === "http" ? "http" : "mock";
   const inventorySource: "http" | "mock" = import.meta.env.VITE_INVENTORY_PROVIDER === "http" ? "http" : "mock";
+  const cashSource: "http" | "mock" = import.meta.env.VITE_CASH_PROVIDER === "http" ? "http" : "mock";
   const { section, item, productId } = useParams();
   const scope = ctx.selectedBranch
     ? { firmId: ctx.firmId, branchId: ctx.selectedBranch.apiId }
@@ -168,7 +170,9 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const canWriteInventoryRecipes = Boolean(scope && inventorySource === "http" && featureSource === "http" && inventoryRecipesState?.effectiveForNewWork);
   const canWriteInventoryCounts = Boolean(scope && inventorySource === "http" && featureSource === "http" && inventoryCountsState?.effectiveForNewWork);
   const canWritePersonnel = Boolean(scope && serviceSource === "http" && featureSource === "http" && personnelState?.effectiveForNewWork);
-  const sources = { catalogSource, featureSource, cariSource, serviceSource, inventorySource };
+  const cashState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "cash.management") : undefined;
+  const canWriteCash = Boolean(scope && cashSource === "http" && featureSource === "http" && cashState?.effectiveForNewWork);
+  const sources = { catalogSource, featureSource, cariSource, serviceSource, inventorySource, cashSource };
   let content: ReactNode;
   let generic = false;
   if (productId) {
@@ -205,6 +209,10 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     content = <ServicePersonnelPage ctx={ctx} source={serviceSource} canWrite={canWritePersonnel} />;
   } else if (section === "branches" && item === "list") {
     content = <BranchesPage ctx={ctx} />;
+  } else if (section === "cash" && ["summary", "movements", "shifts", "opening-closing"].includes(item)) {
+    content = cashSource === "http"
+      ? <CashManagementPage ctx={ctx} view={item as "summary" | "movements" | "shifts" | "opening-closing"} canWrite={canWriteCash} />
+      : <GenericPage section={sections.find(entry => entry.id === "cash")!} slug={item} sources={sources} />;
   } else if (
     section === "sales" &&
     ["summary", "checks", "open"].includes(item)
@@ -225,7 +233,8 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   } else if ((section === "customers" && ["customers", "accounts", "history"].includes(item)) ||
     (section === "inventory" && item === "suppliers")) {
     const kind = section === "inventory" ? "supplier" : item === "customers" || item === "history" ? "customer" : "all";
-    content = cariSource === "http" ? <CarilerHttpPage ctx={ctx} kind={kind} /> : <CarilerDemoPage ctx={ctx} kind={kind} />;
+    const view = section === "inventory" ? "suppliers" : item as "customers" | "accounts" | "history";
+    content = cariSource === "http" ? <CarilerHttpPage ctx={ctx} kind={kind} view={view} /> : <CarilerDemoPage ctx={ctx} kind={kind} view={view} />;
   } else if (
     section === "reports" &&
     (item === "sales" || item === "branches")

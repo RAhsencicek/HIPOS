@@ -4,6 +4,7 @@ import type { ViewContext } from "../../app/context";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Kind = "customer" | "supplier";
+type CariView = "customers" | "accounts" | "history" | "suppliers";
 type EntryType = "customer_charge" | "customer_collection" | "supplier_debt" | "supplier_payment" | "adjustment_increase" | "adjustment_decrease" | "legacy_manual";
 type Movement = { id: string; kind: Kind; entryType: EntryType; deltaMinor: number; description: string; reference?: string;
   effectiveDate: string; source: string; isDemo: boolean; createdAt: string };
@@ -58,7 +59,7 @@ async function api<T>(path: string, method: "GET" | "POST" | "PUT" = "GET", body
   return response.json() as Promise<T>;
 }
 
-export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | "all" }) {
+export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: Kind | "all"; view: CariView }) {
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -115,11 +116,25 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { setNewKind(kind === "supplier" ? "supplier" : "customer"); }, [kind]);
+  useEffect(() => { setQuery(""); setSelectedId(""); }, [view]);
   useEffect(() => { setEntryType(movementKind === "customer" ? "customer_charge" : "supplier_debt"); }, [movementKind]);
   const visible = parties.filter((party) => (kind === "all" || party.types.includes(kind)) &&
     (showInactive || party.isActive) && party.name.toLocaleLowerCase("tr-TR").includes(query.toLocaleLowerCase("tr-TR")));
   const selected = visible.find((party) => party.id === selectedId) ?? visible[0];
-  const title = kind === "customer" ? "Müşteriler" : kind === "supplier" ? "Tedarikçiler" : "Cari hesaplar";
+  const title = view === "history" ? "Müşteri geçmişi"
+    : view === "customers" ? "Müşteriler"
+    : view === "suppliers" ? "Tedarikçiler" : "Cari hesaplar";
+  const historyRows = parties.filter((party) => party.types.includes("customer"))
+    .flatMap((party) => party.movements.filter((movement) => movement.kind === "customer")
+      .map((movement) => ({ ...movement, partyId: party.id, partyName: party.name })))
+    .filter((movement) => movement.effectiveDate >= fromDate && movement.effectiveDate <= toDate)
+    .filter((movement) => !query || `${movement.partyName} ${movement.description} ${movement.reference ?? ""}`
+      .toLocaleLowerCase("tr-TR").includes(query.toLocaleLowerCase("tr-TR")))
+    .sort((left, right) => right.effectiveDate.localeCompare(left.effectiveDate) || right.createdAt.localeCompare(left.createdAt));
+  const historyCharges = historyRows.filter((movement) => movement.entryType === "customer_charge")
+    .reduce((sum, movement) => sum + movement.deltaMinor, 0);
+  const historyCollections = historyRows.filter((movement) => movement.entryType === "customer_collection")
+    .reduce((sum, movement) => sum + Math.abs(movement.deltaMinor), 0);
   const managementWrites = summary?.capabilities.managementWritesEnabled ?? false;
   const writableSelectedTypes = managementWrites ? selected?.types ?? [] : [];
   const canCreateParty = managementWrites;
@@ -137,7 +152,7 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
 
   useEffect(() => {
     let cancelled = false;
-    if (!scope || !selected || !fromDate || !toDate) { setStatement(null); return; }
+    if (view !== "accounts" || !scope || !selected || !fromDate || !toDate) { setStatement(null); return; }
     setStatementLoading(true);
     setStatement(null);
     setStatementError("");
@@ -147,7 +162,7 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
       .catch((reason) => { if (!cancelled) setStatementError((reason as Error).message); })
       .finally(() => { if (!cancelled) setStatementLoading(false); });
     return () => { cancelled = true; };
-  }, [scope, selected?.id, selected?.version, fromDate, toDate]);
+  }, [view, scope, selected?.id, selected?.version, fromDate, toDate]);
 
   async function createParty(event: FormEvent) {
     event.preventDefault();
@@ -208,8 +223,11 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
   }
 
   return <>
-    <PageHeading eyebrow="CARİ VE MÜŞTERİLER" title={title}
-      description="Müşteri alacaklarını ve tedarikçi borçlarını tek şubede, izlenebilir hesap hareketleriyle takip edin."
+    <PageHeading eyebrow={view === "history" ? "MÜŞTERİLER" : "CARİ VE MÜŞTERİLER"} title={title}
+      description={view === "customers" ? "Tek şubenizdeki müşteri kartlarını ve iletişim bilgilerini yönetin. Hesap hareketleri Cari Hesaplar bölümünde ayrı tutulur."
+        : view === "history" ? "Seçilen tarih aralığındaki müşteri cari hareketlerini inceleyin. Sipariş ve adisyon geçmişi henüz bu kaynağa bağlı değil."
+        : view === "suppliers" ? "Tedarikçi kartlarını ve bu şubeyle olan işletme bağlantılarını yönetin."
+        : "Müşteri alacaklarını ve tedarikçi borçlarını ayrı bakiyeler ve izlenebilir hesap hareketleriyle takip edin."}
       action={<StatusPill tone={!scope ? "orange" : loading ? "neutral" : hasLoaded ? "green" : "orange"}>
         {!scope ? "Bu senaryoda etkin değil" : loading ? "Yükleniyor" : hasLoaded ? "PostgreSQL · kalıcı kayıt" : "Kurulum gerekiyor"}
       </StatusPill>} />
@@ -219,19 +237,48 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
     {notice && <div className="notice" role="status">{notice}</div>}
     {scope && loading && <div className="card generic-empty" role="status">Cari kayıtları yükleniyor…</div>}
     {scope && !loading && hasLoaded && <>
-      <div className="cari-summary-grid">
+      {view === "accounts" && <div className="cari-summary-grid">
         <article className="card cari-kpi"><span>MÜŞTERİLERDEN ALACAK</span><strong>{money(summary?.customerReceivableMinor ?? 0)}</strong><small>{summary?.activeCustomers ?? 0} aktif hesap · müşteri avansı {money(summary?.customerCreditMinor ?? 0)}</small></article>
         <article className="card cari-kpi"><span>TEDARİKÇİLERE BORÇ</span><strong>{money(summary?.supplierPayableMinor ?? 0)}</strong><small>{summary?.activeSuppliers ?? 0} aktif hesap · tedarikçi avansı {money(summary?.supplierAdvanceMinor ?? 0)}</small></article>
         <article className="card cari-kpi"><span>HESAP KAPSAMI</span><strong>1 şube</strong><small>Bakiyeler hareketlerden hesaplanır</small></article>
-      </div>
-      {!!summary?.recentMovements.length && <section className="card cari-recent-card">
+      </div>}
+      {view === "customers" && <div className="cari-summary-grid cari-summary-two">
+        <article className="card cari-kpi"><span>MÜŞTERİ KARTI</span><strong>{parties.filter((party) => party.types.includes("customer")).length}</strong><small>Müşteri olarak kayıtlı işletme ve kişiler</small></article>
+        <article className="card cari-kpi"><span>AKTİF MÜŞTERİ</span><strong>{parties.filter((party) => party.types.includes("customer") && party.isActive).length}</strong><small>İletişim kartları bu ekrandan yönetilir</small></article>
+      </div>}
+      {view === "history" && <div className="cari-summary-grid">
+        <article className="card cari-kpi"><span>HAREKET SAYISI</span><strong>{historyRows.length}</strong><small>Seçilen tarih ve arama filtresinde</small></article>
+        <article className="card cari-kpi"><span>ALACAK KAYITLARI</span><strong>{money(historyCharges)}</strong><small>Veresiye satış / alacak hareketleri</small></article>
+        <article className="card cari-kpi"><span>TAHSİLAT KAYITLARI</span><strong>{money(historyCollections)}</strong><small>Elle girilmiş cari tahsilat hareketleri</small></article>
+      </div>}
+      {view === "accounts" && !!summary?.recentMovements.length && <section className="card cari-recent-card">
         <div><span className="card-kicker">SON HAREKETLER</span><h2>İşletme hesaplarında en son neler oldu?</h2></div>
         <div className="cari-recent-list">{summary.recentMovements.slice(0, 5).map((movement) => <div className="cari-recent-row" key={movement.id}>
           <div><strong>{movement.partyName}</strong><small>{entryLabel(movement.entryType)} · {movement.effectiveDate} · {movement.isDemo ? "Örnek demo" : sourceLabel(movement.source)}</small></div>
           <strong className={movement.deltaMinor >= 0 ? "cari-amount-positive" : "cari-amount-negative"}>{movement.deltaMinor > 0 ? "+" : "−"}{money(Math.abs(movement.deltaMinor))}</strong>
         </div>)}</div>
       </section>}
-      {!managementWrites && <div className="notice" role="status">Cari Hesap Yönetimi kapalı. Kartlar, hareketler, ekstreler ve bakiyeler okunabilir; manuel değişiklik için modülü <strong>Ayarlar → Modüller ve Özellikler</strong> bölümünden açın.</div>}
+      {view !== "history" && !managementWrites && <div className="notice" role="status">
+        {view === "customers" ? "Cari Hesap Yönetimi kapalı. Müşteri kartları okunabilir; elle kart kaydı veya düzenleme için modülü " : "Cari Hesap Yönetimi kapalı. Kartlar, hareketler, ekstreler ve bakiyeler okunabilir; manuel değişiklik için modülü "}
+        <strong>Ayarlar → Modüller ve Özellikler</strong> bölümünden açın.
+      </div>}
+      {view === "history" ? <section className="card content-card cari-history-card">
+        <div className="card-heading padded"><div><span className="card-kicker">CARİ HAREKET GEÇMİŞİ</span><h2>Müşteri hesap hareketleri</h2></div></div>
+        <div className="cari-history-tools">
+          <label>Başlangıç tarihi<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
+          <label>Bitiş tarihi<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+          <label className="cari-search">Müşteri veya açıklama ara<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ad, açıklama veya referans" /></label>
+        </div>
+        <div className="table-scroll"><table><thead><tr><th>TARİH</th><th>MÜŞTERİ</th><th>İŞLEM</th><th>AÇIKLAMA / REFERANS</th><th>KAYIT KAYNAĞI</th><th>BAKİYE ETKİSİ</th></tr></thead>
+          <tbody>{historyRows.map((movement) => <tr key={movement.id}>
+            <td>{movement.effectiveDate}</td><td><strong>{movement.partyName}</strong></td>
+            <td>{entryLabel(movement.entryType)}</td><td>{movement.description}{movement.reference && <small><br />Ref: {movement.reference}</small>}</td>
+            <td>{movement.isDemo ? "Örnek demo" : sourceLabel(movement.source)}</td>
+            <td className={movement.deltaMinor >= 0 ? "cari-amount-positive" : "cari-amount-negative"}>{movement.deltaMinor > 0 ? "+" : "−"}{money(Math.abs(movement.deltaMinor))}</td>
+          </tr>)}</tbody>
+        </table>{historyRows.length === 0 && <p className="cari-empty">Bu tarih aralığında müşteri hareketi bulunamadı.</p>}</div>
+        <p className="card-note cari-history-note">Bu ekran cari hesap hareketlerini gösterir. Ürün bazlı sipariş/adisyon geçmişi henüz satış kayıtlarıyla ilişkilendirilmedi.</p>
+      </section> : <>
       <div className="cari-workspace">
         <section className="card content-card cari-list-card">
           <div className="card-heading padded"><div><span className="card-kicker">ŞUBE CARİLERİ</span><h2>{title}</h2></div><span className="cari-record-count">{visible.length} kayıt</span></div>
@@ -239,12 +286,11 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
             <label className="cari-search">Cari ara<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ad veya unvan yazın" /></label>
             <label className="cari-check"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Pasifleri göster</label>
           </div>
-          <div className="table-scroll"><table><thead><tr><th>CARİ</th><th>HAREKET</th><th>BAKİYE</th><th>DURUM</th></tr></thead>
+          <div className="table-scroll"><table><thead><tr><th>{view === "customers" ? "MÜŞTERİ" : "CARİ"}</th>{view === "customers" ? <><th>İLETİŞİM</th><th>DURUM</th></> : <><th>HAREKET</th><th>BAKİYE</th><th>DURUM</th></>}</tr></thead>
             <tbody>{visible.map((party) => <tr key={party.id} className={selected?.id === party.id ? "cari-row-selected" : ""}>
               <td><button type="button" className="cari-party-select" onClick={() => { setSelectedId(party.id); setMovementKind(party.types[0]); }}><strong>{party.name}</strong><small>{party.types.map((type) => type === "customer" ? "Müşteri" : "Tedarikçi").join(" · ")}</small></button></td>
-              <td>{party.movementCount}</td>
-              <td>{party.types.includes("customer") && <span>{customerBalanceLabel(party.customerBalanceMinor)}<br /></span>}
-                {party.types.includes("supplier") && <span>{supplierBalanceLabel(party.supplierBalanceMinor)}</span>}</td>
+              {view === "customers" ? <td>{party.phone ?? party.email ?? "İletişim bilgisi yok"}</td> : <><td>{party.movementCount}</td><td>{party.types.includes("customer") && <span>{customerBalanceLabel(party.customerBalanceMinor)}<br /></span>}
+                {party.types.includes("supplier") && <span>{supplierBalanceLabel(party.supplierBalanceMinor)}</span>}</td></>}
               <td><StatusPill tone={party.isActive ? "green" : "neutral"}>{party.isActive ? "Aktif" : "Pasif"}</StatusPill></td>
             </tr>)}</tbody>
           </table>{visible.length === 0 && <p className="cari-empty">Bu filtrede cari bulunamadı.</p>}</div>
@@ -267,7 +313,7 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
         </section>
       </div>
       {selected && <section className="card content-card padded">
-        <span className="card-kicker">CARİ HAREKETLERİ</span><h2>{selected.name}</h2>
+        <span className="card-kicker">{view === "customers" ? "MÜŞTERİ KARTI" : "CARİ HAREKETLERİ"}</span><h2>{selected.name}</h2>
         <p className="card-note">{selected.phone ?? "Telefon eklenmemiş"}{selected.email ? ` · ${selected.email}` : ""}</p>
         {selected.note && <p className="card-note">{selected.note}</p>}
         <button type="button" className="subtle-link" disabled={!canEditParty} onClick={() => setEditing((value) => !value)}>
@@ -284,7 +330,7 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
           <label className="cari-check"><input type="checkbox" checked={editActive} onChange={(event) => setEditActive(event.target.checked)} /> Aktif</label>
           <button className="primary-button" type="submit" disabled={busy}>Kart değişikliklerini kaydet</button>
         </form>}
-        <div className="cari-balance-strip">
+        {view === "accounts" && <><div className="cari-balance-strip">
           {selected.types.includes("customer") && <div><small>MÜŞTERİ ALACAĞI</small><strong>{money(selected.customerBalanceMinor)}</strong></div>}
           {selected.types.includes("supplier") && <div><small>TEDARİKÇİ BORCU</small><strong>{money(selected.supplierBalanceMinor)}</strong></div>}
         </div>
@@ -346,8 +392,9 @@ export function CarilerHttpPage({ ctx, kind }: { ctx: ViewContext; kind: Kind | 
             <td><strong>{entryLabel(movement.entryType)}</strong><br />{movement.description}{movement.reference && <small> · Ref: {movement.reference}</small>}</td><td>{movement.isDemo ? "Örnek demo" : sourceLabel(movement.source)}</td>
             <td>{movement.deltaMinor > 0 ? "+" : "−"}{money(Math.abs(movement.deltaMinor))}</td>
           </tr>)}</tbody>
-        </table></div>
+        </table></div></>}
       </section>}
+      </>}
     </>}
   </>;
 }

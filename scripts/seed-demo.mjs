@@ -13,6 +13,27 @@ function validate() {
   if (demo.schemaVersion !== 1 || demo.demoOnly !== true || demo.currency !== "TRY") throw new Error("Demo sözleşmesi geçersiz.");
   if (!demo.warehouse?.id || demo.warehouse.name !== "Kadıköy Ana Depo") throw new Error("Demo depo sözleşmesi geçersiz.");
   for (const group of [demo.categories, demo.products, demo.ingredients, demo.recipes, demo.parties, demo.partyMovements, demo.stockMovements]) unique(group, "id");
+  const cash = demo.cashDemo;
+  if (!/^[0-9a-f-]{36}$/i.test(cash?.register?.id ?? "") || !cash.register.code || !cash.register.name)
+    throw new Error("Demo kasa kaydı geçersiz.");
+  unique(cash.shifts, "id");
+  unique(cash.shifts.flatMap((shift) => shift.movements), "id");
+  for (const shift of cash.shifts) {
+    if (!Number.isSafeInteger(shift.openingCashMinor) || shift.openingCashMinor < 0 ||
+      !Number.isSafeInteger(shift.countedCashMinor) || shift.countedCashMinor < 0 ||
+      Date.parse(shift.closedAt) <= Date.parse(shift.openedAt) || !shift.movements.length)
+      throw new Error(`Demo kasa vardiyası geçersiz: ${shift.id}`);
+    const expected = shift.movements.reduce((sum, movement) => {
+      if (!Number.isSafeInteger(movement.amountMinor) || movement.amountMinor <= 0 ||
+        !["opening_float", "manual_in", "manual_out"].includes(movement.kind))
+        throw new Error(`Demo kasa hareketi geçersiz: ${movement.id}`);
+      return sum + (movement.kind === "manual_out" ? -movement.amountMinor : movement.amountMinor);
+    }, 0);
+    if (expected < 0 || shift.movements.filter((movement) => movement.kind === "opening_float").reduce((sum, movement) => sum + movement.amountMinor, 0) !== shift.openingCashMinor ||
+      expected !== shift.openingCashMinor + shift.movements.filter((movement) => movement.kind === "manual_in").reduce((sum, movement) => sum + movement.amountMinor, 0) - shift.movements.filter((movement) => movement.kind === "manual_out").reduce((sum, movement) => sum + movement.amountMinor, 0) ||
+      (expected !== shift.countedCashMinor && !shift.note))
+      throw new Error(`Demo kasa vardiya toplamı geçersiz: ${shift.id}`);
+  }
   unique(demo.products, "sku");
   const categories = new Set(demo.categories.map((item) => item.id));
   const products = new Map(demo.products.map((item) => [item.id, item]));
@@ -101,7 +122,8 @@ const now = "2026-10-08T09:00:00Z";
 const cariOnly = process.argv.includes("--cari");
 const serviceOnly = process.argv.includes("--service");
 const inventoryOnly = process.argv.includes("--inventory");
-if ([cariOnly, serviceOnly, inventoryOnly].filter(Boolean).length > 1) throw new Error("--cari, --service ve --inventory birlikte kullanılamaz.");
+const cashOnly = process.argv.includes("--cash");
+if ([cariOnly, serviceOnly, inventoryOnly, cashOnly].filter(Boolean).length > 1) throw new Error("--cari, --service, --inventory ve --cash birlikte kullanılamaz.");
 const statements = ["BEGIN;"];
 if (serviceOnly) {
   for (let number = 1; number <= demo.serviceDemo.tableCount; number++) statements.push(
@@ -193,6 +215,27 @@ if (serviceOnly) {
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM inventory.count_lines WHERE count_id=${sqlString(countId)} AND ingredient_id=${ingredientId} AND system_quantity=${systemQuantity} AND movement_count_snapshot=${movementCountSnapshot} AND physical_quantity=${line.physicalQuantity} AND unit=${sqlString(ingredient.unit)}) THEN RAISE EXCEPTION 'Demo sayım kalemi farklı içerikle kullanılıyor: ${line.ingredientId}'; END IF; END $$;`);
   }
   statements.push(`INSERT INTO inventory.audit (firm_id,branch_id,warehouse_id,entity_id,action,request_id,actor,detail,occurred_at) SELECT ${firm},${branch},${warehouseId},${sqlString(countId)},'count_started',${sqlString(countId)},'demo-seed',${sqlString(`${demo.countLines.length} hammadde · örnek sayım taslağı`)},${sqlString(now)} WHERE NOT EXISTS (SELECT 1 FROM inventory.audit WHERE firm_id=${firm} AND branch_id=${branch} AND entity_id=${sqlString(countId)} AND action='count_started');`);
+} else if (cashOnly) {
+  const register = demo.cashDemo.register;
+  const registerId = sqlString(register.id);
+  statements.push(`INSERT INTO cash.registers (id,firm_id,branch_id,code,name,provider_mode,is_active,version) VALUES (${registerId},${firm},${branch},${sqlString(register.code)},${sqlString(register.name)},'manual',true,1) ON CONFLICT (id) DO NOTHING;`);
+  statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM cash.registers WHERE id=${registerId} AND firm_id=${firm} AND branch_id=${branch} AND code=${sqlString(register.code)} AND name=${sqlString(register.name)}) THEN RAISE EXCEPTION 'Demo kasa kimliği farklı içerikle kullanılıyor.'; END IF; END $$;`);
+  for (const shift of demo.cashDemo.shifts) {
+    const shiftId = sqlString(shift.id);
+    const expected = shift.movements.reduce((sum, movement) => sum + (movement.kind === "manual_out" ? -movement.amountMinor : movement.amountMinor), 0);
+    const difference = shift.countedCashMinor - expected;
+    const closeRequestId = sqlString(`${shift.id.slice(0, -3)}8${shift.id.slice(-2)}`);
+    statements.push(`INSERT INTO cash.shifts (id,firm_id,branch_id,register_id,status,opening_cash_minor,opened_by,opened_at,expected_cash_minor,counted_cash_minor,difference_minor,close_note,close_request_id,closed_by,closed_at,version) VALUES (${shiftId},${firm},${branch},${registerId},'closed',${shift.openingCashMinor},${sqlString(shift.actor)},${sqlString(shift.openedAt)},${expected},${shift.countedCashMinor},${difference},${shift.note ? sqlString(shift.note) : "NULL"},${closeRequestId},${sqlString(shift.actor)},${sqlString(shift.closedAt)},2) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM cash.shifts WHERE id=${shiftId} AND firm_id=${firm} AND branch_id=${branch} AND register_id=${registerId} AND status='closed' AND expected_cash_minor=${expected} AND counted_cash_minor=${shift.countedCashMinor} AND difference_minor=${difference}) THEN RAISE EXCEPTION 'Demo kasa vardiyası kimliği farklı içerikle kullanılıyor: ${shift.id}'; END IF; END $$;`);
+    for (const movement of shift.movements) {
+      const movementId = sqlString(movement.id);
+      statements.push(`INSERT INTO cash.movements (id,firm_id,branch_id,register_id,shift_id,kind,category,amount_minor,currency,description,source,actor,created_at) VALUES (${movementId},${firm},${branch},${registerId},${shiftId},${sqlString(movement.kind)},${sqlString(movement.category)},${movement.amountMinor},'TRY',${sqlString(movement.description)},'manual','demo-seed',${sqlString(movement.createdAt)}) ON CONFLICT (id) DO NOTHING;`);
+      statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM cash.movements WHERE id=${movementId} AND firm_id=${firm} AND branch_id=${branch} AND register_id=${registerId} AND shift_id=${shiftId} AND kind=${sqlString(movement.kind)} AND amount_minor=${movement.amountMinor} AND description=${sqlString(movement.description)}) THEN RAISE EXCEPTION 'Demo kasa hareketi kimliği farklı içerikle kullanılıyor: ${movement.id}'; END IF; END $$;`);
+      statements.push(`INSERT INTO cash.audit (firm_id,branch_id,register_id,shift_id,request_id,entity_type,entity_id,action,actor,detail,occurred_at) SELECT ${firm},${branch},${registerId},${shiftId},${movementId},'movement',${movementId},'movement_added','demo-seed',${sqlString(`${movement.kind}; ${movement.amountMinor} kuruş · ${movement.description}`)},${sqlString(movement.createdAt)} WHERE NOT EXISTS (SELECT 1 FROM cash.audit WHERE firm_id=${firm} AND branch_id=${branch} AND request_id=${movementId});`);
+    }
+    statements.push(`INSERT INTO cash.audit (firm_id,branch_id,register_id,shift_id,request_id,entity_type,entity_id,action,actor,detail,occurred_at) SELECT ${firm},${branch},${registerId},${shiftId},${shiftId},'shift',${shiftId},'shift_opened','demo-seed',${sqlString(`openingCashMinor=${shift.openingCashMinor}`)},${sqlString(shift.openedAt)} WHERE NOT EXISTS (SELECT 1 FROM cash.audit WHERE firm_id=${firm} AND branch_id=${branch} AND request_id=${shiftId});`);
+    statements.push(`INSERT INTO cash.audit (firm_id,branch_id,register_id,shift_id,request_id,entity_type,entity_id,action,actor,detail,occurred_at) SELECT ${firm},${branch},${registerId},${shiftId},${closeRequestId},'shift',${shiftId},'shift_closed','demo-seed',${sqlString(`expected=${expected};counted=${shift.countedCashMinor};difference=${difference};note=${shift.note ?? ""}`)},${sqlString(shift.closedAt)} WHERE NOT EXISTS (SELECT 1 FROM cash.audit WHERE firm_id=${firm} AND branch_id=${branch} AND request_id=${closeRequestId});`);
+  }
 } else {
 for (const [index, category] of demo.categories.entries()) statements.push(
   `INSERT INTO catalog.categories (firm_id,id,brand_id,name,is_active,sort_order,version,updated_at) VALUES (${firm},${sqlString(category.id)},NULL,${sqlString(category.name)},true,${index},1,${sqlString(now)}) ON CONFLICT (firm_id,id) DO NOTHING;`
@@ -228,4 +271,6 @@ console.log(cariOnly
     ? `Demo servis seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.serviceDemo.tableCount} masa, ${demo.serviceDemo.waiters.length + demo.serviceDemo.employees.length} personel kartı, ${demo.serviceDemo.orders.length} sipariş, ${demo.serviceDemo.assignments.length} masa bağı. Mevcut kayıtlar değiştirilmedi.`
   : inventoryOnly
     ? `Demo stok seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.ingredients.length} hammadde, ${demo.recipes.length} reçete, ${demo.stockMovements.length} hareket, ${demo.countLines.length} kalemli 1 sayım taslağı. Mevcut kayıtlar değiştirilmedi.`
+    : cashOnly
+      ? `Demo kasa seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: 1 kasa, ${demo.cashDemo.shifts.length} kapanmış vardiya, ${demo.cashDemo.shifts.reduce((sum, shift) => sum + shift.movements.length, 0)} nakit hareketi. Mevcut kayıtlar değiştirilmedi.`
   : `Demo katalog seed'i bu ortamda ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.firm.name} / ${demo.branch.name}. Cari için ayrıca demo:seed:cari gerekir; reçete, stok ve sayım henüz veritabanına yazılmadı.`);

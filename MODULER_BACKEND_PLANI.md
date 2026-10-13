@@ -54,7 +54,7 @@ Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalış
 | Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
 | Stok ve reçete | Depo, hammadde/eşik, immutable hareket, reçete sürümü, snapshot/fiziksel/onaylı sayım | Menü, satış, satın alma, rapor | `inventory` migration/API/seed/panel + API ve PostgreSQL tarayıcı kabul akışı tamamlandı. İlk örnek tek depodur. Satıştan otomatik tüketim, satın alma belgesi, maliyet ve depo transferi planlıdır. |
 | Satın alma | Talep, onay, sipariş, mal kabul, tedarikçi | Stok, gider/borç | Planlı yönetsel akış. |
-| Kasa ve ödeme | Tahsilat durumu, vardiya, mutabakat, iade | Satış, finans, rapor | Test girişimi/sonucu PostgreSQL'de; kısmi, bekleyen ve belirsiz durumlar doğrulandı. Gerçek sağlayıcı, tahsilat ve kasa yok. |
+| Kasa ve ödeme | Manuel kasa vardiyası, nakit hareket defteri ve kapanış sayımı; POS/ödeme entegrasyonu ayrı sonraki dilim | Satışla ileride olay bağlantısı; ilk kasa MVP'si bağımsız | `cash.management` migration/API/seed/panel ve PostgreSQL kabul testiyle yerel önizlemede çalışır. Gerçek POS/kart tahsilatı, iade, mali belge ve üretim kimlik doğrulaması yok. [Kasa sözleşmesi](KASA_MVP_SOZLESMESI.md). |
 | Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Planlı. |
 | Müşteri ve pazarlama | Müşteri, segment, izin, sadakat, kampanya | Satış, menü, rapor | Planlı. |
 | Raporlama | Tanımlı satış/ödeme/stok projeksiyonları | Kaynak modüllerin olayları | Görsel prototip. |

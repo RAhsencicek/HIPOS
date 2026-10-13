@@ -20,6 +20,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
                 return IsCariFeature(definition.Key) && !runtime.CariReady
                     ? state with { EffectiveForNewWork = false, Lifecycle = "setup_required",
                         Blockers = [new FeatureBlocker("CARI_STORAGE_UNAVAILABLE", "Cari hareket defteri migration'ı uygulanmalı.")] }
+                    : definition.Key == "cash.management" && !runtime.CashReady
+                    ? state with { EffectiveForNewWork = false, Lifecycle = "setup_required",
+                        Blockers = [new FeatureBlocker("CASH_STORAGE_UNAVAILABLE", "Kasa migration'ı uygulanmalı.")] }
                     : state;
             }).ToArray();
     }
@@ -53,6 +56,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         if (IsCariFeature(key) && command.DesiredEnabled && !runtime.CariReady)
             return FeatureCommandResult.Rejected("CARI_STORAGE_UNAVAILABLE", 503,
                 "Cari hareket defteri migration'ı gerekli.");
+        if (key == "cash.management" && command.DesiredEnabled && !runtime.CashReady)
+            return FeatureCommandResult.Rejected("CASH_STORAGE_UNAVAILABLE", 503,
+                "Kasa migration'ı gerekli.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Bütün şube satırları kilitlenir: bağımlılık kontrolü ile yazma tek atomik işlem olur.
         var rows = await db.BranchFeatureStates.FromSqlInterpolated(
@@ -71,7 +77,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             (key == "payments.simulator" && runtime.PaymentSimulatorReady) ||
             (key is "branches.tables" or "service.waiters" or "staff.records" && runtime.ServiceTablesReady) ||
             (IsInventoryFeature(key) && runtime.InventoryReady) ||
-            (IsCariFeature(key) && runtime.CariReady));
+            (IsCariFeature(key) && runtime.CariReady) ||
+            (key == "cash.management" && runtime.CashReady));
         if (result.Failure is not null || result.State is null) return result;
         var next = result.State;
         if (next.Version == states[key].Version) return result; // Aynı tercih tekrarlandı: audit veya yazma yok.
@@ -114,7 +121,8 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             (key != "payments.simulator" || runtime.PaymentSimulatorReady) &&
             (key != "branches.tables" && key != "service.waiters" && key != "staff.records" || runtime.ServiceTablesReady) &&
             (!IsInventoryFeature(key) || runtime.InventoryReady) &&
-            (!IsCariFeature(key) || runtime.CariReady),
+            (!IsCariFeature(key) || runtime.CariReady) &&
+            (key != "cash.management" || runtime.CashReady),
             cancellationToken);
 
     private static bool IsCatalogWrite(string key) =>
@@ -164,6 +172,25 @@ public static class FeatureDbInitializer
             {
                 FirmId = row.FirmId, BranchId = row.BranchId, FeatureKey = row.Key,
                 Actor = "system:cari-ready", DesiredEnabled = true,
+                Version = row.Version, OccurredAt = row.UpdatedAt,
+            });
+        }
+        if (rows.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public static async Task PromoteCashAsync(FeatureDbContext db, CancellationToken cancellationToken)
+    {
+        var rows = await db.BranchFeatureStates.Where(row => row.Key == "cash.management" &&
+            row.DesiredEnabled && row.Lifecycle == "ready" && !row.EffectiveForNewWork).ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            row.EffectiveForNewWork = true;
+            row.Version++;
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+            db.FeatureAudit.Add(new FeatureAuditRow
+            {
+                FirmId = row.FirmId, BranchId = row.BranchId, FeatureKey = row.Key,
+                Actor = "system:cash-ready", DesiredEnabled = true,
                 Version = row.Version, OccurredAt = row.UpdatedAt,
             });
         }
