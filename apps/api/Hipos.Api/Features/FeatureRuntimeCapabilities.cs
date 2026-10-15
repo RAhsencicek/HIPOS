@@ -10,4 +10,5 @@ public sealed class FeatureRuntimeCapabilities
     public bool InventoryReady { get; set; }
     public bool CariReady { get; set; }
     public bool CashReady { get; set; }
+    public bool ExpensesReady { get; set; }
 }

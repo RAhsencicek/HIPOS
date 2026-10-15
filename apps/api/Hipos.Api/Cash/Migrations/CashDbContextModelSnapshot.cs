@@ -84,7 +84,7 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("request_id");
 
-                    b.Property<Guid>("ShiftId")
+                    b.Property<Guid?>("ShiftId")
                         .HasColumnType("uuid")
                         .HasColumnName("shift_id");
 
@@ -127,6 +127,16 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("character varying(24)")
                         .HasColumnName("category");
 
+                    b.Property<string>("CorrectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("correction_reason");
+
+                    b.Property<string>("CorrectionType")
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("correction_type");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -160,6 +170,10 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("character varying(24)")
                         .HasColumnName("kind");
 
+                    b.Property<Guid?>("OriginalMovementId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("original_movement_id");
+
                     b.Property<string>("Provider")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)")
@@ -190,6 +204,10 @@ namespace Hipos.Api.Cash.Migrations
                         .IsUnique()
                         .HasFilter("provider_event_id IS NOT NULL");
 
+                    b.HasIndex("FirmId", "BranchId", "RegisterId", "OriginalMovementId")
+                        .IsUnique()
+                        .HasFilter("original_movement_id IS NOT NULL");
+
                     b.HasIndex("FirmId", "BranchId", "RegisterId", "ShiftId");
 
                     b.HasIndex("FirmId", "BranchId", "ShiftId", "CreatedAt", "Id");
@@ -199,6 +217,8 @@ namespace Hipos.Api.Cash.Migrations
                             t.HasCheckConstraint("ck_cash_movement_amount_positive", "amount_minor > 0 OR (kind = 'opening_float' AND amount_minor = 0)");
 
                             t.HasCheckConstraint("ck_cash_movement_category", "category IN ('opening', 'cash_sale', 'expense', 'cash_drop', 'other')");
+
+                            t.HasCheckConstraint("ck_cash_movement_correction", "(original_movement_id IS NULL AND correction_type IS NULL AND correction_reason IS NULL) OR (original_movement_id IS NOT NULL AND correction_type = 'reversal' AND correction_reason IS NOT NULL AND length(trim(correction_reason)) BETWEEN 3 AND 500 AND source = 'manual' AND kind IN ('manual_in', 'manual_out'))");
 
                             t.HasCheckConstraint("ck_cash_movement_currency", "currency = 'TRY'");
 
@@ -378,12 +398,20 @@ namespace Hipos.Api.Cash.Migrations
 
             modelBuilder.Entity("Hipos.Api.Cash.CashMovementRow", b =>
                 {
+                    b.HasOne("Hipos.Api.Cash.CashMovementRow", "OriginalMovement")
+                        .WithMany("Corrections")
+                        .HasForeignKey("FirmId", "BranchId", "RegisterId", "OriginalMovementId")
+                        .HasPrincipalKey("FirmId", "BranchId", "RegisterId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Hipos.Api.Cash.CashShiftRow", "Shift")
                         .WithMany("Movements")
                         .HasForeignKey("FirmId", "BranchId", "RegisterId", "ShiftId")
                         .HasPrincipalKey("FirmId", "BranchId", "RegisterId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("OriginalMovement");
 
                     b.Navigation("Shift");
                 });
@@ -398,6 +426,11 @@ namespace Hipos.Api.Cash.Migrations
                         .IsRequired();
 
                     b.Navigation("Register");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Cash.CashMovementRow", b =>
+                {
+                    b.Navigation("Corrections");
                 });
 
             modelBuilder.Entity("Hipos.Api.Cash.CashShiftRow", b =>

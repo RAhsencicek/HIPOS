@@ -17,7 +17,7 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: `VITE_FEATURE_PROVIDER=http VITE_API_BASE_URL=http://127.0.0.1:5181 npm run dev -- --port ${uiPort} --strictPort`,
+      command: `VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_CARI_PROVIDER=http VITE_SERVICE_PROVIDER=http VITE_INVENTORY_PROVIDER=http VITE_CASH_PROVIDER=http VITE_SALES_PROVIDER=http VITE_API_BASE_URL=http://127.0.0.1:5181 npm run dev -- --port ${uiPort} --strictPort`,
       url: `http://127.0.0.1:${uiPort}/admin`,
       reuseExistingServer: false,
       timeout: 30_000,

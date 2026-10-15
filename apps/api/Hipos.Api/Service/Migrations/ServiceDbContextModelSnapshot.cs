@@ -36,6 +36,10 @@ namespace Hipos.Api.Service.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("branch_id");
 
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
                     b.Property<DateTimeOffset?>("ClosedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("closed_at");
@@ -82,6 +86,8 @@ namespace Hipos.Api.Service.Migrations
                         .HasColumnName("waiter_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CheckId");
 
                     b.HasIndex("OrderId")
                         .IsUnique();
@@ -148,6 +154,21 @@ namespace Hipos.Api.Service.Migrations
                     b.HasIndex("FirmId", "BranchId", "EntityId", "OccurredAt");
 
                     b.ToTable("audit", "service");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Service.ServiceSalesCheckRef", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("checks", "sales", t =>
+                        {
+                            t.ExcludeFromMigrations();
+                        });
                 });
 
             modelBuilder.Entity("Hipos.Api.Service.ServiceSalesOrderRef", b =>
@@ -289,6 +310,12 @@ namespace Hipos.Api.Service.Migrations
 
             modelBuilder.Entity("Hipos.Api.Service.ServiceAssignmentRow", b =>
                 {
+                    b.HasOne("Hipos.Api.Service.ServiceSalesCheckRef", null)
+                        .WithMany()
+                        .HasForeignKey("CheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Hipos.Api.Service.ServiceSalesOrderRef", null)
                         .WithMany()
                         .HasForeignKey("OrderId")

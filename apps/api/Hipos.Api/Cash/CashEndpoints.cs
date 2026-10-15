@@ -7,11 +7,14 @@ using Npgsql;
 namespace Hipos.Api.Cash;
 
 public sealed record OpenCashShift(string RequestId, string RegisterId, long OpeningCashMinor);
+public sealed record ProvisionDefaultCashRegister(string RequestId);
 public sealed record AddCashMovement(string RequestId, string Kind, long AmountMinor, string Category, string Description);
+public sealed record CorrectCashMovement(string RequestId, string CorrectionType, string CorrectionReason);
 public sealed record CloseCashShift(string RequestId, int ExpectedVersion, long CountedCashMinor, string? Note);
 public sealed record CashRegisterView(string Id, string Code, string Name, string ProviderMode, bool IsActive);
 public sealed record CashMovementView(string Id, string RegisterId, string ShiftId, string Kind, string Category,
-    long AmountMinor, string Currency, string Description, string Source, string Actor, DateTimeOffset CreatedAt);
+    long AmountMinor, string Currency, string Description, string Source, string Actor, DateTimeOffset CreatedAt,
+    string? OriginalMovementId, string? CorrectionType, string? CorrectionReason);
 public sealed record CashShiftView(string Id, string RegisterId, string Status, long OpeningCashMinor,
     long? ExpectedCashMinor, long? CountedCashMinor, long? DifferenceMinor, string OpenedBy,
     DateTimeOffset OpenedAt, string? ClosedBy, DateTimeOffset? ClosedAt, string? CloseNote, int Version);
@@ -21,6 +24,26 @@ public static class CashEndpoints
     public static void MapCashEndpoints(this WebApplication app, bool ready)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/cash");
+
+        group.MapPut("/registers/default", async (string firmId, string branchId, ProvisionDefaultCashRegister command,
+            HttpContext context, CashProvisioningService provisioning) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty)
+                return Fail(context, "INVALID_REQUEST_ID", 400, "Geçerli bir requestId gereklidir.");
+            var actor = DemoAccess.Resolve(context)!;
+            var result = await provisioning.EnsureDefaultRegisterAsync(firmId, branchId, requestId,
+                actor.Name, context.RequestAborted);
+            if (result.ErrorCode == "DEFAULT_REGISTER_CONFLICT")
+                return Fail(context, result.ErrorCode, 409, "MAIN kodlu kasa varsayılan özelliklerle uyuşmuyor.");
+            if (result.ErrorCode == "EXISTING_REGISTER")
+                return Fail(context, result.ErrorCode, 409, "Bu şubede zaten aktif bir kasa var; ikinci kasa oluşturulmadı.");
+            return result.Created
+                ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/registers/{result.Register!.Id}",
+                    new { source = "postgres", register = ToView(result.Register) })
+                : Results.Ok(new { source = "postgres", register = ToView(result.Register!) });
+        });
 
         group.MapGet("/registers", async (string firmId, string branchId, HttpContext context, CashDbContext db) =>
         {
@@ -219,6 +242,96 @@ public static class CashEndpoints
                 new { source = "postgres", simulated = false, movement = ToView(row) });
         });
 
+        group.MapPost("/movements/{originalMovementId:guid}/corrections", async (string firmId, string branchId,
+            Guid originalMovementId, CorrectCashMovement command, HttpContext context, CashDbContext db,
+            FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var reason = command.CorrectionReason?.Trim() ?? "";
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
+                command.CorrectionType != "reversal" || reason.Length is < 3 or > 500)
+                return Fail(context, "INVALID_CORRECTION", 400, "Yalnız reversal desteklenir; gerekçe 3–500 karakter olmalıdır.");
+
+            var actor = DemoAccess.Resolve(context)!;
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var existingByRequest = await db.Movements.AsNoTracking()
+                .SingleOrDefaultAsync(row => row.Id == requestId, context.RequestAborted);
+            if (existingByRequest is not null)
+                return existingByRequest.FirmId == firmId && existingByRequest.BranchId == branchId &&
+                    existingByRequest.OriginalMovementId == originalMovementId &&
+                    existingByRequest.CorrectionType == command.CorrectionType && existingByRequest.CorrectionReason == reason
+                    ? Results.Ok(new { source = "postgres", simulated = false, movement = ToView(existingByRequest) })
+                    : Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği farklı bir işlemde kullanılmış.");
+
+            var original = await LockMovement(db, firmId, branchId, originalMovementId, context.RequestAborted);
+            if (original is null) return Fail(context, "MOVEMENT_NOT_CORRECTABLE", 404, "Düzeltilebilir hareket bu şubede bulunamadı.");
+            if (original.Source != "manual" || original.Kind is not ("manual_in" or "manual_out") ||
+                original.OriginalMovementId is not null)
+                return Fail(context, "MOVEMENT_NOT_CORRECTABLE", 409, "Yalnızca daha önce düzeltilmemiş manuel giriş/çıkış düzeltilebilir.");
+
+            var register = await LockRegister(db, firmId, branchId, original.RegisterId, context.RequestAborted);
+            if (register is null || !register.IsActive)
+                return Fail(context, "REGISTER_NOT_FOUND", 404, "Kasa bu şubede bulunamadı.");
+            var alreadyCorrected = await db.Movements.AsNoTracking().AnyAsync(row => row.FirmId == firmId &&
+                row.BranchId == branchId && row.RegisterId == original.RegisterId &&
+                row.OriginalMovementId == original.Id, context.RequestAborted);
+            if (alreadyCorrected) return Fail(context, "MOVEMENT_ALREADY_CORRECTED", 409, "Bu hareket daha önce ters kayıtla düzeltildi.");
+
+            var shift = await db.Shifts.FromSqlInterpolated($"SELECT * FROM cash.shifts WHERE firm_id = {firmId} AND branch_id = {branchId} AND register_id = {original.RegisterId} AND status = 'open' FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (shift is null) return Fail(context, "OPEN_SHIFT_REQUIRED", 409, "Düzeltme için aynı kasada açık vardiya gereklidir.");
+
+            var reversedKind = original.Kind == "manual_in" ? "manual_out" : "manual_in";
+            if (reversedKind == "manual_out")
+            {
+                var currentMovements = await db.Movements.AsNoTracking().Where(row => row.FirmId == firmId &&
+                    row.BranchId == branchId && row.ShiftId == shift.Id).ToListAsync(context.RequestAborted);
+                if (original.AmountMinor > Expected(currentMovements))
+                    return Fail(context, "INSUFFICIENT_CASH", 409, "Bu ters kayıt açık vardiyadaki nakdi aşacağı için uygulanamıyor.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var correction = new CashMovementRow
+            {
+                Id = requestId, FirmId = firmId, BranchId = branchId, RegisterId = register.Id,
+                ShiftId = shift.Id, Kind = reversedKind, Category = "other", AmountMinor = original.AmountMinor,
+                Currency = original.Currency, Description = "Ters kayıt", Source = "manual",
+                OriginalMovementId = original.Id, CorrectionType = "reversal", CorrectionReason = reason,
+                Actor = actor.Name, CreatedAt = now,
+            };
+            db.Movements.Add(correction);
+            shift.Version++;
+            db.Audit.Add(new CashAuditRow
+            {
+                FirmId = firmId, BranchId = branchId, RegisterId = register.Id, ShiftId = shift.Id,
+                RequestId = requestId, EntityType = "movement", EntityId = correction.Id,
+                Action = "movement_reversed", Actor = actor.Name,
+                Detail = $"originalMovementId={original.Id};correctionType=reversal;amountMinor={original.AmountMinor};reason={reason}",
+                OccurredAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                await transaction.RollbackAsync(context.RequestAborted);
+                var racedCorrection = await db.Movements.AsNoTracking().AnyAsync(row => row.FirmId == firmId &&
+                    row.BranchId == branchId && row.RegisterId == original.RegisterId &&
+                    row.OriginalMovementId == original.Id, context.RequestAborted);
+                return racedCorrection
+                    ? Fail(context, "MOVEMENT_ALREADY_CORRECTED", 409, "Bu hareket başka bir istekle zaten düzeltildi.")
+                    : Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği başka bir kasa işleminde kullanılmış.");
+            }
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/movements/{correction.Id}",
+                new { source = "postgres", simulated = false, movement = ToView(correction) });
+        });
+
         group.MapPost("/shifts/{shiftId:guid}/close", async (string firmId, string branchId, Guid shiftId,
             CloseCashShift command, HttpContext context, CashDbContext db) =>
         {
@@ -292,7 +405,8 @@ public static class CashEndpoints
 
     private static CashMovementView ToView(CashMovementRow row) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.ShiftId.ToString(), row.Kind, row.Category,
-            row.AmountMinor, row.Currency, row.Description, row.Source, row.Actor, row.CreatedAt);
+            row.AmountMinor, row.Currency, row.Description, row.Source, row.Actor, row.CreatedAt,
+            row.OriginalMovementId?.ToString(), row.CorrectionType, row.CorrectionReason);
 
     private static CashShiftView ToView(CashShiftRow row) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.Status, row.OpeningCashMinor,
@@ -307,6 +421,11 @@ public static class CashEndpoints
     private static async Task<CashShiftRow?> LockShift(CashDbContext db, string firmId, string branchId,
         Guid shiftId, CancellationToken cancellationToken) =>
         await db.Shifts.FromSqlInterpolated($"SELECT * FROM cash.shifts WHERE firm_id = {firmId} AND branch_id = {branchId} AND id = {shiftId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private static async Task<CashMovementRow?> LockMovement(CashDbContext db, string firmId, string branchId,
+        Guid movementId, CancellationToken cancellationToken) =>
+        await db.Movements.FromSqlInterpolated($"SELECT * FROM cash.movements WHERE firm_id = {firmId} AND branch_id = {branchId} AND id = {movementId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
 
     private static async Task<FeatureFailure?> Gate(CashDbContext db, FeatureNewWorkGate gate,

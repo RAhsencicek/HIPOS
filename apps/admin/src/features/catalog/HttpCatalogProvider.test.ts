@@ -100,6 +100,19 @@ describe("HttpCatalogProvider", () => {
     expect(new URL(fetchMock.mock.calls[3][0]).pathname).toBe(`${prefix}/products/${draftId}/publications`);
   });
 
+  it("ürün aktifliğini requestId ve expectedVersion ile şube API'sine gönderir", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ id: "product-1", isActive: false, version: 5, replayed: false }), { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const command = { scope, productId: "product-1", requestId: "request-1", expectedVersion: 4, isActive: false };
+    await new HttpCatalogProvider().setProductActive(command);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(new URL(url).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products/product-1/activation`);
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({ requestId: "request-1", expectedVersion: 4, isActive: false });
+  });
+
   it("fiyat/yayın hatasını başarıya çevirmeden iletir", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ code: "VERSION_CONFLICT", detail: "Taslak değişti." }), { status: 409 },

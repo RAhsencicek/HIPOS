@@ -96,11 +96,11 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
   const categoryById = new Map(workspace?.categories.map(x => [x.id, x]));
   const selectedProducts = selected?.sections.flatMap(section => section.productIds.map(id => productById.get(id))) ?? [];
   const publishReady = Boolean(selected && selected.sections.length && selected.sections.every(section => section.productIds.length > 0) && selectedProducts.length > 0 &&
-    selectedProducts.every(product => product?.status === "published" && product.price.amountMinor > 0));
+    selectedProducts.every(product => product?.isActive && product.status === "published" && product.price.amountMinor > 0));
   const publishBlocker = !selected?.sections.length ? "Önce menüye bölüm ve ürün ekleyin." : selected.sections.some(section => section.productIds.length === 0)
     ? "Yayına almak için boş menü bölümlerine ürün ekleyin veya boş bölümü kaldırın."
-    : selectedProducts.some(product => !product || product.status !== "published" || product.price.amountMinor <= 0)
-      ? "Yayına almak için ürünleri yayınlayın ve geçerli bir fiyat tanımlayın." : "";
+    : selectedProducts.some(product => !product || !product.isActive || product.status !== "published" || product.price.amountMinor <= 0)
+      ? "Yayına almak için ürünleri etkinleştirin, POS'ta yayınlayın ve geçerli fiyat tanımlayın." : "";
   const pickerSection = draft.sections.find(section => section.sectionId === pickerSectionId);
   const pickerUsedElsewhere = new Set(draft.sections.filter(section => section.sectionId !== pickerSectionId).flatMap(section => section.productIds));
   const pickerProducts = workspace?.products.filter(product => {
@@ -185,7 +185,7 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
                   onChange={e => setDraft({ ...draft, sections: draft.sections.map((s, i) => i === sectionIndex ? { ...s, name: e.target.value } : s) })} /></label>
                 {ordered.map(product => {
                   const index = section.productIds.indexOf(product.id);
-                  return <div className={`menu-pick-row ${index >= 0 ? "selected" : ""}`} key={product.id}><span className="menu-product-thumb" aria-hidden="true">{product.image || "🍽️"}</span><div className="menu-picked-details"><strong>{product.name}</strong><small>{categoryById.get(product.categoryId)?.name ?? "Ürün"} · {product.status === "draft" ? "Taslak ürün · aktif menüde kullanılamaz" : formatCatalogMoney(product.price)}</small></div>
+                  return <div className={`menu-pick-row ${index >= 0 ? "selected" : ""}`} key={product.id}><span className="menu-product-thumb" aria-hidden="true">{product.image || "🍽️"}</span><div className="menu-picked-details"><strong>{product.name}</strong><small>{categoryById.get(product.categoryId)?.name ?? "Ürün"} · {!product.isActive ? "Pasif ürün · yeni yayında kullanılamaz" : product.status === "draft" ? "Taslak ürün · aktif menüde kullanılamaz" : formatCatalogMoney(product.price)}</small></div>
                     {index >= 0 && <div className="menu-order-controls"><button aria-label={`${product.name} ürününü yukarı taşı`} disabled={!editable || index === 0} onClick={() => changeProducts(move(section.productIds, index, index - 1))}><ChevronUp size={15} /></button>
                       <button aria-label={`${product.name} ürününü aşağı taşı`} disabled={!editable || index === section.productIds.length - 1} onClick={() => changeProducts(move(section.productIds, index, index + 1))}><ChevronDown size={15} /></button></div>}
                     <button className="menu-remove-product" aria-label={`${product.name} ürününü bu bölümden çıkar`} disabled={!editable} onClick={() => changeProducts(section.productIds.filter(id => id !== product.id))}><X size={15} /></button></div>;
@@ -230,10 +230,11 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
         <div className="menu-picker-grid">{pickerProducts.map(product => {
           const selectedHere = pickerSection.productIds.includes(product.id);
           const unavailable = pickerUsedElsewhere.has(product.id);
-          return <button key={product.id} className={`menu-product-card ${selectedHere ? "selected" : ""}`} disabled={!selectedHere && unavailable} aria-pressed={selectedHere} onClick={() => {
+          const inactive = !product.isActive || product.status !== "published";
+          return <button key={product.id} className={`menu-product-card ${selectedHere ? "selected" : ""}`} disabled={!selectedHere && (unavailable || inactive)} aria-pressed={selectedHere} onClick={() => {
             const nextIds = selectedHere ? pickerSection.productIds.filter(id => id !== product.id) : [...pickerSection.productIds, product.id];
             setDraft(current => ({ ...current, sections: current.sections.map(section => section.sectionId === pickerSection.sectionId ? { ...section, productIds: nextIds } : section) }));
-          }}><span className="menu-product-card-image" aria-hidden="true">{product.image || "🍽️"}</span><span className="menu-product-card-info"><strong>{product.name}</strong><small>{categoryById.get(product.categoryId)?.name ?? "Ürün"}</small><b>{product.status === "draft" ? "Taslak ürün" : formatCatalogMoney(product.price)}</b></span><span className="menu-product-card-check">{selectedHere ? <Check size={16} /> : unavailable ? "Başka bölümde" : <Plus size={16} />}</span></button>;
+          }}><span className="menu-product-card-image" aria-hidden="true">{product.image || "🍽️"}</span><span className="menu-product-card-info"><strong>{product.name}</strong><small>{categoryById.get(product.categoryId)?.name ?? "Ürün"}</small><b>{!product.isActive ? "Pasif ürün" : product.status === "draft" ? "Taslak ürün" : formatCatalogMoney(product.price)}</b></span><span className="menu-product-card-check">{selectedHere ? <Check size={16} /> : unavailable ? "Başka bölümde" : inactive ? "Kullanılamaz" : <Plus size={16} />}</span></button>;
         })}{!pickerProducts.length && <div className="menu-picker-empty">Bu filtrede ürün bulunamadı.</div>}</div>
         <footer><span>{pickerSection.productIds.length} ürün seçili</span><button className="primary-button" onClick={() => setPickerSectionId(null)}>Seçimi tamamla</button></footer>
       </section></div>}

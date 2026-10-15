@@ -37,4 +37,17 @@ describe("alt ekran durum sözleşmesi", () => {
     expect(isFutureSidebarItem("cash", "refunds", httpSources)).toBe(true);
     expect(isFutureSidebarItem("cash", "movements", mockSources)).toBe(true);
   });
+
+  it("gider ekranlarını yalnız PostgreSQL sağlayıcısı bağlıyken çalışıyor gösterir", () => {
+    for (const item of ["expenses", "expense-categories"]) {
+      const presentation = featurePresentation("finance", item, {
+        ...mockSources,
+        expenseSource: "http",
+      });
+      expect(presentation.stage).toBe("working");
+      expect(presentation.description).toContain("finance PostgreSQL şemasına bağlıdır");
+      expect(isFutureSidebarItem("finance", item, { ...mockSources, expenseSource: "http" })).toBe(false);
+      expect(isFutureSidebarItem("finance", item, mockSources)).toBe(true);
+    }
+  });
 });

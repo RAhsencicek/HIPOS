@@ -13,7 +13,7 @@ test("cari alt ekranları ve gelecek işleri ayrı gösterir; demo hareketleri g
   await expect(page.getByText("Beta Ofis").first()).toBeVisible();
   await expect(page.getByText("ABC Gıda").first()).toBeVisible();
   await expect(page.getByText("2.000,00").first()).toBeVisible();
-  await expect(page.getByText("9.500,00").first()).toBeVisible();
+  await expect(page.getByText("12.550,00").first()).toBeVisible();
   await expect(page.getByText("Cari kartları ve hareketleri kurgusal demo verisidir.", { exact: false })).toBeVisible();
 });
 

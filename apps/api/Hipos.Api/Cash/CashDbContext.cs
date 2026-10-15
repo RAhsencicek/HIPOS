@@ -53,9 +53,14 @@ public sealed class CashMovementRow
     public string? Provider { get; set; }
     public string? ExternalReference { get; set; }
     public string? ProviderEventId { get; set; }
+    public Guid? OriginalMovementId { get; set; }
+    public string? CorrectionType { get; set; }
+    public string? CorrectionReason { get; set; }
     public string Actor { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
     public CashShiftRow Shift { get; set; } = null!;
+    public CashMovementRow? OriginalMovement { get; set; }
+    public List<CashMovementRow> Corrections { get; set; } = [];
 }
 
 public sealed class CashAuditRow
@@ -64,7 +69,7 @@ public sealed class CashAuditRow
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
     public Guid RegisterId { get; set; }
-    public Guid ShiftId { get; set; }
+    public Guid? ShiftId { get; set; }
     public Guid RequestId { get; set; }
     public string EntityType { get; set; } = "";
     public Guid EntityId { get; set; }
@@ -147,6 +152,8 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
                 table.HasCheckConstraint("ck_cash_movement_source", "source IN ('manual', 'pos')");
                 table.HasCheckConstraint("ck_cash_movement_external_identity",
                     "(source = 'manual' AND provider IS NULL AND external_reference IS NULL AND provider_event_id IS NULL) OR (source = 'pos' AND provider IS NOT NULL AND provider_event_id IS NOT NULL)");
+                table.HasCheckConstraint("ck_cash_movement_correction",
+                    "(original_movement_id IS NULL AND correction_type IS NULL AND correction_reason IS NULL) OR (original_movement_id IS NOT NULL AND correction_type = 'reversal' AND correction_reason IS NOT NULL AND length(trim(correction_reason)) BETWEEN 3 AND 500 AND source = 'manual' AND kind IN ('manual_in', 'manual_out'))");
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
@@ -163,6 +170,9 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.Property(row => row.Provider).HasColumnName("provider").HasMaxLength(80);
             entity.Property(row => row.ExternalReference).HasColumnName("external_reference").HasMaxLength(160);
             entity.Property(row => row.ProviderEventId).HasColumnName("provider_event_id").HasMaxLength(160);
+            entity.Property(row => row.OriginalMovementId).HasColumnName("original_movement_id");
+            entity.Property(row => row.CorrectionType).HasColumnName("correction_type").HasMaxLength(24);
+            entity.Property(row => row.CorrectionReason).HasColumnName("correction_reason").HasMaxLength(500);
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.HasOne(row => row.Shift).WithMany(shift => shift.Movements)
@@ -172,6 +182,12 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ShiftId, row.CreatedAt, row.Id });
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Provider, row.ProviderEventId })
                 .IsUnique().HasFilter("provider_event_id IS NOT NULL");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.RegisterId, row.OriginalMovementId })
+                .IsUnique().HasFilter("original_movement_id IS NOT NULL");
+            entity.HasOne(row => row.OriginalMovement).WithMany(movement => movement.Corrections)
+                .HasForeignKey(row => new { row.FirmId, row.BranchId, row.RegisterId, row.OriginalMovementId })
+                .HasPrincipalKey(movement => new { movement.FirmId, movement.BranchId, movement.RegisterId, movement.Id })
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<CashAuditRow>(entity =>
         {

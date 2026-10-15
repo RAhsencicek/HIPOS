@@ -28,6 +28,7 @@ import { CarilerDemoPage, RecipesDemoPage, StockDemoPage } from "../features/dem
 import { CarilerHttpPage } from "../features/demo/CarilerHttpPage";
 import { InventoryHttpPage } from "../features/inventory/InventoryHttpPage";
 import { CashManagementPage } from "../features/cash/CashManagementPage";
+import { ExpenseManagementPage } from "../features/expenses/ExpenseManagementPage";
 
 const sectionFeatureKey: Record<string, string> = {
   catalog: "catalog.products",
@@ -118,6 +119,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const serviceSource: "http" | "mock" = import.meta.env.VITE_SERVICE_PROVIDER === "http" ? "http" : "mock";
   const inventorySource: "http" | "mock" = import.meta.env.VITE_INVENTORY_PROVIDER === "http" ? "http" : "mock";
   const cashSource: "http" | "mock" = import.meta.env.VITE_CASH_PROVIDER === "http" ? "http" : "mock";
+  const expenseSource: "http" | "mock" = import.meta.env.VITE_EXPENSE_PROVIDER === "http" ? "http" : "mock";
   const { section, item, productId } = useParams();
   const scope = ctx.selectedBranch
     ? { firmId: ctx.firmId, branchId: ctx.selectedBranch.apiId }
@@ -172,7 +174,9 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const canWritePersonnel = Boolean(scope && serviceSource === "http" && featureSource === "http" && personnelState?.effectiveForNewWork);
   const cashState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "cash.management") : undefined;
   const canWriteCash = Boolean(scope && cashSource === "http" && featureSource === "http" && cashState?.effectiveForNewWork);
-  const sources = { catalogSource, featureSource, cariSource, serviceSource, inventorySource, cashSource };
+  const expenseState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "finance.expenses") : undefined;
+  const canWriteExpenses = Boolean(scope && expenseSource === "http" && featureSource === "http" && expenseState?.effectiveForNewWork);
+  const sources = { catalogSource, featureSource, cariSource, serviceSource, inventorySource, cashSource, expenseSource };
   let content: ReactNode;
   let generic = false;
   if (productId) {
@@ -213,6 +217,10 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     content = cashSource === "http"
       ? <CashManagementPage ctx={ctx} view={item as "summary" | "movements" | "shifts" | "opening-closing"} canWrite={canWriteCash} />
       : <GenericPage section={sections.find(entry => entry.id === "cash")!} slug={item} sources={sources} />;
+  } else if (section === "finance" && ["expenses", "expense-categories"].includes(item)) {
+    content = expenseSource === "http"
+      ? <ExpenseManagementPage ctx={ctx} canWrite={canWriteExpenses} view={item === "expense-categories" ? "categories" : "expenses"} />
+      : <GenericPage section={sections.find(entry => entry.id === "finance")!} slug={item} sources={sources} />;
   } else if (
     section === "sales" &&
     ["summary", "checks", "open"].includes(item)

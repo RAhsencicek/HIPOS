@@ -21,6 +21,7 @@ export type CatalogProduct = {
   sku: string;
   category: { id: string; name: string };
   status: ProductStatus;
+  isActive: boolean;
   channels: SalesChannel[];
   image: string;
   recipeLinked: boolean;
@@ -122,6 +123,14 @@ export type PublishDraftRequest = {
   expectedVersion: number;
 };
 
+export type SetProductActiveRequest = {
+  scope: CatalogScope;
+  productId: string;
+  requestId: string;
+  expectedVersion: number;
+  isActive: boolean;
+};
+
 export type PriceResult = { product: CatalogProductDetail; priceVersion: PriceVersion };
 export type PublicationResult = { product: CatalogProductDetail; publication: Publication };
 
@@ -133,6 +142,7 @@ export interface CatalogProvider {
   updateDraft(request: UpdateDraftRequest): Promise<CatalogProductDetail>;
   setDraftPrice(request: SetDraftPriceRequest): Promise<PriceResult>;
   publishDraft(request: PublishDraftRequest): Promise<PublicationResult>;
+  setProductActive(request: SetProductActiveRequest): Promise<{ isActive: boolean; version: number }>;
   listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]>;
   listPublications(request: ProductDetailRequest): Promise<Publication[]>;
 }
@@ -140,6 +150,7 @@ export interface CatalogProvider {
 export type CatalogErrorCode =
   | "UNAUTHORIZED_SCOPE"
   | "PRODUCT_NOT_FOUND"
+  | "PRODUCT_INACTIVE"
   | "FEATURE_DISABLED"
   | "FEATURE_SETUP_REQUIRED"
   | "PROVIDER_PENDING"
@@ -156,6 +167,7 @@ export type CatalogErrorCode =
   | "DRAFT_NOT_FOUND"
   | "PRICE_VERSION_CONFLICT"
   | "PUBLICATION_CONFLICT"
+  | "REQUEST_ID_CONFLICT"
   | "FEATURE_DRAINING"
   | "UNAUTHENTICATED"
   | "LOAD_FAILED"

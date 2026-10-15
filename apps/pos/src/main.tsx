@@ -9,6 +9,7 @@ type Product = {
   name: string;
   sku: string;
   status: string;
+  isActive: boolean;
   channels: string[];
   price: { amountMinor: number; currency: string };
 };
@@ -76,7 +77,7 @@ function App() {
     ).then((result) => {
       if (!active) return;
       setProducts(result.items.filter((item) => item.status === "published" &&
-        item.channels.includes("pos") && item.price.amountMinor > 0));
+        item.isActive && item.channels.includes("pos") && item.price.amountMinor > 0));
       setLoading(false);
     }).catch((cause: unknown) => {
       if (!active) return;

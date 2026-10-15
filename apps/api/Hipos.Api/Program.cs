@@ -5,6 +5,7 @@ using Hipos.Api.Cari;
 using Hipos.Api.Service;
 using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
+using Hipos.Api.Expenses;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -35,14 +36,18 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
     builder.Services.AddDbContext<CashDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "cash")));
+    builder.Services.AddDbContext<ExpenseDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "finance")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
+    builder.Services.AddScoped<CatalogProductActivationCommands>();
     builder.Services.AddScoped<CatalogCategoryCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
+    builder.Services.AddScoped<CashProvisioningService>();
 }
 else if (storage == "memory")
     builder.Services.AddSingleton<IFeatureStore, InMemoryFeatureStore>();
@@ -64,6 +69,7 @@ var cariReady = false;
 var serviceReady = false;
 var inventoryReady = false;
 var cashReady = false;
+var expensesReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -72,15 +78,22 @@ if (storage == "postgres")
     var catalogDb = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
     catalogReady = !(await catalogDb.Database.GetPendingMigrationsAsync()).Any();
     var salesDb = scope.ServiceProvider.GetRequiredService<SalesDbContext>();
-    salesReady = !(await salesDb.Database.GetPendingMigrationsAsync()).Any();
+    var pendingSalesMigrations = (await salesDb.Database.GetPendingMigrationsAsync()).ToArray();
+    var postApiSalesMigrations = new[] { "SalesChecksRequireLinks", "SalesCheckForeignKeys" };
+    salesReady = pendingSalesMigrations.All(migration => postApiSalesMigrations.Any(suffix =>
+        migration.EndsWith(suffix, StringComparison.Ordinal)));
     var cariDb = scope.ServiceProvider.GetRequiredService<CariDbContext>();
     cariReady = !(await cariDb.Database.GetPendingMigrationsAsync()).Any();
     var serviceDb = scope.ServiceProvider.GetRequiredService<ServiceDbContext>();
-    serviceReady = salesReady && !(await serviceDb.Database.GetPendingMigrationsAsync()).Any();
+    var pendingServiceMigrations = (await serviceDb.Database.GetPendingMigrationsAsync()).ToArray();
+    serviceReady = salesReady && pendingServiceMigrations.All(migration =>
+        migration.EndsWith("ServiceAssignmentsRequireCheckLinks", StringComparison.Ordinal));
     var inventoryDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
     inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
     var cashDb = scope.ServiceProvider.GetRequiredService<CashDbContext>();
     cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
+    var expenseDb = scope.ServiceProvider.GetRequiredService<ExpenseDbContext>();
+    expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -90,6 +103,7 @@ if (storage == "postgres")
     featureRuntime.ServiceTablesReady = serviceReady;
     featureRuntime.InventoryReady = inventoryReady;
     featureRuntime.CashReady = cashReady;
+    featureRuntime.ExpensesReady = expensesReady;
     if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");
@@ -97,7 +111,9 @@ if (storage == "postgres") app.MapCariEndpoints(cariReady);
 if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
 if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady);
+if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
+if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
@@ -183,6 +199,26 @@ app.MapGet("/api/v1/firms/{firmId}/catalog/products/{productId}",
         var result = await services.GetRequiredService<CatalogQueries>().GetAsync(
             new CatalogScope(firmId, branchId), id, context.RequestAborted);
         return result is null ? Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bu kapsamda bulunamadı.") : Results.Ok(result);
+    });
+
+app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/activation",
+    async (string firmId, string branchId, string productId, SetCatalogProductActive command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede ürün durumu yönetme izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı ve API yeniden başlatılmalı.");
+        if (!Guid.TryParse(productId, out var id))
+            return Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bu kapsamda bulunamadı.");
+        var result = await services.GetRequiredService<CatalogProductActivationCommands>().SetActiveAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure)
+            return Failure(context, failure.Code, failure.Status, failure.Message);
+        return Results.Ok(new { id = result.ProductId, isActive = result.IsActive,
+            version = result.Version, replayed = result.Replayed });
     });
 
 app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts",

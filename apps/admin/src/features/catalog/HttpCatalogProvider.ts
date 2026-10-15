@@ -14,6 +14,7 @@ import type {
   PublicationResult,
   PublishDraftRequest,
   SetDraftPriceRequest,
+  SetProductActiveRequest,
   UpdateDraftRequest,
 } from "./contracts";
 
@@ -145,6 +146,13 @@ export class HttpCatalogProvider implements CatalogProvider {
         publicationId: request.publicationId,
         expectedVersion: request.expectedVersion,
       });
+  }
+
+  setProductActive(request: SetProductActiveRequest): Promise<{ isActive: boolean; version: number }> {
+    if (!request.scope.branchId)
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Ürün durumu için şube seçin."));
+    return this.request(`/api/v1/firms/${encodeURIComponent(request.scope.firmId)}/branches/${encodeURIComponent(request.scope.branchId)}/catalog/products/${encodeURIComponent(request.productId)}/activation`,
+      request.scope, "POST", { requestId: request.requestId, expectedVersion: request.expectedVersion, isActive: request.isActive });
   }
 
   listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]> {

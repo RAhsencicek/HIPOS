@@ -263,7 +263,8 @@ export function ProductsPage({ ctx, canPreviewNewWork, canWriteDraft }: { ctx: V
                     <th>KATEGORİ</th>
                     <th>KANALLAR</th>
                     <th>REÇETE</th>
-                    <th>DURUM</th>
+                    <th>ÜRÜN DURUMU</th>
+                    <th>YAYIN DURUMU</th>
                     <th>{ctx.branchApiId ? "ŞUBE FİYATI" : "MERKEZ FİYATI"}</th>
                     <th />
                   </tr>
@@ -299,6 +300,11 @@ export function ProductsPage({ ctx, canPreviewNewWork, canWriteDraft }: { ctx: V
                         ) : (
                           <StatusPill>Eksik</StatusPill>
                         )}
+                      </td>
+                      <td>
+                        <StatusPill tone={product.isActive ? "green" : "red"}>
+                          {product.isActive ? "Aktif" : "Pasif"}
+                        </StatusPill>
                       </td>
                       <td>
                         <StatusPill
@@ -382,11 +388,14 @@ export function ProductDetail({
   canPublish: boolean;
   inventorySource: "mock" | "http";
 }) {
-  const { source, notifyChange } = useCatalogProvider();
+  const { source, provider, notifyChange } = useCatalogProvider();
   const [editing, setEditing] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
+  const [activationBusy, setActivationBusy] = useState(false);
+  const [activationError, setActivationError] = useState("");
+  const [activationRequestId, setActivationRequestId] = useState(() => crypto.randomUUID());
   const [recipeState, setRecipeState] = useState<{ status: "loading" } | { status: "loaded"; recipe: InventoryRecipeDetail | null } | { status: "error"; message: string }>({ status: "loading" });
-  useEffect(() => { setEditing(false); setSaveNotice(""); }, [ctx.firmId, ctx.branchApiId, productId]);
+  useEffect(() => { setEditing(false); setSaveNotice(""); setActivationRequestId(crypto.randomUUID()); }, [ctx.firmId, ctx.branchApiId, productId]);
   useEffect(() => {
     if (inventorySource !== "http" || !ctx.branchApiId) { setRecipeState({ status: "loaded", recipe: null }); return; }
     let cancelled = false;
@@ -431,16 +440,33 @@ export function ProductDetail({
         eyebrow={source === "http" ? "ÜRÜN AYRINTISI · POSTGRESQL" : "ÜRÜN AYRINTISI · ÖRNEK VERİ"}
         title={product.name}
         description={`Stok kodu: ${product.sku} · ${product.category.name}`}
-        action={source === "http" && product.status === "draft" ?
-          <button className="primary-button" disabled={!canWriteDraft} onClick={() => { setSaveNotice(""); setEditing(true); }}>Taslağı düzenle</button>
-          : source === "http" && product.status === "published"
-            ? <StatusPill tone="green">POS'ta yayında</StatusPill>
-            : <StatusPill tone="purple">Önizleme</StatusPill>}
+        action={source === "http" ? <div className="catalog-product-actions">
+          <StatusPill tone={product.isActive ? "green" : "red"}>{product.isActive ? "Ürün aktif" : "Ürün pasif"}</StatusPill>
+          {product.status === "draft" ? <button className="primary-button" disabled={!canWriteDraft} onClick={() => { setSaveNotice(""); setEditing(true); }}>Taslağı düzenle</button>
+            : <StatusPill tone={product.channels.includes("pos") ? "green" : "neutral"}>{product.channels.includes("pos") ? "POS kanalında yayın kaydı var" : "POS'ta yayınlanmadı"}</StatusPill>}
+          <button className="soft-button" disabled={!canWriteDraft || activationBusy} onClick={() => void (async () => {
+            const nextActive = !product.isActive;
+            if (!window.confirm(nextActive
+              ? `“${product.name}” ürününü yeniden etkinleştirelim mi? Yeni işlemlerde fiyat ve POS yayın kuralları yine uygulanacak.`
+              : `“${product.name}” pasife alınsın mı? Yeni sipariş ve yayınlarda kullanılamaz; açık adisyonlar ve geçmiş kayıtlar korunur.`)) return;
+            setActivationBusy(true); setActivationError(""); setSaveNotice("");
+            try {
+              await provider.setProductActive({ scope, productId: product.id, requestId: activationRequestId,
+                expectedVersion: product.version, isActive: nextActive });
+              setActivationRequestId(crypto.randomUUID());
+              notifyChange();
+              setSaveNotice(nextActive ? "Ürün etkinleştirildi; kayıt veritabanında doğrulandı." : "Ürün pasife alındı. Açık adisyonlar ve geçmiş kayıtlar korunuyor.");
+            } catch (reason) { setActivationError(reason instanceof Error ? reason.message : "Ürün durumu değiştirilemedi."); }
+            finally { setActivationBusy(false); }
+          })()}>{activationBusy ? "Güncelleniyor…" : product.isActive ? "Ürünü pasife al" : "Ürünü etkinleştir"}</button>
+        </div> : <StatusPill tone="purple">Önizleme</StatusPill>}
       />
       {source === "http" && product.status === "draft" && !canWriteDraft && <div className="notice" role="status">
         Taslak okunabilir; yeni değişiklik için bu şubedeki taslak modülü hazır olmalı. <Link to="/admin/settings/modules">Modül ayarları</Link>
       </div>}
       {saveNotice && <div className="notice" role="status">{saveNotice}</div>}
+      {activationError && <div className="notice" role="alert">{activationError}</div>}
+      {source === "http" && !product.isActive && <div className="notice" role="status">Ürün pasif. Yeni siparişe eklenemez ve yeni menü/POS yayınına alınamaz. Açık adisyonlar, mevcut yayın geçmişi ve ürün kaydı korunur.</div>}
       {editing && source === "http" && canWriteDraft && <DraftForm key={`${ctx.firmId}:${ctx.branchApiId}:${product.id}:${product.version}`}
         scope={scope} product={product} onCancel={() => { setEditing(false); notifyChange(); }}
         onSaved={() => { setEditing(false); notifyChange(); setSaveNotice("Taslak değişikliği veritabanına kaydedildi."); }} />}

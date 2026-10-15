@@ -92,7 +92,7 @@ export HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_featur
 export HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features'
 
 printf '\n[3/6] Veritabanı migration’ları uygulanıyor…\n'
-for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext ServiceDbContext InventoryDbContext CashDbContext; do
+for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext; do
   printf '  • %s\n' "$context"
   dotnet tool run dotnet-ef database update \
     --project apps/api/Hipos.Api/Hipos.Api.csproj \
@@ -107,6 +107,7 @@ npm run demo:seed:cari
 npm run demo:seed:service
 npm run demo:seed:inventory
 npm run demo:seed:cash
+npm run demo:seed:expenses
 
 printf '\n[5/6] API derleniyor…\n'
 dotnet build apps/api/Hipos.Api/Hipos.Api.csproj --no-restore
@@ -134,7 +135,7 @@ fi
 (
   cd "$ROOT_DIR/apps/admin"
   exec env VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_SALES_PROVIDER=http \
-    VITE_CARI_PROVIDER=http VITE_SERVICE_PROVIDER=http VITE_INVENTORY_PROVIDER=http VITE_CASH_PROVIDER=http \
+    VITE_CARI_PROVIDER=http VITE_SERVICE_PROVIDER=http VITE_INVENTORY_PROVIDER=http VITE_CASH_PROVIDER=http VITE_EXPENSE_PROVIDER=http \
     VITE_API_BASE_URL=http://127.0.0.1:5180 HIPOS_DEV_API_TARGET=http://127.0.0.1:5180 \
     "$ROOT_DIR/node_modules/.bin/vite" --host 0.0.0.0 --port 5173 --strictPort
 ) >"$LOG_DIR/admin.log" 2>&1 &

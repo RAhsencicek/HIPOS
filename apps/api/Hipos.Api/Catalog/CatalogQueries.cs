@@ -11,12 +11,12 @@ public sealed record CatalogPageInfo(int Page, int PageSize, int TotalItems, int
 public sealed record CatalogProduct(
     string Id, string FirmId, string? BrandId, string[] BranchIds,
     string Name, string Sku, CatalogCategory Category, string Status,
-    string[] Channels, string Image, bool RecipeLinked, CatalogMoney Price,
+    bool IsActive, string[] Channels, string Image, bool RecipeLinked, CatalogMoney Price,
     string PriceSource, DateTimeOffset UpdatedAt, int Version);
 public sealed record CatalogProductDetail(
     string Id, string FirmId, string? BrandId, string[] BranchIds,
     string Name, string Sku, CatalogCategory Category, string Status,
-    string[] Channels, string Image, bool RecipeLinked, CatalogMoney Price,
+    bool IsActive, string[] Channels, string Image, bool RecipeLinked, CatalogMoney Price,
     string PriceSource, DateTimeOffset UpdatedAt, int Version,
     string Description, string[] Allergens, string[] OptionGroups);
 public sealed record CatalogProductList(
@@ -82,7 +82,7 @@ public sealed class CatalogQueries(CatalogDbContext db)
         return new CatalogProductDetail(
             product.Id, product.FirmId, product.BrandId, product.BranchIds,
             product.Name, product.Sku, product.Category, product.Status,
-            product.Channels, product.Image, product.RecipeLinked, product.Price,
+            product.IsActive, product.Channels, product.Image, product.RecipeLinked, product.Price,
             product.PriceSource, product.UpdatedAt, product.Version,
             row.Description, row.Allergens, row.OptionGroups);
     }
@@ -93,7 +93,7 @@ public sealed class CatalogQueries(CatalogDbContext db)
         return new CatalogProduct(
             row.Id.ToString(), row.FirmId, row.BrandId, row.BranchIds,
             row.Name, row.Sku, new CatalogCategory(row.CategoryId, row.CategoryName),
-            row.Status, row.Channels, row.Image, row.RecipeLinked,
+            row.Status, row.IsActive, row.Channels, row.Image, row.RecipeLinked,
             new CatalogMoney(overridePrice?.AmountMinor ?? row.BasePriceMinor, row.Currency),
             overridePrice is null ? "central" : "branch_override", row.UpdatedAt, row.Version);
     }

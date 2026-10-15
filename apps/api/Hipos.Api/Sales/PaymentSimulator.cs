@@ -23,7 +23,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
 {
     public async Task<PaymentCommandResult> StartAsync(
         string firmId, string branchId, Guid orderId, StartSimulatedPayment command,
-        string actor, CancellationToken cancellationToken)
+        string actor, CancellationToken cancellationToken, bool requireCheckCapability = false)
     {
         if (command.AttemptId == Guid.Empty || command.AmountMinor <= 0 ||
             command.Method is not ("cash" or "card") ||
@@ -41,6 +41,12 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
         var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
             transaction.GetDbTransaction(), firmId, branchId, "payments.simulator", cancellationToken);
         if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+        if (requireCheckCapability)
+        {
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "sales.checks", cancellationToken);
+            if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+        }
         var order = await LockOrderAsync(firmId, branchId, orderId, cancellationToken);
         if (order is null)
             return PaymentCommandResult.Rejected("ORDER_NOT_FOUND", 404, "Sipariş bu şubede bulunamadı.");
@@ -65,7 +71,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
         var now = DateTimeOffset.UtcNow;
         var attempt = new PaymentAttemptRow
         {
-            Id = command.AttemptId, FirmId = firmId, BranchId = branchId, OrderId = orderId,
+            Id = command.AttemptId, CheckId = order.CheckId,
+            FirmId = firmId, BranchId = branchId, OrderId = orderId,
             AmountMinor = command.AmountMinor, Currency = "TRY", Method = command.Method,
             Status = command.SimulatedOutcome, RequestedOutcome = command.SimulatedOutcome,
             Version = 1, Actor = actor, CreatedAt = now, UpdatedAt = now,

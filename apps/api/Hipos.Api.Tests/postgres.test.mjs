@@ -21,10 +21,20 @@ const pgBin = "/opt/homebrew/opt/postgresql@18/bin";
 const firm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const moda = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 const besiktas = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+const atasehir = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3";
 const single = "11111111-1111-4111-8111-111111111111";
 const singleBranch = "33333333-3333-4333-8333-333333333333";
 const pizzaId = "66666666-6666-4666-8666-666666666601";
 const cakeId = "66666666-6666-4666-8666-666666666606";
+const httpProviderEnv = {
+  VITE_FEATURE_PROVIDER: "http",
+  VITE_CATALOG_PROVIDER: "http",
+  VITE_CARI_PROVIDER: "http",
+  VITE_SERVICE_PROVIDER: "http",
+  VITE_INVENTORY_PROVIDER: "http",
+  VITE_CASH_PROVIDER: "http",
+  VITE_SALES_PROVIDER: "http",
+};
 
 async function freePort() {
   const server = createServer();
@@ -260,11 +270,40 @@ test(
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "CatalogDbContext"],
         { cwd: repo, env },
       );
-      await execFile(
-        "dotnet",
-        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "SalesDbContext"],
-        { cwd: repo, env },
-      );
+      const legacySalesFirm = "abababab-abab-4bab-8bab-abababababab";
+      const legacySalesBranch = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc";
+      const legacySalesOrder = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+      const legacyPayment = "dededede-dede-4ede-8ede-dededededede";
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
+        "20261007122833_AddSimulatedPayments", "--project", project, "--context", "SalesDbContext"], { cwd: repo, env });
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO sales.orders (id,firm_id,branch_id,source,status,payment_status,total_minor,currency,request_fingerprint,created_at,version)
+         VALUES ('${legacySalesOrder}','${legacySalesFirm}','${legacySalesBranch}','migration_fixture','open','paid',1000,'TRY',repeat('a',64),'2026-10-08T09:00:00Z',1);
+         INSERT INTO sales.order_audit (order_id,firm_id,branch_id,actor,action,version,occurred_at)
+         VALUES ('${legacySalesOrder}','${legacySalesFirm}','${legacySalesBranch}','migration-test','created',1,'2026-10-08T09:00:00Z');
+         INSERT INTO sales.payment_attempts (id,firm_id,branch_id,order_id,amount_minor,currency,method,status,requested_outcome,version,actor,created_at,updated_at)
+         VALUES ('${legacyPayment}','${legacySalesFirm}','${legacySalesBranch}','${legacySalesOrder}',1000,'TRY','cash','succeeded','succeeded',1,'migration-test','2026-10-08T09:01:00Z','2026-10-08T09:01:00Z');
+         INSERT INTO sales.payment_attempt_audit (attempt_id,order_id,firm_id,branch_id,actor,action,status,version,occurred_at)
+         VALUES ('${legacyPayment}','${legacySalesOrder}','${legacySalesFirm}','${legacySalesBranch}','migration-test','started','succeeded',1,'2026-10-08T09:01:00Z');`]);
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
+        "20261015114911_SalesChecksNullableBackfill", "--project", project, "--context", "SalesDbContext"], { cwd: repo, env });
+      const salesBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT check_id::text FROM sales.orders WHERE id='${legacySalesOrder}')||','||
+                (SELECT check_id::text FROM sales.payment_attempts WHERE id='${legacyPayment}')||','||
+                (SELECT count(*)::text FROM sales.check_audit WHERE check_id='${legacySalesOrder}')`]);
+      assert.equal(salesBackfill.stdout.trim(), `${legacySalesOrder},${legacySalesOrder},1`);
+      const preservedSales = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM sales.orders WHERE id='${legacySalesOrder}')||','||
+                (SELECT count(*) FROM sales.order_audit WHERE order_id='${legacySalesOrder}')||','||
+                (SELECT count(*) FROM sales.payment_attempts WHERE id='${legacyPayment}')||','||
+                (SELECT count(*) FROM sales.payment_attempt_audit WHERE attempt_id='${legacyPayment}')||','||
+                (SELECT source||','||total_minor||','||status||','||payment_status FROM sales.orders WHERE id='${legacySalesOrder}')||','||
+                (SELECT amount_minor||','||status FROM sales.payment_attempts WHERE id='${legacyPayment}')`]);
+      assert.equal(preservedSales.stdout.trim(), "1,1,1,1,migration_fixture,1000,open,paid,1000,succeeded",
+        "Legacy sipariş, sipariş audit'i, ödeme ve ödeme audit'i backfill sırasında korunmalı.");
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "20261008100143_InitCari", "--project", project, "--context", "CariDbContext"],
@@ -291,8 +330,28 @@ test(
       await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO service.waiters (id,firm_id,branch_id,name,is_active,updated_at)
-         VALUES ('legacy-waiter-preserved','${single}','${singleBranch}','Önceki Garson',true,'2026-10-08T09:00:00Z');`]);
-      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
+         VALUES ('legacy-waiter-preserved','${single}','${singleBranch}','Önceki Garson',true,'2026-10-08T09:00:00Z');
+         INSERT INTO service.tables (id,firm_id,branch_id,number,name,is_active,version,updated_at)
+         VALUES ('legacy-migration-table','${legacySalesFirm}','${legacySalesBranch}',12,'Önceki Masa',true,1,'2026-10-08T09:00:00Z');
+         INSERT INTO service.assignments (id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by)
+         VALUES ('efefefef-efef-4fef-8fef-efefefefefef','${legacySalesFirm}','${legacySalesBranch}','legacy-migration-table','${legacySalesOrder}',NULL,'2026-10-08T09:02:00Z',NULL,1,'migration-test',NULL);`]);
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
+        "20261015114942_ServiceAssignmentsChecksNullableBackfill", "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
+      const serviceBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT check_id::text FROM service.assignments WHERE id='efefefef-efef-4fef-8fef-efefefefefef')||','||
+                (SELECT table_id FROM sales.checks WHERE id='${legacySalesOrder}')`]);
+      assert.equal(serviceBackfill.stdout.trim(), `${legacySalesOrder},legacy-migration-table`);
+      const preservedAssignment = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*)||','||order_id||','||table_id||','||coalesce(waiter_id,'')||','||check_id::text||','||
+                (closed_at IS NULL)::text
+         FROM service.assignments WHERE id='efefefef-efef-4fef-8fef-efefefefefef'
+         GROUP BY order_id,table_id,waiter_id,check_id,closed_at`]);
+      assert.equal(preservedAssignment.stdout.trim(),
+        `1,${legacySalesOrder},legacy-migration-table,,${legacySalesOrder},true`,
+        "Legacy service assignment ve açık masa bağlamı korunmalı.");
+      if (process.env.HIPOS_MIGRATION_BACKFILL_ONLY === "1") return;
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
@@ -301,6 +360,11 @@ test(
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "CashDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ExpenseDbContext"],
         { cwd: repo, env },
       );
       const migratedCategory = await runPg("psql", [
@@ -409,13 +473,68 @@ test(
 
       const featureSettingsPath = `/api/v1/firms/${single}/branches/${singleBranch}/features`;
       const cashPath = `/api/v1/firms/${single}/branches/${singleBranch}/cash`;
+      const defaultRegisterPath = `/api/v1/firms/${firm}/branches/${moda}/cash/registers/default`;
+      const cashFeatureBeforeProvision = await request(featurePath(moda), "GET", undefined, "manager-moda");
+      const cashModuleBeforeProvision = cashFeatureBeforeProvision.data.find((state) => state.key === "cash.management").desiredEnabled;
+      const provisionBody = { requestId: "99999999-9999-4999-8999-999999999e01" };
+      const provisioningResults = await Promise.all([
+        request(defaultRegisterPath, "PUT", provisionBody, "manager-moda"),
+        request(defaultRegisterPath, "PUT", { requestId: "99999999-9999-4999-8999-999999999e02" }, "manager-moda"),
+      ]);
+      const provisionedRegister = provisioningResults[0];
+      const provisionedAgain = provisioningResults[1];
+      assert.deepEqual(provisioningResults.map((result) => result.status).sort(), [200, 201]);
+      assert.equal(provisionedRegister.status === 201 || provisionedAgain.status === 201, true);
+      assert.equal(provisionedRegister.data.register.code, "MAIN");
+      assert.equal(provisionedRegister.data.register.name, "Ana Kasa");
+      assert.equal(provisionedRegister.data.register.providerMode, "manual");
+      assert.equal(provisionedAgain.data.register.id, provisionedRegister.data.register.id);
+      assert.equal((await request(featurePath(moda), "GET", undefined, "manager-moda")).data.find((state) => state.key === "cash.management").desiredEnabled,
+        cashModuleBeforeProvision, "Provisioning cash.management tercihini değiştirmemeli.");
+      assert.equal((await request(defaultRegisterPath, "PUT", provisionBody, "manager-single")).status, 403);
+      assert.equal((await request(defaultRegisterPath, "PUT", provisionBody, "manager-moda")).status, 200,
+        "Aynı requestId ile provisioning tekrarı mevcut MAIN kasayı döndürmeli.");
+      assert.equal((await request(`/api/v1/firms/${single}/branches/${singleBranch}/cash/registers/default`, "PUT",
+        { requestId: "99999999-9999-4999-8999-999999999e03" }, "manager-moda")).status, 403,
+      "Yönetici yetkili olmadığı şubeye kasa provision edememeli.");
+      const provisionCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${moda}' AND code='MAIN'`]);
+      assert.equal(provisionCounts.stdout.trim(), "1,1", "İdempotent provisioning ikinci kasa/audit oluşturmamalı.");
       const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
       const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
         "SELECT (SELECT count(*) FROM cash.registers)||','||(SELECT count(*) FROM cash.shifts)||','||(SELECT count(*) FROM cash.movements)"]);
-      assert.equal(cashSeedCounts.stdout.trim(), "1,2,6");
+      assert.equal(cashSeedCounts.stdout.trim(), "2,2,6", "Demo KAD-01 ve ayrıca provision edilen MAIN kasası vardır.");
+      const kadDefaultPath = `/api/v1/firms/${single}/branches/${singleBranch}/cash/registers/default`;
+      const kadProvision = await request(kadDefaultPath, "PUT",
+        { requestId: "99999999-9999-4999-8999-999999999e04" }, "manager-single");
+      assert.equal(kadProvision.status, 409, "Mevcut KAD-01 varken ikinci kasa provision edilmemeli.");
+      assert.equal(kadProvision.data.code, "EXISTING_REGISTER");
+      const kadRegisters = await request(`/api/v1/firms/${single}/branches/${singleBranch}/cash/registers`, "GET", undefined, "manager-single");
+      assert.deepEqual(kadRegisters.data.items.map((register) => register.code), ["KAD-01"]);
+      const emptyBranchPath = `/api/v1/firms/${firm}/branches/${besiktas}/cash/registers/default`;
+      const emptyBranchRequest = { requestId: "99999999-9999-4999-8999-999999999e05" };
+      const createdDefault = await request(emptyBranchPath, "PUT", emptyBranchRequest, "manager-multi");
+      assert.equal(createdDefault.status, 201, "Aktif kasası olmayan şubede varsayılan kasa oluşturulmalı.");
+      assert.deepEqual([createdDefault.data.register.code, createdDefault.data.register.name, createdDefault.data.register.providerMode],
+        ["MAIN", "Ana Kasa", "manual"]);
+      const replayedDefault = await request(emptyBranchPath, "PUT", emptyBranchRequest, "manager-multi");
+      assert.equal(replayedDefault.status, 200);
+      assert.equal(replayedDefault.data.register.id, createdDefault.data.register.id);
+      const emptyBranchCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${besiktas}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${besiktas}' AND code='MAIN'`]);
+      assert.equal(emptyBranchCounts.stdout.trim(), "1,1", "Provisioning tekrarı ek kasa veya audit üretmemeli.");
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-c",
+        `INSERT INTO cash.registers (id,firm_id,branch_id,code,name,provider_mode,is_active,version) VALUES ('99999999-9999-4999-8999-999999999e06','${firm}','${atasehir}','MAIN','Yanlış Varsayılan','manual',true,1)`]);
+      const conflictingMain = await request(`/api/v1/firms/${firm}/branches/${atasehir}/cash/registers/default`, "PUT",
+        { requestId: "99999999-9999-4999-8999-999999999e07" }, "manager-multi");
+      assert.equal(conflictingMain.status, 409);
+      assert.equal(conflictingMain.data.code, "DEFAULT_REGISTER_CONFLICT",
+        "MAIN kaydı varsayılan özelliklerle uyuşmuyorsa üzerine yazılmamalı.");
       const cashOverview = await request(`${cashPath}/overview`, "GET", undefined, "manager-single");
       assert.equal(cashOverview.status, 200);
       assert.equal(cashOverview.data.source, "postgres");
@@ -469,17 +588,79 @@ test(
         requestId: "99999999-9999-4999-8999-999999999f09", registerId: cashRegisterId, openingCashMinor: 20000,
       }, "manager-single");
       assert.equal(openedBeforeDisable.status, 201);
+      const correctionPath = `${cashPath}/movements/${cashOut.requestId}/corrections`;
+      assert.equal((await request(correctionPath, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f13", correctionType: "reversal", correctionReason: "Başka firma testi",
+      }, "manager-moda")).status, 403, "Başka firmadan düzeltme isteği reddedilmeli.");
+      assert.equal((await request(correctionPath, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f0c", correctionType: "replace", correctionReason: "Yanlış kayıt",
+      }, "manager-single")).data.code, "INVALID_CORRECTION");
+      const reversalBody = { requestId: "99999999-9999-4999-8999-999999999f0d",
+        correctionType: "reversal", correctionReason: "Yanlış manuel gider kaydı" };
+      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO cash.movements (id,firm_id,branch_id,register_id,shift_id,kind,category,amount_minor,currency,description,source,original_movement_id,correction_type,correction_reason,actor,created_at) VALUES ('99999999-9999-4999-8999-999999999f17','${single}','${singleBranch}','${cashRegisterId}','${cashShiftId}','manual_out','other',1,'TRY','invalid correction','manual','77777777-7777-4777-8777-777777777712','reversal',NULL,'test',now())`]));
+      const reversed = await request(correctionPath, "POST", reversalBody, "manager-single");
+      assert.equal(reversed.status, 201);
+      assert.equal(reversed.data.movement.kind, "manual_in");
+      assert.equal(reversed.data.movement.amountMinor, cashOut.amountMinor);
+      assert.equal(reversed.data.movement.originalMovementId, cashOut.requestId);
+      assert.equal(reversed.data.movement.shiftId, openedBeforeDisable.data.shift.id,
+        "Orijinal vardiya kapalıysa reversal mevcut açık vardiyaya yazılmalı.");
+      assert.equal(reversed.data.movement.correctionType, "reversal");
+      assert.equal((await request(correctionPath, "POST", reversalBody, "manager-single")).status, 200);
+      assert.equal((await request(correctionPath, "POST", { ...reversalBody,
+        requestId: "99999999-9999-4999-8999-999999999f0e" }, "manager-single")).data.code, "MOVEMENT_ALREADY_CORRECTED");
+      const originalAfterCorrection = await request(`${cashPath}/movements?shiftId=${cashShiftId}`, "GET", undefined, "manager-single");
+      assert.equal(originalAfterCorrection.data.items.find((movement) => movement.id === cashOut.requestId).kind, "manual_out");
+      const correctionAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM cash.audit WHERE firm_id='${single}' AND branch_id='${singleBranch}' AND action='movement_reversed' AND entity_id='${reversalBody.requestId}'`]);
+      assert.equal(correctionAudit.stdout.trim(), "1");
+      const closeCorrectionShift = await request(`${cashPath}/shifts/${openedBeforeDisable.data.shift.id}/close`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f0f", expectedVersion: 2, countedCashMinor: 32000,
+      }, "manager-single");
+      assert.equal(closeCorrectionShift.status, 200);
+      const noOpenCorrection = await request(`${cashPath}/movements/${cashIn.requestId}/corrections`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f10", correctionType: "reversal", correctionReason: "Açık vardiya yok testi",
+      }, "manager-single");
+      assert.equal(noOpenCorrection.data.code, "OPEN_SHIFT_REQUIRED");
+      const pendingShiftBeforeDisable = await request(`${cashPath}/shifts`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f14", registerId: cashRegisterId, openingCashMinor: 20000,
+      }, "manager-single");
+      assert.equal(pendingShiftBeforeDisable.status, 201);
+      const demoCashDropId = "77777777-7777-4777-8777-777777777723";
+      const concurrentCorrections = await Promise.all([
+        request(`${cashPath}/movements/${demoCashDropId}/corrections`, "POST", {
+          requestId: "99999999-9999-4999-8999-999999999f15", correctionType: "reversal", correctionReason: "Çakışan düzeltme birinci istek",
+        }, "manager-single"),
+        request(`${cashPath}/movements/${demoCashDropId}/corrections`, "POST", {
+          requestId: "99999999-9999-4999-8999-999999999f16", correctionType: "reversal", correctionReason: "Çakışan düzeltme ikinci istek",
+        }, "manager-single"),
+      ]);
+      assert.deepEqual(concurrentCorrections.map((result) => result.status).sort(), [201, 409]);
+      assert.equal(concurrentCorrections.find((result) => result.status === 409).data.code, "MOVEMENT_ALREADY_CORRECTED");
       const cashDisabled = await request(`${featureSettingsPath}/cash.management`, "PUT", {
         desiredEnabled: false, expectedVersion: cashFeature.version,
       }, "manager-single");
       assert.equal(cashDisabled.status, 200);
       assert.equal((await request(`${cashPath}/shifts`, "POST", { ...openCash,
         requestId: "99999999-9999-4999-8999-999999999f0a" }, "manager-single")).data.code, "FEATURE_DISABLED");
-      const pendingShiftClose = await request(`${cashPath}/shifts/${openedBeforeDisable.data.shift.id}/close`, "POST", {
-        requestId: "99999999-9999-4999-8999-999999999f0b", expectedVersion: 1, countedCashMinor: 20000,
+      assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/movements`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f11", kind: "manual_in", amountMinor: 100,
+        category: "other", description: "Modül kapalı hareket testi",
+      }, "manager-single")).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(`${cashPath}/movements/${cashIn.requestId}/corrections`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f12", correctionType: "reversal", correctionReason: "Modül kapalı düzeltme testi",
+      }, "manager-single")).data.code, "FEATURE_DISABLED");
+      const pendingShiftClose = await request(`${cashPath}/shifts/${pendingShiftBeforeDisable.data.shift.id}/close`, "POST", {
+        requestId: "99999999-9999-4999-8999-999999999f0b", expectedVersion: 2, countedCashMinor: 48000,
       }, "manager-single");
       assert.equal(pendingShiftClose.status, 200, "Modül kapatılınca açık vardiya güvenli biçimde kapatılabilmeli.");
-      assert.equal((await request(`${cashPath}/shifts`, "GET", undefined, "manager-single")).data.total, 4);
+      assert.equal((await request(`${cashPath}/shifts`, "GET", undefined, "manager-single")).data.total, 5);
+      assert.equal((await request(`${cashPath}/registers`, "GET", undefined, "manager-single")).status, 200);
+      assert.equal((await request(`${cashPath}/overview`, "GET", undefined, "manager-single")).status, 200);
+      assert.equal((await request(`${cashPath}/movements`, "GET", undefined, "manager-moda")).status, 403);
       const cashMovements = await request(`${cashPath}/movements?shiftId=${cashShiftId}`, "GET", undefined, "manager-single");
       assert.equal(cashMovements.data.total, 3);
       const immutableCashMovement = cashIn.requestId;
@@ -779,8 +960,7 @@ test(
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
-        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http", VITE_CARI_PROVIDER: "http",
-          VITE_INVENTORY_PROVIDER: "http", VITE_CASH_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        env: { ...process.env, ...httpProviderEnv, VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -808,13 +988,20 @@ test(
       await cashPage.getByLabel("Açıklama").fill("Panel öğle servisi nakit satış toplamı");
       await cashPage.getByRole("button", { name: "Hareketi kaydet" }).click();
       await expect(cashPage.getByText("Nakit hareketi değiştirilemez kasa defterine kaydedildi.")).toBeVisible();
+      await cashPage.goto(`${uiBase}/admin/cash/movements`);
+      const panelMovement = cashPage.locator(".cash-movement-list article").filter({ hasText: "Panel öğle servisi nakit satış toplamı" });
+      await panelMovement.getByRole("button", { name: "Nakit satış girişi hareketini düzelt" }).click();
+      await cashPage.getByLabel("Gerekçe").fill("Panelde yanlışlıkla girilmiş örnek hareket");
+      await cashPage.getByRole("button", { name: "Ters kaydı oluştur" }).click();
+      await expect(cashPage.getByText("Ters kayıt yeni hareket olarak eklendi; orijinal kayıt değişmedi.")).toBeVisible();
       await cashPage.goto(`${uiBase}/admin/cash/opening-closing`);
       await expect(cashPage.getByRole("heading", { name: "Vardiya açılış / kapanış", level: 1 })).toBeVisible();
-      await cashPage.getByLabel("Kasada sayılan (TL)").fill("1250,00");
+      await cashPage.getByLabel("Kasada sayılan (TL)").fill("1000,00");
       await cashPage.getByRole("button", { name: "Say ve vardiyayı kapat" }).click();
       await expect(cashPage.getByText("Vardiya kapatıldı; sayım farkı ve açıklaması saklandı.")).toBeVisible();
       await cashPage.goto(`${uiBase}/admin/cash/movements`);
       await expect(cashPage.getByText("Panel öğle servisi nakit satış toplamı")).toBeVisible();
+      await expect(cashPage.getByText("Panelde yanlışlıkla girilmiş örnek hareket")).toBeVisible();
       await cariPage.goto(`${uiBase}/admin/customers/customers`);
       await expect(cariPage.getByRole("heading", { name: "Müşteriler", level: 1 })).toBeVisible();
       await expect(cariPage.getByText("İletişim kartları bu ekrandan yönetilir")).toBeVisible();
@@ -1100,13 +1287,13 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
-      assert.equal(catalogMigrationCount.stdout.trim(), "7");
+      assert.equal(catalogMigrationCount.stdout.trim(), "8");
       const salesMigrationCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM sales."__EFMigrationsHistory"',
       ]);
-      assert.equal(salesMigrationCount.stdout.trim(), "2");
+      assert.equal(salesMigrationCount.stdout.trim(), "3");
       const auditCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -1171,9 +1358,14 @@ test(
       const salesList = (branchId) =>
         `/api/v1/firms/${firm}/sales/orders${branchId ? `?branchId=${branchId}` : ""}`;
       const posOrders = (branchId) => `/api/v1/firms/${firm}/branches/${branchId}/sales/orders`;
+      const salesChecks = (branchId) => `/api/v1/firms/${firm}/branches/${branchId}/sales/checks`;
       const orderId = "88888888-8888-4888-8888-888888888801";
       const orderBody = { orderId, items: [{ productId: pizzaId, quantity: 2 }] };
       assert.deepEqual((await request(salesList(moda))).data.items, []);
+      assert.equal((await request(salesChecks(moda), "POST", {
+        requestId: "88888888-8888-4888-8888-888888888901", firstOrderId: "88888888-8888-4888-8888-888888888902",
+        items: [{ productId: pizzaId, quantity: 1 }], customerId: null, tableId: null, waiterId: null,
+      }, "pos-moda")).data.code, "FEATURE_DISABLED");
       assert.equal((await request(posOrders(moda), "POST", orderBody, "pos-moda")).data.code, "FEATURE_DISABLED");
       assert.equal((await request(posOrders(moda), "POST", orderBody)).status, 403);
       assert.equal((await request(posOrders(besiktas), "POST", orderBody, "pos-moda")).status, 403);
@@ -1181,8 +1373,16 @@ test(
       const salesEnabled = await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: true, expectedVersion: 1,
       });
-      assert.equal(salesEnabled.status, 200);
-      assert.equal(salesEnabled.data.effectiveForNewWork, true);
+      assert.equal(salesEnabled.data.code, "DEPENDENCY_NOT_READY");
+      const checksEnabled = await request(featurePath(moda, "sales.checks"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      });
+      assert.equal(checksEnabled.status, 200);
+      const salesEnabledAgain = await request(featurePath(moda, "sales.pos_orders"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      });
+      assert.equal(salesEnabledAgain.status, 200);
+      assert.equal(salesEnabledAgain.data.effectiveForNewWork, true);
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, orderId: "88888888-8888-4888-8888-888888888802",
         items: [{ productId: cakeId, quantity: 1 }],
@@ -1269,8 +1469,7 @@ test(
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
-        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_SERVICE_PROVIDER: "http",
-          VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        env: { ...process.env, ...httpProviderEnv, VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -1309,6 +1508,97 @@ test(
       assert.equal((await request(`${modaService}/assignments`, "POST", {
         ...assignment, requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef",
       }, "pos-moda")).data.code, "TABLE_OCCUPIED");
+      const modaCariState = (await request(featurePath(moda))).data.find((row) => row.key === "cari.management");
+      const modaCariEnabled = await request(featurePath(moda, "cari.management"), "PUT", {
+        desiredEnabled: true, expectedVersion: modaCariState.version,
+      });
+      assert.equal(modaCariEnabled.status, 200);
+      const modaCustomer = await request(cariPath(firm, moda), "POST", {
+        name: "Adisyon Test Müşterisi", types: ["customer"],
+      });
+      assert.equal(modaCustomer.status, 201);
+      const checkBody = (requestId, firstOrderId, links = {}) => ({
+        requestId, firstOrderId, items: [{ productId: pizzaId, quantity: 1 }],
+        customerId: links.customerId ?? null, tableId: links.tableId ?? null, waiterId: links.waiterId ?? null,
+      });
+      const ledgerCountsBeforeChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||
+                (SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
+      const selfServiceCheck = await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888901", "88888888-8888-4888-8888-888888888902"), "pos-moda");
+      assert.equal(selfServiceCheck.status, 201);
+      assert.equal(selfServiceCheck.data.customerId ?? null, null);
+      assert.equal(selfServiceCheck.data.tableId ?? null, null);
+      assert.equal(selfServiceCheck.data.waiterId ?? null, null);
+      assert.equal((await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888901", "88888888-8888-4888-8888-888888888902"), "pos-moda")).status, 200);
+      assert.equal((await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888901", "88888888-8888-4888-8888-888888888902",
+        { customerId: "nonexistent-customer" }), "pos-moda")).data.code, "CHECK_REQUEST_CONFLICT");
+      assert.equal((await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888928", "88888888-8888-4888-8888-888888888929",
+        { customerId: semanticParty.data.id }), "pos-moda")).data.code, "CUSTOMER_NOT_FOUND");
+      const customerSelfServiceCheck = await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888903", "88888888-8888-4888-8888-888888888904",
+        { customerId: modaCustomer.data.id }), "pos-moda");
+      assert.equal(customerSelfServiceCheck.status, 201);
+      assert.equal(customerSelfServiceCheck.data.customerId, modaCustomer.data.id);
+      const table14 = await request(`${modaService}/tables`, "POST", { number: 14, name: "Masa 14" });
+      const table15 = await request(`${modaService}/tables`, "POST", { number: 15, name: "Masa 15" });
+      assert.equal(table14.status, 201);
+      assert.equal(table15.status, 201);
+      const tableServiceAnonymous = await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888905", "88888888-8888-4888-8888-888888888906",
+        { tableId: table14.data.id, waiterId: waiter.data.id }), "pos-moda");
+      assert.equal(tableServiceAnonymous.status, 201);
+      assert.equal(tableServiceAnonymous.data.customerId ?? null, null);
+      assert.equal(tableServiceAnonymous.data.tableId, table14.data.id);
+      assert.equal(tableServiceAnonymous.data.waiterId, waiter.data.id);
+      const tableServiceCustomer = await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888907", "88888888-8888-4888-8888-888888888908",
+        { customerId: modaCustomer.data.id, tableId: table15.data.id }), "pos-moda");
+      assert.equal(tableServiceCustomer.status, 201);
+      assert.equal(tableServiceCustomer.data.customerId, modaCustomer.data.id);
+      assert.equal(tableServiceCustomer.data.waiterId ?? null, null);
+      const table14Plan = await request(`${modaService}/tables`);
+      const table14Assignment = table14Plan.data.items.find((entry) => entry.id === table14.data.id).assignment;
+      assert.equal(table14Assignment.orderId, "88888888-8888-4888-8888-888888888906");
+      const checkDetailPath = `${salesChecks(moda)}/${selfServiceCheck.data.id}`;
+      assert.equal((await request(checkDetailPath, "GET", undefined, "manager-moda")).data.orders.length, 1);
+      assert.equal((await request(salesChecks(moda), "GET", undefined, "manager-moda")).data.items.length, 5);
+      const appendedOrder = await request(`${checkDetailPath}/orders`, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888909", items: [{ productId: pizzaId, quantity: 1 }],
+      }, "pos-moda");
+      assert.equal(appendedOrder.status, 201);
+      assert.equal(appendedOrder.data.orders.length, 2);
+      assert.equal(appendedOrder.data.totalMinor, 64000);
+      assert.equal((await request(`${checkDetailPath}/orders`, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888909", items: [{ productId: pizzaId, quantity: 1 }],
+      }, "pos-moda")).status, 200);
+      assert.equal((await request(`${checkDetailPath}/orders`, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888909", items: [{ productId: pizzaId, quantity: 2 }],
+      }, "pos-moda")).data.code, "ORDER_ID_CONFLICT");
+      const ledgerCountsAfterChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||
+                (SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
+      assert.equal(ledgerCountsAfterChecks.stdout.trim(), ledgerCountsBeforeChecks.stdout.trim(),
+        "Adisyon oluşturma kasa veya cari hareketi üretmemeli.");
+      // Rollout order: nullable columns + legacy backfill, then API writes with required check links,
+      // and only then enforce NOT NULL and foreign keys.
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "SalesDbContext"], { cwd: repo, env });
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "ServiceDbContext"], { cwd: repo, env });
+      const requiredCheckColumns = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT string_agg(table_schema||'.'||table_name||':'||is_nullable, ',' ORDER BY table_schema,table_name)
+         FROM information_schema.columns
+         WHERE (table_schema='sales' AND table_name IN ('orders','payment_attempts') AND column_name='check_id')
+            OR (table_schema='service' AND table_name='assignments' AND column_name='check_id')`]);
+      assert.equal(requiredCheckColumns.stdout.trim(),
+        "sales.orders:NO,sales.payment_attempts:NO,service.assignments:NO");
       const tablesOff = await request(featurePath(moda, "branches.tables"), "PUT", { desiredEnabled: false, expectedVersion: 2 });
       assert.equal(tablesOff.status, 200);
       const afterTablesOff = (await request(featurePath(moda))).data;
@@ -1356,7 +1646,7 @@ test(
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
       assert.equal((await request(`${posOrders(moda)}/${orderId}`)).data.status, "open");
-      assert.equal((await request(salesList(moda))).data.items.length, 1);
+      assert.equal((await request(salesList(moda))).data.items.length, 6);
       assert.deepEqual((await request(salesList(besiktas))).data.items, []);
       assert.equal((await request(salesList(), "GET", undefined, "manager-moda")).status, 403);
       assert.equal((await request(salesList(moda), "GET", undefined, "manager-single")).status, 403);
@@ -1366,6 +1656,34 @@ test(
         items: [{ productId: pizzaId, quantity: 1 }],
       }, "pos-besiktas");
       assert.equal(besiktasOrder.data.code, "FEATURE_DISABLED");
+      assert.equal((await request(featurePath(besiktas, "sales.checks"), "PUT", {
+        desiredEnabled: true, expectedVersion: 1,
+      })).status, 200);
+      const besiktasFeatures = (await request(featurePath(besiktas))).data;
+      const besiktasTables = besiktasFeatures.find((row) => row.key === "branches.tables");
+      if (besiktasTables.desiredEnabled) assert.equal((await request(featurePath(besiktas, "branches.tables"), "PUT", {
+        desiredEnabled: false, expectedVersion: besiktasTables.version,
+      })).status, 200);
+      const besiktasCari = (await request(featurePath(besiktas))).data.find((row) => row.key === "cari.management");
+      if (besiktasCari.desiredEnabled) assert.equal((await request(featurePath(besiktas, "cari.management"), "PUT", {
+        desiredEnabled: false, expectedVersion: besiktasCari.version,
+      })).status, 200);
+      assert.equal((await request(salesChecks(besiktas), "POST", {
+        requestId: "88888888-8888-4888-8888-888888888924", firstOrderId: "88888888-8888-4888-8888-888888888925",
+        items: [{ productId: pizzaId, quantity: 1 }], customerId: null, tableId: "closed-table", waiterId: null,
+      }, "pos-besiktas")).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(salesChecks(besiktas), "POST", {
+        requestId: "88888888-8888-4888-8888-888888888926", firstOrderId: "88888888-8888-4888-8888-888888888927",
+        items: [{ productId: pizzaId, quantity: 1 }], customerId: modaCustomer.data.id, tableId: null, waiterId: null,
+      }, "pos-besiktas")).data.code, "FEATURE_DISABLED");
+      const selfServiceWithTableModulesOff = await request(salesChecks(besiktas), "POST", {
+        requestId: "88888888-8888-4888-8888-888888888920",
+        firstOrderId: "88888888-8888-4888-8888-888888888921",
+        items: [{ productId: pizzaId, quantity: 1 }], customerId: null, tableId: null, waiterId: null,
+      }, "pos-besiktas");
+      assert.equal(selfServiceWithTableModulesOff.status, 201);
+      assert.equal(selfServiceWithTableModulesOff.data.tableId ?? null, null);
+      assert.equal(selfServiceWithTableModulesOff.data.waiterId ?? null, null);
       assert.equal((await request(featurePath(besiktas, "sales.pos_orders"), "PUT", {
         desiredEnabled: true, expectedVersion: 1,
       })).status, 200);
@@ -1375,14 +1693,25 @@ test(
       }, "pos-besiktas");
       assert.equal(pricedOrder.status, 201);
       assert.equal(pricedOrder.data.items[0].unitPriceMinor, 34000);
-      assert.equal((await request(salesList())).data.items.length, 2);
+      assert.equal((await request(salesList())).data.items.length, 8);
       assert.equal((await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: false, expectedVersion: 2,
       })).status, 200);
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, orderId: "88888888-8888-4888-8888-888888888804",
       }, "pos-moda")).data.code, "FEATURE_DISABLED");
-      assert.equal((await request(salesList(moda))).data.items.length, 1);
+      assert.equal((await request(salesList(moda))).data.items.length, 6);
+      const checksFeatureOff = await request(featurePath(moda, "sales.checks"), "PUT", {
+        desiredEnabled: false, expectedVersion: 2,
+      });
+      assert.equal(checksFeatureOff.status, 200);
+      assert.equal((await request(`${salesChecks(moda)}/${selfServiceCheck.data.id}`, "GET", undefined, "manager-moda")).status, 200);
+      assert.equal((await request(salesChecks(moda), "POST", checkBody(
+        "88888888-8888-4888-8888-888888888922", "88888888-8888-4888-8888-888888888923"), "pos-moda")).data.code,
+        "FEATURE_DISABLED");
+      assert.equal((await request(featurePath(moda, "sales.checks"), "PUT", {
+        desiredEnabled: true, expectedVersion: 3,
+      })).status, 200);
       const orderAudit = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -1392,31 +1721,39 @@ test(
       assert.equal(orderAudit.stdout.trim(), "created:pos-moda:1");
       await stopApi();
       await startApi();
-      assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 64000);
+      assert.equal((await request(salesList(moda))).data.items.find((item) => item.id === orderId).totalMinor, 64000);
 
       // Simüle ödeme: kısmi başarı, belirsiz sonuç, çözüm, iptal ve tamamlama.
       const paymentsPath = `${posOrders(moda)}/${orderId}/payment-attempts`;
+      const simulatedMovementCounts = async () => {
+        const counts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+          "-d", "hipos_features", "-t", "-A", "-c",
+          `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||` +
+          `(SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
+        return counts.stdout.trim();
+      };
+      const movementCountsBeforePayments = await simulatedMovementCounts();
       const firstAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
       const unknownAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
       const pendingAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
       const finalAttempt = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4";
-      const paymentBody = (attemptId, amountMinor, simulatedOutcome, expectedOrderVersion) => ({
-        attemptId, amountMinor, method: "card", simulatedOutcome, expectedOrderVersion,
+      const paymentBody = (attemptId, amountMinor, simulatedOutcome, expectedOrderVersion, method = "card") => ({
+        attemptId, amountMinor, method, simulatedOutcome, expectedOrderVersion,
       });
-      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda")).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1, "cash"), "pos-moda")).data.code, "FEATURE_DISABLED");
       assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
         desiredEnabled: true, expectedVersion: 1,
       })).status, 200);
-      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1))).status, 403);
-      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-besiktas")).status, 403);
-      const partial = await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda");
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1, "cash"))).status, 403);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1, "cash"), "pos-besiktas")).status, 403);
+      const partial = await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1, "cash"), "pos-moda");
       assert.equal(partial.status, 201);
       assert.equal(partial.data.attempt.simulated, true);
       assert.equal(partial.data.order.paymentStatus, "partially_paid");
       assert.equal(partial.data.order.paidMinor, 20000);
       assert.equal(partial.data.order.remainingMinor, 44000);
       assert.equal(partial.data.order.status, "open");
-      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-moda")).status, 200);
+      assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 20000, "succeeded", 1, "cash"), "pos-moda")).status, 200);
       assert.equal((await request(`${posOrders(besiktas)}/${orderId}/payment-attempts`, "POST",
         paymentBody(firstAttempt, 20000, "succeeded", 1), "pos-besiktas")).data.code, "PAYMENT_NOT_FOUND");
       assert.equal((await request(paymentsPath, "POST", paymentBody(firstAttempt, 21000, "succeeded", 1), "pos-moda")).data.code, "PAYMENT_ID_CONFLICT");
@@ -1453,10 +1790,21 @@ test(
       assert.equal(full.data.order.paidMinor, 64000);
       assert.equal(full.data.order.remainingMinor, 0);
       assert.equal(full.data.order.status, "open");
+      const checkPaymentPath = `${salesChecks(moda)}/${selfServiceCheck.data.id}/payment-attempts`;
+      const checkPayment = await request(checkPaymentPath, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888902",
+        attemptId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6", amountMinor: 32000,
+        method: "cash", simulatedOutcome: "succeeded", expectedOrderVersion: 1,
+      }, "pos-moda");
+      assert.equal(checkPayment.status, 201);
+      assert.equal(checkPayment.data.check.paymentStatus, "partially_paid");
+      assert.equal(checkPayment.data.check.paidMinor, 32000);
+      assert.equal(checkPayment.data.check.remainingMinor, 32000);
+      assert.equal(checkPayment.data.check.payments.length, 1);
       assert.equal((await request(paymentsPath, "POST", paymentBody("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5", 1, "succeeded", 7), "pos-moda")).data.code, "AMOUNT_EXCEEDS_REMAINING");
       assert.equal((await request(paymentsPath)).data.length, 4);
       assert.equal((await request(paymentsPath, "GET", undefined, "manager-single")).status, 403);
-      assert.equal((await request(salesList(moda))).data.items[0].paymentStatus, "paid");
+      assert.equal((await request(salesList(moda))).data.items.find((item) => item.id === orderId).paymentStatus, "paid");
       assert.equal((await request(featurePath(moda, "payments.simulator"), "PUT", {
         desiredEnabled: false, expectedVersion: 4,
       })).status, 200);
@@ -1471,6 +1819,8 @@ test(
         "started:succeeded", "started:unknown", "resolved:failed",
         "started:pending", "resolved:cancelled", "started:succeeded",
       ]);
+      assert.equal(await simulatedMovementCounts(), movementCountsBeforePayments,
+        "Simüle nakit/kart ödemeleri kasa veya cari hareketi üretmemeli.");
 
       // Gerçek taslak → sürümlü fiyat → yayın → test POS satışı.
       const publishedProductId = "77777777-7777-4777-8777-777777777709";
@@ -1555,6 +1905,13 @@ test(
       assert.equal((await request(`${draftPath}/${unpublishedId}/price`, "PUT", {
         priceVersionId: "99999999-9999-4999-8999-999999999913", amountMinor: 28000, expectedVersion: 1,
       })).status, 201);
+      const unpublishedProductState = await request(`/api/v1/firms/${firm}/catalog/products/${unpublishedId}?branchId=${moda}`);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/products/${unpublishedId}/activation`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888814", expectedVersion: unpublishedProductState.data.version, isActive: false,
+      })).status, 200);
+      assert.equal((await request(`${draftPath}/${unpublishedId}/publish`, "POST", {
+        publicationId: "99999999-9999-4999-8999-999999999915", expectedVersion: 2,
+      })).data.code, "PRODUCT_INACTIVE", "Pasif taslak ürün yeni POS yayınına alınmamalı.");
       assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
         desiredEnabled: false, expectedVersion: 2,
       })).status, 200);
@@ -1563,6 +1920,8 @@ test(
       })).data.code, "FEATURE_DISABLED");
       assert.equal((await request(publishHistoryPath)).data.length, 1);
       assert.equal((await request(priceHistoryPath)).data.length, 2);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/products/${unpublishedId}/publications`)).data.length, 0,
+        "Reddedilen pasif ürün yayını geçmişe eklenmemeli.");
 
       // Yönetim paneli → fiyat → yayın → ayrı test POS → salt okunur sipariş görünümü.
       assert.equal((await request(featurePath(moda, "catalog.publishing"), "PUT", {
@@ -1578,8 +1937,7 @@ test(
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
-        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http",
-          VITE_SALES_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        env: { ...process.env, ...httpProviderEnv, VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -1628,6 +1986,20 @@ test(
       })).status, 200);
       assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/products/${panelProduct.id}/publications`)).data.length, 1);
 
+      const menuFeatureBeforeProductLifecycle = (await request(featurePath(moda))).data.find(row => row.key === "catalog.menus");
+      if (!menuFeatureBeforeProductLifecycle.desiredEnabled) assert.equal((await request(featurePath(moda, "catalog.menus"), "PUT", {
+        desiredEnabled: true, expectedVersion: menuFeatureBeforeProductLifecycle.version,
+      })).status, 200);
+      const activeMenuWithProduct = await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888812", expectedVersion: 0,
+        name: "Ürün Durum Koruma Menüsü", description: "Ürün pasifliği mevcut menüyü değiştirmemeli.",
+        sections: [{ sectionId: "products", name: "Ürünler", productIds: [panelProduct.id] }],
+      });
+      assert.equal(activeMenuWithProduct.status, 200);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus/${activeMenuWithProduct.data.id}/activation`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888813", expectedVersion: 1, isActive: true,
+      })).status, 200);
+
       uiOutput = "";
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
@@ -1645,7 +2017,7 @@ test(
       await posPage.getByLabel("Adet").fill("2");
       await posPage.getByRole("button", { name: "Sipariş oluştur" }).click();
       await posPage.getByText("Sipariş veritabanına kaydedildi.").waitFor();
-      assert.equal((await request(salesList(moda))).data.items.length, 2);
+      assert.equal((await request(salesList(moda))).data.items.length, 7);
       assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 69980);
       await posPage.getByRole("button", { name: "Simüle ödeme girişimi oluştur" }).click();
       await posPage.getByText("Simülatör sonucu: başarılı. Gerçek tahsilat yapılmadı.").waitFor();
@@ -1659,8 +2031,7 @@ test(
       ui = spawn(process.execPath, [join(repo, "node_modules/vite/bin/vite.js"),
         "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"], {
         cwd: join(repo, "apps/admin"),
-        env: { ...process.env, VITE_FEATURE_PROVIDER: "http", VITE_CATALOG_PROVIDER: "http",
-          VITE_SALES_PROVIDER: "http", VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
+        env: { ...process.env, ...httpProviderEnv, VITE_API_BASE_URL: uiBase, HIPOS_DEV_API_TARGET: base },
         stdio: ["ignore", "pipe", "pipe"],
       });
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
@@ -1679,7 +2050,94 @@ test(
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, orderId: "88888888-8888-4888-8888-888888888805",
       }, "pos-moda")).status, 201);
-      assert.equal((await request(salesList(moda))).data.items.length, 3);
+      assert.equal((await request(salesList(moda))).data.items.length, 8);
+
+      // Tek ürün aktifliği kabul senaryosu: mevcut adisyonu ve yayın geçmişini koru, yeni işi engelle.
+      const lifecycleOrderId = "88888888-8888-4888-8888-888888888806";
+      const lifecycleOrder = await request(posOrders(moda), "POST", {
+        orderId: lifecycleOrderId, items: [{ productId: panelProduct.id, quantity: 1 }],
+      }, "pos-moda");
+      assert.equal(lifecycleOrder.status, 201);
+      assert.equal(lifecycleOrder.data.status, "open");
+      const productActivationPath = `/api/v1/firms/${firm}/branches/${moda}/catalog/products/${panelProduct.id}/activation`;
+      await managerPage.goto(`${uiBase}/admin/catalog/products/${panelProduct.id}`);
+      await managerPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await managerPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await managerPage.getByRole("button", { name: "Ürünü pasife al" }).waitFor();
+      managerPage.once("dialog", dialog => dialog.accept());
+      await managerPage.getByRole("button", { name: "Ürünü pasife al" }).click();
+      await managerPage.getByText("Ürün pasife alındı. Açık adisyonlar ve geçmiş kayıtlar korunuyor.").waitFor();
+      await managerPage.getByText("Ürün pasif", { exact: true }).waitFor();
+
+      const inactiveProduct = await request(`/api/v1/firms/${firm}/catalog/products/${panelProduct.id}?branchId=${moda}`);
+      assert.equal(inactiveProduct.data.isActive, false);
+      assert.equal(inactiveProduct.data.status, "published");
+      assert.deepEqual(inactiveProduct.data.channels, ["pos"]);
+      const activeMenuAfterProductDeactivation = (await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus`)).data.items
+        .find(item => item.id === activeMenuWithProduct.data.id);
+      assert.equal(activeMenuAfterProductDeactivation.isActive, true, "Ürün pasifliği mevcut aktif menüyü pasifleştirmemeli.");
+      assert.deepEqual(activeMenuAfterProductDeactivation.sections[0].productIds, [panelProduct.id], "Aktif menünün geçmiş içeriği korunmalı.");
+      await managerPage.goto(`${uiBase}/admin/catalog/menus?menu=${activeMenuWithProduct.data.id}`);
+      await managerPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
+      await managerPage.getByRole("combobox", { name: "Şube seçimi" }).selectOption("moda");
+      await managerPage.getByText("Pasif ürün · yeni yayında kullanılamaz").waitFor({ timeout: 8000 });
+      const stillOpen = await request(`${posOrders(moda)}/${lifecycleOrderId}`);
+      assert.equal(stillOpen.status, 200);
+      assert.equal(stillOpen.data.status, "open");
+      assert.deepEqual(stillOpen.data.items.map(item => ({ id: item.productId, name: item.productName, amount: item.unitPriceMinor })),
+        [{ id: panelProduct.id, name: "Panelden Pizza", amount: 34990 }]);
+      assert.equal((await request(posOrders(moda), "POST", {
+        orderId: "88888888-8888-4888-8888-888888888807", items: [{ productId: panelProduct.id, quantity: 1 }],
+      }, "pos-moda")).data.code, "PRODUCT_INACTIVE");
+      const productHistoryPath = `/api/v1/firms/${firm}/branches/${moda}/catalog/products/${panelProduct.id}/publications`;
+      assert.equal((await request(productHistoryPath)).data.length, 1);
+
+      const activationAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT request_id::text || ':' || action || ':' || version || ':' || is_active
+         FROM catalog.product_activation_audit WHERE product_id='${panelProduct.id}'`]);
+      const [activationRequestId, activationAction, activationVersion, activationState] = activationAudit.stdout.trim().split(":");
+      assert.deepEqual([activationAction, activationVersion, activationState], ["deactivated", "5", "false"]);
+      assert.equal((await request(productActivationPath, "POST", {
+        requestId: activationRequestId, expectedVersion: 4, isActive: false,
+      })).data.replayed, true);
+      assert.equal((await request(productActivationPath, "POST", {
+        requestId: activationRequestId, expectedVersion: 3, isActive: true,
+      })).data.code, "REQUEST_ID_CONFLICT");
+      assert.equal((await request(productActivationPath, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888808", expectedVersion: 3, isActive: true,
+      })).data.code, "VERSION_CONFLICT");
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${besiktas}/catalog/products/${panelProduct.id}/activation`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888809", expectedVersion: 3, isActive: true,
+      })).data.code, "FEATURE_DISABLED");
+      assert.equal((await request(`/api/v1/firms/${firm}/catalog/products/${panelProduct.id}?branchId=${moda}`)).data.isActive, false,
+        "Başka şubenin kapalı modülünden gelen istek ürün durumunu değiştirememeli.");
+      const activationAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM catalog.product_activation_audit WHERE product_id='${panelProduct.id}'`]);
+      assert.equal(activationAuditCount.stdout.trim(), "1");
+
+      const menuFeatureState = (await request(featurePath(moda))).data.find(row => row.key === "catalog.menus");
+      if (!menuFeatureState.desiredEnabled) assert.equal((await request(featurePath(moda, "catalog.menus"), "PUT", {
+        desiredEnabled: true, expectedVersion: menuFeatureState.version,
+      })).status, 200);
+      const inactiveProductMenu = await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888810", expectedVersion: 0,
+        name: "Pasif Ürün Yayın Kontrolü", description: "Pasif ürün menü yayınında kullanılamaz.",
+        sections: [{ sectionId: "products", name: "Ürünler", productIds: [panelProduct.id] }],
+      });
+      assert.equal(inactiveProductMenu.status, 200);
+      assert.equal((await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus/${inactiveProductMenu.data.id}/activation`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888811", expectedVersion: 1, isActive: true,
+      })).data.code, "MENU_NOT_READY");
+      const preservedInactiveMenu = (await request(`/api/v1/firms/${firm}/branches/${moda}/catalog/menus`)).data.items.find(item => item.id === inactiveProductMenu.data.id);
+      assert.equal(preservedInactiveMenu.isActive, false);
+      assert.deepEqual(preservedInactiveMenu.sections[0].productIds, [panelProduct.id]);
+      const menuFeatureAfterProductAcceptance = (await request(featurePath(moda))).data.find(row => row.key === "catalog.menus");
+      assert.equal((await request(featurePath(moda, "catalog.menus"), "PUT", {
+        desiredEnabled: false, expectedVersion: menuFeatureAfterProductAcceptance.version,
+      })).status, 200);
+
       await verifyMenuApi({ request, firm, branch: moda, otherBranch: besiktas, pizzaId, cakeId,
         sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
           "-d", "hipos_features", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", query])).stdout });

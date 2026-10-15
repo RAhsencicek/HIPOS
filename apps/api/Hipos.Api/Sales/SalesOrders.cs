@@ -5,6 +5,7 @@ using Hipos.Api.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using System.Data.Common;
 
 namespace Hipos.Api.Sales;
 
@@ -23,11 +24,13 @@ public sealed record SalesOrderResult(SalesOrderDetail? Order, FeatureFailure? F
         new(null, new FeatureFailure(code, status, message), false);
 }
 
-public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, FeatureNewWorkGate gate)
+public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, FeatureNewWorkGate gate,
+    FeatureRuntimeCapabilities runtime)
 {
     public async Task<SalesOrderResult> CreateAsync(
         string firmId, string branchId, CreatePosOrder command, string actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Guid? requestedCheckId = null,
+        SalesCheckRow? checkToCreate = null, string featureKey = "sales.pos_orders")
     {
         if (command.OrderId == Guid.Empty || command.Items is null ||
             command.Items.Count is < 1 or > 20 ||
@@ -38,14 +41,51 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         var sorted = command.Items.OrderBy(item => item.ProductId).ToArray();
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             string.Join("|", sorted.Select(item => $"{item.ProductId:N}:{item.Quantity}")))));
+        var checkId = requestedCheckId ?? command.OrderId;
+        if (checkToCreate is null && featureKey == "sales.pos_orders")
+            checkToCreate = new SalesCheckRow
+            {
+                Id = checkId, FirmId = firmId, BranchId = branchId, Status = "open",
+                Currency = "TRY", CreatedAt = DateTimeOffset.UtcNow, Version = 1,
+            };
+        if (checkId == Guid.Empty || checkToCreate is not null && checkToCreate.Id != checkId)
+            return SalesOrderResult.Rejected("INVALID_CHECK", 400, "Adisyon kimliği geçersiz.");
         var existing = await db.Orders.AsNoTracking().Include(row => row.Lines).Include(row => row.PaymentAttempts)
             .FirstOrDefaultAsync(row => row.Id == command.OrderId, cancellationToken);
-        if (existing is not null) return Existing(existing, firmId, branchId, fingerprint);
+        if (existing is not null) return Existing(existing, firmId, branchId, checkId, fingerprint);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
-            transaction.GetDbTransaction(), firmId, branchId, "sales.pos_orders", cancellationToken);
+            transaction.GetDbTransaction(), firmId, branchId, featureKey, cancellationToken);
         if (blocked is not null) return new SalesOrderResult(null, blocked, false);
+        if (featureKey == "sales.pos_orders")
+        {
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "sales.checks", cancellationToken);
+            if (blocked is not null) return new SalesOrderResult(null, blocked, false);
+        }
+
+        existing = await db.Orders.AsNoTracking().Include(row => row.Lines).Include(row => row.PaymentAttempts)
+            .FirstOrDefaultAsync(row => row.Id == command.OrderId, cancellationToken);
+        if (existing is not null) return Existing(existing, firmId, branchId, checkId, fingerprint);
+
+        var check = await db.Checks.FromSqlInterpolated(
+            $"SELECT * FROM sales.checks WHERE id = {checkId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        var createCheck = check is null && checkToCreate is not null;
+        if (check is null && !createCheck)
+            return SalesOrderResult.Rejected("CHECK_NOT_FOUND", 404, "Adisyon bu şubede bulunamadı.");
+        if (check is not null && checkToCreate is not null)
+            return SalesOrderResult.Rejected("CHECK_REQUEST_CONFLICT", 409, "Adisyon requestId zaten kullanılmış.");
+        if (check is not null && check.Status != "open")
+            return SalesOrderResult.Rejected("CHECK_NOT_OPEN", 409, "Adisyona yeni sipariş eklenemez.");
+
+        if (createCheck)
+        {
+            var relatedFailure = await ValidateCheckLinksAsync(firmId, branchId, checkToCreate!,
+                transaction.GetDbTransaction(), cancellationToken);
+            if (relatedFailure is not null) return new SalesOrderResult(null, relatedFailure, false);
+        }
 
         // Kaynak katalogdan alınır; istemci fiyat veya ürün adı gönderemez.
         var lines = new List<SalesOrderLineRow>();
@@ -54,10 +94,10 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         {
             var product = await catalog.GetAsync(new CatalogScope(firmId, branchId),
                 item.ProductId, cancellationToken);
-            if (product is null || product.Status != "published" ||
+            if (product is null || !product.IsActive || product.Status != "published" ||
                 !product.Channels.Contains("pos") || product.Price.AmountMinor <= 0 ||
                 product.Price.Currency != "TRY")
-                return SalesOrderResult.Rejected("PRODUCT_NOT_SELLABLE", 409,
+                return SalesOrderResult.Rejected(product is { IsActive: false } ? "PRODUCT_INACTIVE" : "PRODUCT_NOT_SELLABLE", 409,
                     "Ürün bu şubede POS satışına açık değil veya geçerli fiyatı yok.");
             long lineTotal;
             try
@@ -79,14 +119,22 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         }
 
         var now = DateTimeOffset.UtcNow;
+        check ??= checkToCreate!;
+        if (createCheck) db.Checks.Add(check);
+        else { check.Version++; check.Status = "open"; }
         var order = new SalesOrderRow
         {
-            Id = command.OrderId, FirmId = firmId, BranchId = branchId,
+            Id = command.OrderId, CheckId = checkId, FirmId = firmId, BranchId = branchId,
             Source = "test_pos", Status = "open", PaymentStatus = "unpaid",
             TotalMinor = total, Currency = "TRY", RequestFingerprint = fingerprint,
             CreatedAt = now, Version = 1, Lines = lines,
         };
         db.Orders.Add(order);
+        db.CheckAudit.Add(new SalesCheckAuditRow
+        {
+            CheckId = check.Id, FirmId = firmId, BranchId = branchId,
+            Actor = actor, Action = createCheck ? "created" : "order_added", Version = check.Version, OccurredAt = now,
+        });
         db.Audit.Add(new SalesOrderAuditRow
         {
             OrderId = order.Id, FirmId = firmId, BranchId = branchId,
@@ -95,12 +143,18 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (createCheck && check.TableId is not null)
+                await CreateServiceAssignmentAsync(check, order, actor, transaction.GetDbTransaction(), cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
             return SalesOrderResult.Rejected("ORDER_ID_CONFLICT", 409,
                 "Sipariş kimliği başka bir işlemde kullanıldı; güncel kaydı yükleyin.");
+        }
+        catch (PostgresException error) when (error.SqlState == PostgresErrorCodes.UniqueViolation && createCheck && check.TableId is not null)
+        {
+            return SalesOrderResult.Rejected("TABLE_OCCUPIED", 409, "Masada zaten açık adisyon var.");
         }
         return new SalesOrderResult(ToDetail(order), null, true);
     }
@@ -127,11 +181,107 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
     }
 
     private static SalesOrderResult Existing(
-        SalesOrderRow row, string firmId, string branchId, string fingerprint) =>
-        row.FirmId == firmId && row.BranchId == branchId && row.RequestFingerprint == fingerprint
+        SalesOrderRow row, string firmId, string branchId, Guid checkId, string fingerprint) =>
+        row.FirmId == firmId && row.BranchId == branchId && row.CheckId == checkId && row.RequestFingerprint == fingerprint
             ? new SalesOrderResult(ToDetail(row), null, false)
             : SalesOrderResult.Rejected("ORDER_ID_CONFLICT", 409,
                 "Sipariş kimliği başka bir kayıt için kullanılıyor.");
+
+    private async Task<FeatureFailure?> ValidateCheckLinksAsync(string firmId, string branchId,
+        SalesCheckRow check, System.Data.Common.DbTransaction transaction, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (check.CustomerId is not null)
+        {
+            if (!runtime.CariReady)
+                return new FeatureFailure("CARI_STORAGE_UNAVAILABLE", 503, "Müşteri doğrulaması için cari migration'ı uygulanmalı.");
+            var blocked = await gate.CheckAndLockAsync(connection, transaction, firmId, branchId,
+                "cari.management", cancellationToken);
+            if (blocked is not null) return blocked;
+            if (!await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM cari.parties WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active AND types @> ARRAY['customer'])",
+                cancellationToken, ("id", check.CustomerId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("CUSTOMER_NOT_FOUND", 404, "Bu şubede aktif müşteri carisi bulunamadı.");
+        }
+        if (check.TableId is not null)
+        {
+            var blocked = await gate.CheckAndLockAsync(connection, transaction, firmId, branchId,
+                "branches.tables", cancellationToken);
+            if (blocked is not null) return blocked;
+            if (!await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM service.tables WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active)",
+                cancellationToken, ("id", check.TableId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM service.assignments WHERE table_id=@id AND closed_at IS NULL)",
+                cancellationToken, ("id", check.TableId)))
+                return new FeatureFailure("TABLE_OCCUPIED", 409, "Masada zaten açık adisyon var.");
+        }
+        if (check.WaiterId is not null)
+        {
+            foreach (var feature in new[] { "staff.records", "service.waiters" })
+            {
+                var blocked = await gate.CheckAndLockAsync(connection, transaction, firmId, branchId,
+                    feature, cancellationToken);
+                if (blocked is not null) return blocked;
+            }
+            if (!await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM service.employees WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active AND department='service')",
+                cancellationToken, ("id", check.WaiterId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("WAITER_NOT_FOUND", 404, "Bu şubede aktif servis personeli bulunamadı.");
+        }
+        return null;
+    }
+
+    private async Task CreateServiceAssignmentAsync(SalesCheckRow check, SalesOrderRow order, string actor,
+        System.Data.Common.DbTransaction transaction, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var id = Guid.NewGuid();
+        await ExecuteAsync(db.Database.GetDbConnection(), transaction, """
+            INSERT INTO service.assignments (id,check_id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by)
+            VALUES (@id,@check,@firm,@branch,@table,@order,@waiter,@opened,NULL,1,@actor,NULL)
+            """, cancellationToken, ("id", id), ("check", check.Id), ("firm", check.FirmId),
+            ("branch", check.BranchId), ("table", check.TableId!), ("order", order.Id),
+            ("waiter", (object?)check.WaiterId ?? DBNull.Value), ("opened", now), ("actor", actor));
+        await ExecuteAsync(db.Database.GetDbConnection(), transaction,
+            "INSERT INTO service.audit (firm_id,branch_id,entity_id,action,actor,occurred_at) VALUES (@firm,@branch,@id,'assignment_opened',@actor,@at)",
+            cancellationToken, ("firm", check.FirmId), ("branch", check.BranchId), ("id", id.ToString()),
+            ("actor", actor), ("at", now));
+        await ExecuteAsync(db.Database.GetDbConnection(), transaction, """
+            INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+            VALUES (@check,@firm,@branch,@actor,'table_assigned',@version,@at)
+            """, cancellationToken, ("check", check.Id), ("firm", check.FirmId),
+            ("branch", check.BranchId), ("actor", actor), ("version", check.Version), ("at", now));
+    }
+
+    private static async Task<bool> ExistsAsync(DbConnection connection, DbTransaction transaction, string sql,
+        CancellationToken cancellationToken, params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters) AddParameter(command, name, value);
+        return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
+    }
+
+    private static async Task ExecuteAsync(DbConnection connection, DbTransaction transaction, string sql,
+        CancellationToken cancellationToken, params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters) AddParameter(command, name, value);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static void AddParameter(DbCommand command, string name, object? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
 
     public static SalesOrderDetail ToDetail(SalesOrderRow row) =>
         new(row.Id.ToString(), row.FirmId, row.BranchId, row.Source, row.Status,

@@ -126,6 +126,8 @@ public sealed class CatalogPublicationCommands(
             row.Id == draftId && row.FirmId == firmId && row.Status == "draft", cancellationToken);
         if (product is null)
             return CatalogPublicationResult.Rejected("DRAFT_INCONSISTENT", 503, "Taslak ürün okuma kaydı eksik.");
+        if (!product.IsActive)
+            return CatalogPublicationResult.Rejected("PRODUCT_INACTIVE", 409, "Pasif ürün yeni POS yayınına alınamaz.");
         var price = await db.PriceVersions.AsNoTracking()
             .Where(row => row.FirmId == firmId && row.ProductId == draftId && row.BranchId == branchId)
             .OrderByDescending(row => row.Number).FirstOrDefaultAsync(cancellationToken);

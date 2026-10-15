@@ -13,6 +13,7 @@ public sealed class CatalogProductRow
     public string CategoryId { get; set; } = "";
     public string CategoryName { get; set; } = "";
     public string Status { get; set; } = "draft";
+    public bool IsActive { get; set; } = true;
     public string[] Channels { get; set; } = [];
     public string Image { get; set; } = "";
     public bool RecipeLinked { get; set; }
@@ -119,6 +120,20 @@ public sealed class CatalogDraftAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class CatalogProductActivationAuditRow
+{
+    public Guid RequestId { get; set; }
+    public Guid ProductId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public bool IsActive { get; set; }
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
     public DbSet<CatalogProductRow> Products => Set<CatalogProductRow>();
@@ -129,6 +144,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogPublicationRow> Publications => Set<CatalogPublicationRow>();
     public DbSet<CatalogDraftRow> Drafts => Set<CatalogDraftRow>();
     public DbSet<CatalogDraftAuditRow> DraftAudit => Set<CatalogDraftAuditRow>();
+    public DbSet<CatalogProductActivationAuditRow> ProductActivationAudit => Set<CatalogProductActivationAuditRow>();
     public DbSet<CatalogMenuRow> Menus => Set<CatalogMenuRow>();
     public DbSet<CatalogMenuSectionRow> MenuSections => Set<CatalogMenuSectionRow>();
     public DbSet<CatalogMenuItemRow> MenuItems => Set<CatalogMenuItemRow>();
@@ -155,6 +171,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.CategoryId).HasColumnName("category_id").HasMaxLength(80);
             entity.Property(row => row.CategoryName).HasColumnName("category_name").HasMaxLength(160);
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
+            entity.Property(row => row.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(row => row.Channels).HasColumnName("channels");
             entity.Property(row => row.Image).HasColumnName("image").HasMaxLength(512);
             entity.Property(row => row.RecipeLinked).HasColumnName("recipe_linked");
@@ -281,6 +298,22 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Id });
+        });
+        modelBuilder.Entity<CatalogProductActivationAuditRow>(entity =>
+        {
+            entity.ToTable("product_activation_audit");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(32);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.IsActive).HasColumnName("is_active");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ProductId, row.OccurredAt });
         });
     }
 }

@@ -108,6 +108,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("branch_id");
 
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -157,6 +161,8 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CheckId");
+
                     b.HasIndex("OrderId");
 
                     b.HasIndex("FirmId", "BranchId", "OrderId", "Status");
@@ -172,6 +178,129 @@ namespace Hipos.Api.Sales.Migrations
                             t.HasCheckConstraint("ck_payment_status", "status IN ('succeeded', 'failed', 'pending', 'unknown', 'cancelled')");
 
                             t.HasCheckConstraint("ck_payment_version_positive", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckAuditRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FirmId", "BranchId", "CheckId", "Id");
+
+                    b.ToTable("check_audit", "sales");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("CustomerId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("TableId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("table_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<string>("WaiterId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("waiter_id");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("Id", "FirmId", "BranchId");
+
+                    b.HasIndex("FirmId", "BranchId", "CreatedAt");
+
+                    b.ToTable("checks", "sales", t =>
+                        {
+                            t.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
+
+                            t.HasCheckConstraint("ck_check_status", "status IN ('open')");
+
+                            t.HasCheckConstraint("ck_check_version_positive", "version > 0");
                         });
                 });
 
@@ -299,6 +428,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("branch_id");
 
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -350,6 +483,8 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CheckId");
+
                     b.HasIndex("FirmId", "BranchId", "CreatedAt");
 
                     b.ToTable("orders", "sales", t =>
@@ -366,6 +501,12 @@ namespace Hipos.Api.Sales.Migrations
 
             modelBuilder.Entity("Hipos.Api.Sales.PaymentAttemptRow", b =>
                 {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("CheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Hipos.Api.Sales.SalesOrderRow", "Order")
                         .WithMany("PaymentAttempts")
                         .HasForeignKey("OrderId")
@@ -384,6 +525,15 @@ namespace Hipos.Api.Sales.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesOrderRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("CheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderRow", b =>

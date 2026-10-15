@@ -32,7 +32,7 @@ public static class CatalogMenuEndpoints
             var sections = await db.MenuSections.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
             var items = await db.MenuItems.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
             return Results.Ok(new { source = "postgres", items = menus.Select(x => View(x, sections, items)), categories,
-                products = products.Select(x => new { x.Id, x.Name, x.CategoryId, x.Status, x.Image,
+                products = products.Select(x => new { x.Id, x.Name, x.CategoryId, x.Status, x.IsActive, x.Image,
                     price = new CatalogMoney(x.BranchPrices.FirstOrDefault(p => p.BranchId == branchId)?.AmountMinor ?? x.BasePriceMinor, x.Currency) }) });
         });
         group.MapPost("", (string firmId, string branchId, SaveCatalogMenu command, HttpContext ctx,
@@ -127,9 +127,9 @@ public static class CatalogMenuEndpoints
             .Where(x => x.FirmId == firm && x.BranchIds.Contains(branch) && ids.Contains(x.Id)).ToListAsync(ctx.RequestAborted);
         if (products.Count != ids.Length)
             return Fail("INVALID_MENU_PRODUCT", 400, "Seçilen ürünlerden biri bu firmaya veya şubeye ait değil.");
-        if (active && (ids.Length == 0 || sections.Any(s => s.ProductIds.Length == 0) || products.Any(p => p.Status != "published" ||
+        if (active && (ids.Length == 0 || sections.Any(s => s.ProductIds.Length == 0) || products.Any(p => !p.IsActive || p.Status != "published" ||
             p.Currency != "TRY" || (p.BranchPrices.FirstOrDefault(x => x.BranchId == branch)?.AmountMinor ?? p.BasePriceMinor) <= 0)))
-            return Fail("MENU_NOT_READY", 409, "Aktif menüde boş kategori olamaz; en az bir yayınlanmış ve geçerli fiyatlı ürün seçin.");
+            return Fail("MENU_NOT_READY", 409, "Aktif menüde boş kategori olamaz; yalnız aktif, yayınlanmış ve geçerli fiyatlı ürün kullanılabilir.");
         return null;
     }
 

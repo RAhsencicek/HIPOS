@@ -15,14 +15,18 @@
 3. Aynı vardiyada `50,00 TL` işletme gideri çıkışı girin. Beklenen tutar `1.200,00 TL` olmalı.
 4. **Vardiyalar / Açılış-Kapanış** sayfasına geçip `1.190,00 TL` fiziksel sayım yapın. Fark açıklaması olmadan kapatmayı deneyin; backend'in açıklama zorunluluğu hatası görünmeli. Açıklama ekleyip tekrar kapatın; `-10,00 TL` fark geçmişte saklanmalı.
 5. **Kasa Hareketleri** alanında açılış, giriş ve çıkışı doğru yönleriyle görün. Kapanış farkı ekstra nakit hareketi oluşturmamalı.
-6. Aynı kasa modülünü **Ayarlar → Modüller ve Özellikler** alanından kapatıp sayfayı yenileyin. Geçmiş okunmalı; yeni vardiya/hareket başlatılamamalı. Açık vardiya varken kapatmayı denerseniz güvenli kapanış tamamlanabilmeli.
-7. Test POS'taki simüle nakit/kart sonucu kasa bakiyesini değiştirmemeli.
+6. **Kasa Hareketleri** ekranında manuel bir giriş/çıkışın **Düzelt** düğmesine basın. Gerekçesiz gönderimin engellendiğini görün; gerekçe ile gönderince aynı tutarda ters yönlü ikinci hareket oluşmalı. Orijinal satır değişmemeli, yeni satırda gerekçe ve orijinal hareket bağlantısı görünmeli. Aynı orijinalde ikinci düzeltme düğmesi bulunmamalı.
+7. Orijinal vardiyası kapanmış bir hareketi yeni açık vardiya varken düzeltin; ters kayıt yeni vardiyada görünmeli. Açık vardiya yokken düzeltmeyi deneyin; işlem reddedilmeli.
+8. Aynı kasa modülünü **Ayarlar → Modüller ve Özellikler** alanından kapatıp sayfayı yenileyin. Özet ve geçmiş okunmalı; yeni vardiya/hareket/düzeltme başlatılamamalı. Önceden açık vardiya varsa güvenli kapanış tamamlanabilmeli.
+9. Test POS'taki simüle nakit/kart sonucu kasa veya cari hareket sayısını değiştirmemeli.
 
 ## Beklenen kapsam uyarıları
 
 - Vardiya nakit satış toplamı yönetici tarafından elle girilir; adisyonlara veya test ödeme simülatörüne otomatik bağlı değildir.
 - Kart, yemek kartı, karma ödeme, iade, banka mutabakatı, mali belge, kupür bazlı sayım ve yetki rolleri bu dilimde yoktur.
 - Açılış/geçmiş örnek kayıtları kurgusaldır; bu rehberde yaptığınız yeni kayıtlar yerel PostgreSQL'e kalıcı yazılır.
-- Hareketler silinemez veya düzenlenemez. Yanlış bir test girdisini “düzeltmek” için yeni ters/düzeltme akışı bu MVP'de henüz yoktur; geliştirme veritabanında kabul testi bittikten sonra seed geçmişini silmeye çalışmayın.
+- Hareketler silinemez veya düzenlenemez. Yanlış kayıt, yalnız gerekçeli ve tekil ters hareketle dengelenir. Girişin ters çıkışı mevcut vardiyada yeterli nakit yoksa güvenlik için reddedilir; test için yapay nakit yaratmayın.
+- Yeni firma/şubelerde `PUT /api/v1/firms/{firmId}/branches/{branchId}/cash/registers/default` onboarding çağrısı `MAIN / Ana Kasa / manual` oluşturur. Bu API `cash.management` tercihini açmaz. Demo seed'indeki `KAD-01 / Kadıköy Ana Kasa` mevcut kurgusal veri olarak aynen korunur.
+- Provisioning mevcut `KAD-01` gibi başka aktif kasa bulunan şubede ikinci kasa açmaz (`409 EXISTING_REGISTER`). Yanlış özellikte mevcut `MAIN` kaydı da değiştirilmez (`409 DEFAULT_REGISTER_CONFLICT`). Boş şube, aynı MAIN tekrarı, eşzamanlı çağrı, capability'nin değişmemesi ve firma/şube kapsamı `npm run test:db` içinde doğrulanır. Firma/şube oluşturma orkestrasyonu henüz mevcut değildir; gelecek satış-kasa olay ve onboarding sözleşmeleri [bu taslakta](KASA_ONBOARDING_VE_SATIS_OLAY_SOZLESMESI.md) yer alır.
 
 Otomatik PostgreSQL/API/panel kabulü: `npm run test:db`.

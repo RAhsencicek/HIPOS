@@ -115,6 +115,7 @@ export class MockCatalogProvider implements CatalogProvider {
       sku: record.sku,
       category: { ...record.category },
       status: record.status,
+      isActive: true,
       channels: [...record.channels],
       image: record.image,
       recipeLinked: record.recipeLinked,
@@ -249,6 +250,11 @@ export class MockCatalogProvider implements CatalogProvider {
     return Promise.reject(new CatalogProviderError(
       "DRAFT_NOT_AVAILABLE", 409, "Örnek veri POS'a gerçekten yayınlanmaz.",
     ));
+  }
+
+  setProductActive(_request: import("./contracts").SetProductActiveRequest): Promise<{ isActive: boolean; version: number }> {
+    return Promise.reject(new CatalogProviderError("FEATURE_DISABLED", 409,
+      "Örnek gösterimde ürün durumu değiştirilmez; kalıcı kayıt için HTTP katalog sağlayıcısını kullanın."));
   }
 
   async listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]> {

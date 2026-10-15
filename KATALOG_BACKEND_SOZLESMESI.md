@@ -1,6 +1,6 @@
 # HIPOS — Ürünler ve Menü backend sözleşmesi
 
-Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme** ve ilk **taslak fiyat sürümü → POS yayını** komutları uygulandı. Panelde taslak, fiyat, ilk yayın ve geçmiş API'ye bağlıdır; kategori yazma formu henüz yoktur. İleri tarihli/merkezi fiyat, çok kanallı yayın ve geri alma planlıdır. Yönetici paneli ilk kullanıcı yüzüdür; sipariş oluşturma veya POS işlemi bu sözleşmenin parçası değildir.
+Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme**, ilk **taslak fiyat sürümü → POS yayını** ve menü oluşturma/aktif menü komutları uygulandı. Ürün aktifliği, menü aktifliği ve kanal yayını ayrı durumlar olarak korunur. QR/web yayını, ileri tarihli/merkezi fiyat ve yayın geri alma planlıdır. Yönetici paneli ilk kullanıcı yüzüdür; sipariş oluşturma veya POS işlemi bu sözleşmenin parçası değildir.
 
 ## Bugün çalışan okuma dilimi
 
@@ -32,6 +32,50 @@ Body: { name, sku, categoryId, categoryName, description, expectedVersion }
 `draftId` istemcinin ürettiği UUID'dir. İlk oluşturma `201`, değişmemiş aynı taslağın aynı içerikle hemen tekrar gönderilmesi `200` döner ve ikinci denetim kaydı üretmez. Kimlik başka içerik için kullanılırsa veya taslak daha sonra değiştirilmişse eski oluşturma gövdesi `409` çakışır; bu mekanizma genel amaçlı kalıcı bir idempotency-key sistemi değildir. Stok kodu firma içinde tektir. Güncelleme yalnız taslak sahibinin şubesinde yapılır; `expectedVersion` eskiyse `409`, başka şubenin taslağıysa `404` döner. Kaydedilen taslak ürün okuma modeline ve denetim kaydına aynı PostgreSQL işleminde yansır.
 
 Modül kapatma ve taslak komutu aynı şube özellik satırını kilitler: eşzamanlı istekte komut ya kapanmadan önce bütünüyle kaydolur ya da kapanmış özelliği görüp reddedilir. Taslak oluşturma/güncelleme, kategori kaydını ve güncel adını sunucuda doğrular. Yeni taslağın fiyatı `0`, kanal listesi boştur; fiyat sürümü ve yayın komutları tamamlanmadan satılabilir sayılmaz. Bu dilimde yayımlanmış ürünler güncellenmez. Panel mock modunda “Ürün ekleme akışı” yalnız prototip açıklamasıdır; HTTP modunda form ancak gerçek API yanıtından sonra başarı gösterir.
+
+## Ürün, menü ve kanal durumları
+
+Ürün durumu üç ayrı eksende değerlendirilir; tek bir alan diğerinin yerine geçmez:
+
+| Kavram | Anlamı |
+| --- | --- |
+| Ürün `isActive` | Katalog kaydının yeni taslak/yayın/sipariş işlemlerinde kullanılabilir olup olmadığı. Pasife alınması ürünü veya geçmişini silmez. |
+| Ürün `status` | `draft` veya `published`: ürünün katalog/POS yayın akışındaki olgunluk durumu. |
+| Ürün `channels` ve `publications.channels` | Ürünün hangi kanala yayınlandığı. İlk MVP yalnız `pos` kanalını yazar; QR/web etkinmiş gibi gösterilmez. |
+| Menü `isActive` | Seçili şubede kullanılabilir/aktif menü seçimi. Menü içerik kaydından ve tekil ürün aktifliğinden ayrıdır. |
+
+Ürün API yanıtları `isActive` alanını taşır. Yeni ürün aktif olarak oluşturulur. Aktiflik değişikliği şu şube kapsamlı komutla yapılır:
+
+```text
+POST /api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/activation
+Body: { requestId, expectedVersion, isActive }
+```
+
+Komut firma/şube kapsamını, katalog yazma capability'sini, demo yönetici yetkisini ve sürümü sunucuda doğrular. Aynı `requestId` ve içerik tekrarlanırsa önceki sonuç döner; aynı kimlik farklı içerikle gelirse `409 REQUEST_ID_CONFLICT`, eski sürümle gelirse `409 VERSION_CONFLICT` döner. Durum ve audit satırı tek PostgreSQL işlemiyle yazılır. Migration mevcut ürünleri varsayılan olarak aktif korur. Ürün aktif/pasifliği değişirken `status`, `channels`, fiyat ve geçmiş yayın anlık görüntüleri değiştirilmez.
+
+Pasif ürün:
+
+- Yeni satış/adisyon sipariş kalemine eklenemez (`409 PRODUCT_INACTIVE`).
+- Yeni POS yayın komutu reddedilir (`409 PRODUCT_INACTIVE`).
+- Yeni menü aktif etme doğrulamasından geçemez. Menü içeriğindeki ürün bağlantısı silinmez; durum düzenleyicide görünür.
+- Ürün daha önce aktif bir menüde bulunuyorsa ürünün pasife alınması o menüyü kendiliğinden pasifleştirmez veya içeriğini değiştirmez. Menü düzenleyicisinde ürün açıkça “Pasif ürün” olarak işaretlenir; sonraki aktivasyon denemesi sunucuda reddedilir.
+- Açık adisyon satırları, siparişin ürün/fiyat anlık görüntüsü, eski yayınlar ve raporlama kaynakları değişmeden kalır.
+- Ürün ve geçmişi silinmez. Ürün yeniden etkinleştirilirse yeni işlemlerde diğer `draft/published`, fiyat ve kanal kuralları uygulanır.
+
+Pasif menü seçili şubede yeni kullanım/aktif seçim oluşturmaz. Menü içeriği, ürünler, önceki aktiflik audit anlık görüntüleri ve ürün yayın geçmişi korunur. Menü pasifleştirmek içindeki ürünleri pasifleştirmez; ürün pasifleştirmek de diğer menüleri veya ürünün bütün yayın geçmişini silmez.
+
+Yayın geçmişi ürünün şube ve kanal bazlı değiştirilemez kayıtlarıdır. Ürünü veya menüyü pasife alma geçmiş yayın satırlarını fiziksel olarak silmez ya da geriye dönük değiştirmez. Ürün aktifliği, menü aktifliği veya kanal yayını UI'da tek bir “yayında” göstergesinde birleştirilmemelidir.
+
+## Ürün aktifliği kabul sınırları
+
+1. Aktif ve POS'a yayımlanmış ürünle açık adisyon oluşturulur.
+2. Aynı ürünle aktif menü oluşturulur; ürün beklenen sürümle pasife alınır ve `isActive=false` olarak okunur.
+3. Açık adisyon ve önceden aktif menü okunmaya devam eder; sipariş kalemi, tutar anlık görüntüsü, menü aktifliği ve ürün bağlantısı değişmez. Menü düzenleyicisinde “Pasif ürün” görünür.
+4. Aynı ürünle yeni sipariş denemesi `409 PRODUCT_INACTIVE` alır; yeni sipariş oluşmaz.
+5. Aynı ürünle yeni POS yayın isteği ve pasif ürünü içeren menünün yeni aktivasyonu reddedilir; eski yayın geçmişi ve menü içeriği korunur.
+6. Tekrar kullanılan `requestId` ikinci durum değişikliği/audit oluşturmaz; farklı içerikte çakışır. Eski `expectedVersion` reddedilir.
+7. Ürün pasifliği başka firma/şube kapsamındaki ürünü değiştiremez; menü pasifliği menü kompozisyonunu ve katalog ürünlerini silmez.
+8. Kayıt, sürüm, audit, UI durumu ve firma/şube denetimleri migration'lı PostgreSQL kabul testinde doğrulanır.
 
 ## İlk fiyat sürümü ve POS yayını
 
@@ -66,10 +110,10 @@ Kategori firma genelinde olduğu için komutu yalnız bütün firma şubelerine 
 
 | Alt ekran grubu | Okuma ihtiyacı | Gelecek yönetsel komut | Durum |
 | --- | --- | --- | --- |
-| Ürünler, ürün ayrıntısı | Firma/şube ürün listesi, detay, arama | Taslak oluştur, taslak güncelle, pasifleştir | Liste/detay ve temel taslak oluştur/güncelle panel–API–PostgreSQL zincirinde var; pasifleştirme yok. |
+| Ürünler, ürün ayrıntısı | Firma/şube ürün listesi, detay, arama; aktiflik ve kanal/yayın durumu ayrı görünür | Taslak oluştur/güncelle, etkinleştir/pasifleştir | Ürün aktifliği, audit ve API korumaları panel/API/PostgreSQL kabul testinde doğrulandı; ürün yayın geçmişi okunabiliyor. |
 | Kategoriler | Kategori listesi ve şube ürün sayısı | Kategori oluştur/ad değiştir/sırala | Okuma, oluşturma ve ad değiştirme API/PostgreSQL'de var. Panel henüz yazma formu içermez; sıralama ve pasifleştirme yok. |
 | Seçenek grupları, alerjenler, görseller | Ürün ilişkileri | Bağla/çıkar, görsel yükle | Yalnız mevcut okuma alanları; dosya/ilişki komutu yok. |
-| Menüler ve kompozisyon | Menü–kategori–ürün hiyerarşisi | Taslak menü düzenle | Planlandı. |
+| Menüler ve kompozisyon | Menü–kategori–ürün hiyerarşisi; menü aktifliği ürün durumundan ayrıdır | Taslak menü düzenle, şubede etkinleştir/pasifleştir | Menü düzenleme ve tek aktif menü seçimi panel/API/PostgreSQL'de vardır; etkinleştirme pasif ürün içeriyorsa reddedilir. |
 | Kanal/şube görünürlüğü | Ürün kapsamı | Taslak görünürlük değiştir | Şube görünürlüğü okunur; komut yok. |
 | Fiyatlar ve sürümler | Merkez/şube fiyatı, geçerlilik | Fiyat taslağı, şube istisnası, sürüm oluştur | Şube taslağı için numaralı fiyat sürümü API'si, panel formu ve geçmiş okuması var; ileri tarih/merkez istisnası yok. |
 | İleri tarihli fiyatlar | Zamanlanmış sürümler | Gelecek tarihli fiyat planla/iptal et | Planlandı. |

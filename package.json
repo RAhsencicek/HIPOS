@@ -19,12 +19,14 @@
     "test:api": "node --test apps/api/Hipos.Api.Tests/http.test.mjs",
     "test:api-ui": "npm run test:api-ui --workspace @hipos/admin",
     "test:db": "node --test apps/api/Hipos.Api.Tests/postgres.test.mjs",
+    "test:expenses": "node --test apps/api/Hipos.Api.Tests/expenses.test.mjs",
     "demo:check": "node scripts/seed-demo.mjs --check",
     "demo:seed": "node scripts/seed-demo.mjs",
     "demo:seed:menus": "node scripts/seed-menus.mjs",
     "demo:seed:cari": "node scripts/seed-demo.mjs --cari",
     "demo:seed:service": "node scripts/seed-demo.mjs --service",
     "demo:seed:inventory": "node scripts/seed-demo.mjs --inventory",
-    "demo:seed:cash": "node scripts/seed-demo.mjs --cash"
+    "demo:seed:cash": "node scripts/seed-demo.mjs --cash",
+    "demo:seed:expenses": "node scripts/seed-demo.mjs --expenses"
   }
 }

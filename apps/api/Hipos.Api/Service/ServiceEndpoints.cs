@@ -253,7 +253,13 @@ public static class ServiceEndpoints
                 blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
                     firmId, branchId, "service.waiters", context.RequestAborted);
                 if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+                blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                    firmId, branchId, "staff.records", context.RequestAborted);
+                if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
             }
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "sales.checks", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
             var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {command.TableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
@@ -267,9 +273,18 @@ public static class ServiceEndpoints
             if (order is null || order.Status != "open") return Fail(context, "ORDER_NOT_FOUND", 404, "Bu şubede açık adisyon bulunamadı.");
             var now = DateTimeOffset.UtcNow;
             var row = new ServiceAssignmentRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
-                TableId = table.Id, OrderId = order.Id, WaiterId = command.WaiterId,
+                CheckId = order.CheckId, TableId = table.Id, OrderId = order.Id, WaiterId = command.WaiterId,
                 OpenedAt = now, CreatedBy = DemoAccess.Resolve(context)!.Name };
             db.Assignments.Add(row);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE sales.checks SET table_id = {table.Id}, waiter_id = {command.WaiterId}, version = version + 1
+                WHERE id = {order.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
+                """, context.RequestAborted);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+                SELECT id,firm_id,branch_id,{row.CreatedBy},'table_assigned',version,{now}
+                FROM sales.checks WHERE id = {order.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
+                """, context.RequestAborted);
             AddAudit(db, firmId, branchId, row.Id.ToString(), "assignment_opened", row.CreatedBy, now);
             try { await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted); }
             catch (DbUpdateException error) when (Unique(error))
@@ -293,6 +308,15 @@ public static class ServiceEndpoints
             row.ClosedAt = DateTimeOffset.UtcNow;
             row.ClosedBy = DemoAccess.Resolve(context)!.Name;
             row.Version++;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE sales.checks SET table_id = NULL, waiter_id = NULL, version = version + 1
+                WHERE id = {row.CheckId} AND firm_id = {firmId} AND branch_id = {branchId} AND table_id = {row.TableId}
+                """, context.RequestAborted);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+                SELECT id,firm_id,branch_id,{row.ClosedBy},'table_unassigned',version,{row.ClosedAt}
+                FROM sales.checks WHERE id = {row.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
+                """, context.RequestAborted);
             AddAudit(db, firmId, branchId, row.Id.ToString(), "assignment_closed", row.ClosedBy, row.ClosedAt.Value);
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);

@@ -36,9 +36,15 @@ public sealed class ServiceSalesOrderRef
     public Guid Id { get; set; }
 }
 
+public sealed class ServiceSalesCheckRef
+{
+    public Guid Id { get; set; }
+}
+
 public sealed class ServiceAssignmentRow
 {
     public Guid Id { get; set; }
+    public Guid CheckId { get; set; }
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
     public string TableId { get; set; } = "";
@@ -110,11 +116,18 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
         });
+        modelBuilder.Entity<ServiceSalesCheckRef>(entity =>
+        {
+            entity.ToTable("checks", "sales", table => table.ExcludeFromMigrations());
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+        });
         modelBuilder.Entity<ServiceAssignmentRow>(entity =>
         {
             entity.ToTable("assignments", table => table.HasCheckConstraint("ck_assignment_version", "version > 0"));
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.TableId).HasColumnName("table_id").HasMaxLength(80);
@@ -128,6 +141,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.HasOne<ServiceTableRow>().WithMany().HasForeignKey(row => row.TableId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ServiceWaiterRow>().WithMany().HasForeignKey(row => row.WaiterId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ServiceSalesOrderRef>().WithMany().HasForeignKey(row => row.OrderId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ServiceSalesCheckRef>().WithMany().HasForeignKey(row => row.CheckId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => row.OrderId).IsUnique();
             entity.HasIndex(row => row.TableId).IsUnique().HasFilter("closed_at IS NULL");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ClosedAt });

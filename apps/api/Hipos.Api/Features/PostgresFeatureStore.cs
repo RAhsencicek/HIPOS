@@ -23,6 +23,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
                     : definition.Key == "cash.management" && !runtime.CashReady
                     ? state with { EffectiveForNewWork = false, Lifecycle = "setup_required",
                         Blockers = [new FeatureBlocker("CASH_STORAGE_UNAVAILABLE", "Kasa migration'ı uygulanmalı.")] }
+                    : definition.Key == "finance.expenses" && !runtime.ExpensesReady
+                    ? state with { EffectiveForNewWork = false, Lifecycle = "setup_required",
+                        Blockers = [new FeatureBlocker("EXPENSE_STORAGE_UNAVAILABLE", "Gider migration'ı uygulanmalı.")] }
                     : state;
             }).ToArray();
     }
@@ -44,6 +47,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         if (key == "sales.pos_orders" && command.DesiredEnabled && !runtime.SalesOrdersReady)
             return FeatureCommandResult.Rejected("SALES_STORAGE_UNAVAILABLE", 503,
                 "Test POS siparişi için satış migration'ı gerekli.");
+        if (key == "sales.checks" && command.DesiredEnabled && !runtime.SalesOrdersReady)
+            return FeatureCommandResult.Rejected("SALES_STORAGE_UNAVAILABLE", 503,
+                "Ortak adisyonlar için satış migration'ı gerekli.");
         if (key == "payments.simulator" && command.DesiredEnabled && !runtime.PaymentSimulatorReady)
             return FeatureCommandResult.Rejected("PAYMENT_STORAGE_UNAVAILABLE", 503,
                 "Test ödeme için satış migration'ı gerekli.");
@@ -59,6 +65,9 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         if (key == "cash.management" && command.DesiredEnabled && !runtime.CashReady)
             return FeatureCommandResult.Rejected("CASH_STORAGE_UNAVAILABLE", 503,
                 "Kasa migration'ı gerekli.");
+        if (key == "finance.expenses" && command.DesiredEnabled && !runtime.ExpensesReady)
+            return FeatureCommandResult.Rejected("EXPENSE_STORAGE_UNAVAILABLE", 503,
+                "Gider migration'ı gerekli.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         // Bütün şube satırları kilitlenir: bağımlılık kontrolü ile yazma tek atomik işlem olur.
         var rows = await db.BranchFeatureStates.FromSqlInterpolated(
@@ -74,11 +83,13 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         var result = FeatureRules.SetDesired(states, key, command,
             (IsCatalogWrite(key) && runtime.CatalogDraftsReady) ||
             (key == "sales.pos_orders" && runtime.SalesOrdersReady) ||
+            (key == "sales.checks" && runtime.SalesOrdersReady) ||
             (key == "payments.simulator" && runtime.PaymentSimulatorReady) ||
             (key is "branches.tables" or "service.waiters" or "staff.records" && runtime.ServiceTablesReady) ||
             (IsInventoryFeature(key) && runtime.InventoryReady) ||
             (IsCariFeature(key) && runtime.CariReady) ||
-            (key == "cash.management" && runtime.CashReady));
+            (key == "cash.management" && runtime.CashReady) ||
+            (key == "finance.expenses" && runtime.ExpensesReady));
         if (result.Failure is not null || result.State is null) return result;
         var next = result.State;
         if (next.Version == states[key].Version) return result; // Aynı tercih tekrarlandı: audit veya yazma yok.
@@ -118,11 +129,13 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
             row.FirmId == firmId && row.BranchId == branchId && row.Key == key && row.EffectiveForNewWork &&
             (!IsCatalogWrite(key) || runtime.CatalogDraftsReady) &&
             (key != "sales.pos_orders" || runtime.SalesOrdersReady) &&
+            (key != "sales.checks" || runtime.SalesOrdersReady) &&
             (key != "payments.simulator" || runtime.PaymentSimulatorReady) &&
             (key != "branches.tables" && key != "service.waiters" && key != "staff.records" || runtime.ServiceTablesReady) &&
             (!IsInventoryFeature(key) || runtime.InventoryReady) &&
             (!IsCariFeature(key) || runtime.CariReady) &&
-            (key != "cash.management" || runtime.CashReady),
+            (key != "cash.management" || runtime.CashReady) &&
+            (key != "finance.expenses" || runtime.ExpensesReady),
             cancellationToken);
 
     private static bool IsCatalogWrite(string key) =>

@@ -6,6 +6,7 @@ namespace Hipos.Api.Sales;
 public sealed class SalesOrderRow
 {
     public Guid Id { get; set; }
+    public Guid CheckId { get; set; }
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
     public string Source { get; set; } = "test_pos";
@@ -23,6 +24,7 @@ public sealed class SalesOrderRow
 public sealed class PaymentAttemptRow
 {
     public Guid Id { get; set; }
+    public Guid CheckId { get; set; }
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
     public Guid OrderId { get; set; }
@@ -36,6 +38,32 @@ public sealed class PaymentAttemptRow
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public SalesOrderRow Order { get; set; } = null!;
+}
+
+public sealed class SalesCheckRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Status { get; set; } = "open";
+    public string? CustomerId { get; set; }
+    public string? TableId { get; set; }
+    public string? WaiterId { get; set; }
+    public string Currency { get; set; } = "TRY";
+    public DateTimeOffset CreatedAt { get; set; }
+    public int Version { get; set; } = 1;
+}
+
+public sealed class SalesCheckAuditRow
+{
+    public long Id { get; set; }
+    public Guid CheckId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string Action { get; set; } = "";
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
 }
 
 public sealed class PaymentAttemptAuditRow
@@ -80,6 +108,8 @@ public sealed class SalesOrderAuditRow
 
 public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : DbContext(options)
 {
+    public DbSet<SalesCheckRow> Checks => Set<SalesCheckRow>();
+    public DbSet<SalesCheckAuditRow> CheckAudit => Set<SalesCheckAuditRow>();
     public DbSet<SalesOrderRow> Orders => Set<SalesOrderRow>();
     public DbSet<SalesOrderLineRow> Lines => Set<SalesOrderLineRow>();
     public DbSet<SalesOrderAuditRow> Audit => Set<SalesOrderAuditRow>();
@@ -89,6 +119,28 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("sales");
+        modelBuilder.Entity<SalesCheckRow>(entity =>
+        {
+            entity.ToTable("checks", table =>
+            {
+                table.HasCheckConstraint("ck_check_version_positive", "version > 0");
+                table.HasCheckConstraint("ck_check_status", "status IN ('open')");
+                table.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
+            entity.Property(row => row.CustomerId).HasColumnName("customer_id").HasMaxLength(80);
+            entity.Property(row => row.TableId).HasColumnName("table_id").HasMaxLength(80);
+            entity.Property(row => row.WaiterId).HasColumnName("waiter_id").HasMaxLength(80);
+            entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CreatedAt });
+            entity.HasAlternateKey(row => new { row.Id, row.FirmId, row.BranchId });
+        });
         modelBuilder.Entity<SalesOrderRow>(entity =>
         {
             entity.ToTable("orders", table =>
@@ -100,6 +152,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.Source).HasColumnName("source").HasMaxLength(32);
@@ -111,6 +164,8 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CreatedAt });
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.CheckId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SalesOrderLineRow>(entity =>
         {
@@ -158,6 +213,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.OrderId).HasColumnName("order_id");
@@ -172,7 +228,23 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
             entity.HasOne(row => row.Order).WithMany(order => order.PaymentAttempts)
                 .HasForeignKey(row => row.OrderId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.CheckId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.OrderId, row.Status });
+        });
+        modelBuilder.Entity<SalesCheckAuditRow>(entity =>
+        {
+            entity.ToTable("check_audit");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(32);
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CheckId, row.Id });
         });
         modelBuilder.Entity<PaymentAttemptAuditRow>(entity =>
         {

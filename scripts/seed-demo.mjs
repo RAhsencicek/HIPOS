@@ -123,7 +123,8 @@ const cariOnly = process.argv.includes("--cari");
 const serviceOnly = process.argv.includes("--service");
 const inventoryOnly = process.argv.includes("--inventory");
 const cashOnly = process.argv.includes("--cash");
-if ([cariOnly, serviceOnly, inventoryOnly, cashOnly].filter(Boolean).length > 1) throw new Error("--cari, --service, --inventory ve --cash birlikte kullanılamaz.");
+const expensesOnly = process.argv.includes("--expenses");
+if ([cariOnly, serviceOnly, inventoryOnly, cashOnly, expensesOnly].filter(Boolean).length > 1) throw new Error("Yalnızca tek bir özel seed seçeneği kullanılabilir.");
 const statements = ["BEGIN;"];
 if (serviceOnly) {
   for (let number = 1; number <= demo.serviceDemo.tableCount; number++) statements.push(
@@ -139,7 +140,9 @@ if (serviceOnly) {
     const fingerprint = createHash("sha256").update(order.items.toSorted((a, b) => a.productId.localeCompare(b.productId))
       .map((item) => `${item.productId.replaceAll("-", "").toLowerCase()}:${item.quantity}`).join("|")).digest("hex").toUpperCase();
     const total = order.items.reduce((sum, item) => sum + demo.products.find((product) => product.id === item.productId).priceMinor * item.quantity, 0);
-    statements.push(`INSERT INTO sales.orders (id,firm_id,branch_id,source,status,payment_status,total_minor,currency,request_fingerprint,created_at,version) VALUES (${sqlString(order.id)},${firm},${branch},'demo_service','open','unpaid',${total},'TRY',${sqlString(fingerprint)},${sqlString(order.createdAt)},1) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`INSERT INTO sales.checks (id,firm_id,branch_id,status,customer_id,table_id,waiter_id,currency,created_at,version) VALUES (${sqlString(order.id)},${firm},${branch},'open',NULL,NULL,NULL,'TRY',${sqlString(order.createdAt)},1) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at) SELECT ${sqlString(order.id)},${firm},${branch},'demo-seed','created',1,${sqlString(order.createdAt)} WHERE NOT EXISTS (SELECT 1 FROM sales.check_audit WHERE check_id=${sqlString(order.id)} AND action='created');`);
+    statements.push(`INSERT INTO sales.orders (id,check_id,firm_id,branch_id,source,status,payment_status,total_minor,currency,request_fingerprint,created_at,version) VALUES (${sqlString(order.id)},${sqlString(order.id)},${firm},${branch},'demo_service','open','unpaid',${total},'TRY',${sqlString(fingerprint)},${sqlString(order.createdAt)},1) ON CONFLICT (id) DO NOTHING;`);
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM sales.orders WHERE id = ${sqlString(order.id)} AND firm_id = ${firm} AND branch_id = ${branch} AND source = 'demo_service' AND request_fingerprint = ${sqlString(fingerprint)}) THEN RAISE EXCEPTION 'Demo sipariş kimliği farklı içerikle kullanılıyor: ${order.id}'; END IF; END $$;`);
     for (const item of order.items) {
       const product = demo.products.find((entry) => entry.id === item.productId);
@@ -148,7 +151,9 @@ if (serviceOnly) {
   }
   for (const assignment of demo.serviceDemo.assignments) {
     const order = demo.serviceDemo.orders.find((row) => row.id === assignment.orderId);
-    statements.push(`INSERT INTO service.assignments (id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by) VALUES (${sqlString(assignment.id)},${firm},${branch},${sqlString(`table-${String(assignment.tableNumber).padStart(2, "0")}`)},${sqlString(order.id)},${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"},${sqlString(order.createdAt)},NULL,1,'demo-seed',NULL) ON CONFLICT (id) DO NOTHING;`);
+    const tableId = `table-${String(assignment.tableNumber).padStart(2, "0")}`;
+    statements.push(`INSERT INTO service.assignments (id,check_id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by) VALUES (${sqlString(assignment.id)},${sqlString(order.id)},${firm},${branch},${sqlString(tableId)},${sqlString(order.id)},${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"},${sqlString(order.createdAt)},NULL,1,'demo-seed',NULL) ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`UPDATE sales.checks SET table_id=${sqlString(tableId)},waiter_id=${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"} WHERE id=${sqlString(order.id)} AND firm_id=${firm} AND branch_id=${branch};`);
   }
 } else if (cariOnly) {
   for (const party of demo.parties) {
@@ -215,6 +220,16 @@ if (serviceOnly) {
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM inventory.count_lines WHERE count_id=${sqlString(countId)} AND ingredient_id=${ingredientId} AND system_quantity=${systemQuantity} AND movement_count_snapshot=${movementCountSnapshot} AND physical_quantity=${line.physicalQuantity} AND unit=${sqlString(ingredient.unit)}) THEN RAISE EXCEPTION 'Demo sayım kalemi farklı içerikle kullanılıyor: ${line.ingredientId}'; END IF; END $$;`);
   }
   statements.push(`INSERT INTO inventory.audit (firm_id,branch_id,warehouse_id,entity_id,action,request_id,actor,detail,occurred_at) SELECT ${firm},${branch},${warehouseId},${sqlString(countId)},'count_started',${sqlString(countId)},'demo-seed',${sqlString(`${demo.countLines.length} hammadde · örnek sayım taslağı`)},${sqlString(now)} WHERE NOT EXISTS (SELECT 1 FROM inventory.audit WHERE firm_id=${firm} AND branch_id=${branch} AND entity_id=${sqlString(countId)} AND action='count_started');`);
+} else if (expensesOnly) {
+  const expenseFirms = [demo.firm.id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"];
+  const expenseCategories = [
+    ["rent", "Kira"], ["utilities", "Faturalar"], ["supplies", "Sarf malzemeleri"],
+    ["maintenance", "Bakım ve onarım"], ["marketing", "Pazarlama"], ["other", "Diğer"],
+  ];
+  for (const expenseFirm of expenseFirms) for (const [id, name] of expenseCategories) {
+    statements.push(`INSERT INTO finance.expense_categories (firm_id,id,name,is_active,created_at) VALUES (${sqlString(expenseFirm)},${sqlString(id)},${sqlString(name)},true,${sqlString(now)}) ON CONFLICT (firm_id,id) DO NOTHING;`);
+    statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM finance.expense_categories WHERE firm_id=${sqlString(expenseFirm)} AND id=${sqlString(id)} AND name=${sqlString(name)}) THEN RAISE EXCEPTION 'Gider kategori anahtarı farklı içerikle kullanılıyor: ${id}'; END IF; END $$;`);
+  }
 } else if (cashOnly) {
   const register = demo.cashDemo.register;
   const registerId = sqlString(register.id);
@@ -271,6 +286,8 @@ console.log(cariOnly
     ? `Demo servis seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.serviceDemo.tableCount} masa, ${demo.serviceDemo.waiters.length + demo.serviceDemo.employees.length} personel kartı, ${demo.serviceDemo.orders.length} sipariş, ${demo.serviceDemo.assignments.length} masa bağı. Mevcut kayıtlar değiştirilmedi.`
   : inventoryOnly
     ? `Demo stok seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.ingredients.length} hammadde, ${demo.recipes.length} reçete, ${demo.stockMovements.length} hareket, ${demo.countLines.length} kalemli 1 sayım taslağı. Mevcut kayıtlar değiştirilmedi.`
-    : cashOnly
+  : cashOnly
       ? `Demo kasa seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: 1 kasa, ${demo.cashDemo.shifts.length} kapanmış vardiya, ${demo.cashDemo.shifts.reduce((sum, shift) => sum + shift.movements.length, 0)} nakit hareketi. Mevcut kayıtlar değiştirilmedi.`
+    : expensesOnly
+      ? `Gider kategori seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: 2 demo firma, firma başına 6 kategori. Mevcut kayıtlar değiştirilmedi.`
   : `Demo katalog seed'i bu ortamda ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.firm.name} / ${demo.branch.name}. Cari için ayrıca demo:seed:cari gerekir; reçete, stok ve sayım henüz veritabanına yazılmadı.`);

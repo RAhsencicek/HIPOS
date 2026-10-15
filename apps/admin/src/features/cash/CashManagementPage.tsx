@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { ArrowDownLeft, ArrowUpRight, Banknote, RefreshCw, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Banknote, RefreshCw, RotateCcw, Wallet } from "lucide-react";
 import type { ViewContext } from "../../app/context";
 import { DemoNotice, MetricCard, PageHeading, StatusPill } from "../../shared/ui";
 
@@ -9,7 +9,8 @@ type Shift = { id: string; registerId: string; status: "open" | "closed"; openin
   expectedCashMinor: number | null; countedCashMinor: number | null; differenceMinor: number | null;
   openedBy: string; openedAt: string; closedBy: string | null; closedAt: string | null; closeNote: string | null; version: number };
 type Movement = { id: string; registerId: string; shiftId: string; kind: string; category: string;
-  amountMinor: number; currency: string; description: string; source: string; actor: string; createdAt: string };
+  amountMinor: number; currency: string; description: string; source: string; actor: string; createdAt: string;
+  originalMovementId: string | null; correctionType: string | null; correctionReason: string | null };
 type OpenShift = { shift: Shift; cashInMinor: number; cashOutMinor: number; movementCount: number; recentMovements: Movement[] };
 type Overview = { source: string; simulated: boolean; registers: Register[]; openShifts: OpenShift[] };
 type ShiftPage = { items: Shift[]; total: number };
@@ -49,13 +50,15 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
   const [movementDescription, setMovementDescription] = useState("");
   const [countedCash, setCountedCash] = useState("");
   const [closeNote, setCloseNote] = useState("");
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const [correctionReason, setCorrectionReason] = useState("");
   const actor = ctx.isMulti ? "manager-multi" : "manager-single";
   const scope = ctx.branchApiId
     ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/cash`
     : null;
   const active = overview?.openShifts[0] ?? null;
 
-  const api = useCallback(async <T,>(path: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<T> => {
+  const api = useCallback(async <T,>(path: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> => {
     let response: Response;
     try {
       response = await fetch(`${apiBase}${path}`, { method,
@@ -135,6 +138,20 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
     }, "Vardiya kapatıldı; sayım farkı ve açıklaması saklandı.");
   }
 
+  async function reverseMovement(event: FormEvent) {
+    event.preventDefault();
+    if (!scope || !correctingId) return;
+    const reason = correctionReason.trim();
+    if (reason.length < 3 || reason.length > 500) { setError("Düzeltme gerekçesi 3–500 karakter olmalı."); return; }
+    const originalId = correctingId;
+    await run(async () => {
+      await api(`${scope}/movements/${encodeURIComponent(originalId)}/corrections`, "POST", {
+        requestId: crypto.randomUUID(), correctionType: "reversal", correctionReason: reason,
+      });
+      setCorrectingId(null); setCorrectionReason("");
+    }, "Ters kayıt yeni hareket olarak eklendi; orijinal kayıt değişmedi.");
+  }
+
   const totalRecent = useMemo(() => movements.slice(0, 8), [movements]);
   const currentExpected = active?.shift.expectedCashMinor ?? 0;
   const displayView = view === "opening-closing" ? "shifts" : view;
@@ -176,7 +193,19 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
         </form>}
         <section className="card cash-history"><header><h2>Son kasa hareketleri</h2><span>Son {totalRecent.length} kayıt</span></header><CashMovementList items={totalRecent} /></section>
       </>}
-      {displayView === "movements" && <section className="card cash-history"><header><h2>Değiştirilemez kasa defteri</h2><span>{movements.length} hareket</span></header><CashMovementList items={movements} /></section>}
+      {displayView === "movements" && <section className="card cash-history"><header><h2>Değiştirilemez kasa defteri</h2><span>{movements.length} hareket</span></header>
+        <CashMovementList items={movements} onCorrect={canWrite && active ? (movement) => {
+          setCorrectingId(movement.id); setCorrectionReason(""); setError("");
+        } : undefined} />
+        {correctingId && <form className="cash-correction-form" onSubmit={(event) => void reverseMovement(event)}>
+          <div><span className="eyebrow">MANUEL DÜZELTME · TERS KAYIT</span><strong>Orijinal hareket değiştirilmeyecek</strong></div>
+          <label>Gerekçe<textarea rows={3} maxLength={500} required minLength={3} value={correctionReason}
+            onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Örn. yanlış tutar elle girildi" /></label>
+          <div className="cash-correction-actions"><button type="button" className="secondary-button" onClick={() => setCorrectingId(null)}>Vazgeç</button>
+            <button className="primary-button" disabled={busy || correctionReason.trim().length < 3}>Ters kaydı oluştur</button></div>
+        </form>}
+        {!active && <p className="cash-correction-hint">Düzeltme için aynı kasada yeni bir açık vardiya başlatın.</p>}
+      </section>}
       {displayView === "shifts" && <div className="cash-layout cash-layout-shifts">
         <section className="card cash-history"><header><h2>Vardiya geçmişi</h2><span>{shifts.length} vardiya</span></header>
           {shifts.length ? <div className="cash-shift-list">{shifts.map((shift) => <article key={shift.id}>
@@ -201,11 +230,16 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
   </>;
 }
 
-function CashMovementList({ items }: { items: Movement[] }) {
+function CashMovementList({ items, onCorrect }: { items: Movement[]; onCorrect?: (movement: Movement) => void }) {
   if (!items.length) return <div className="empty-list">Henüz kasa hareketi yok.</div>;
   return <div className="cash-movement-list">{items.map((item) => <article key={item.id}>
     <span className={`cash-movement-icon ${item.kind === "manual_out" ? "out" : "in"}`}>{item.kind === "manual_out" ? <ArrowUpRight size={16} /> : <ArrowDownLeft size={16} />}</span>
-    <div><strong>{movementTitle(item)}</strong><span>{item.description}</span><small>{dateTime(item.createdAt)} · {item.actor} · Elle girildi</small></div>
+    <div><strong>{item.correctionType === "reversal" ? "Ters kayıt düzeltmesi" : movementTitle(item)}</strong>
+      <span>{item.correctionType === "reversal" ? item.correctionReason : item.description}</span>
+      <small>{dateTime(item.createdAt)} · {item.actor} · Elle girildi{item.originalMovementId ? ` · Orijinal: ${item.originalMovementId.slice(0, 8)}` : ""}</small></div>
     <b className={item.kind === "manual_out" ? "cash-negative" : "cash-positive"}>{item.kind === "manual_out" ? "−" : "+"}{money(item.amountMinor)}</b>
+    {onCorrect && item.source === "manual" && !item.originalMovementId &&
+      (item.kind === "manual_in" || item.kind === "manual_out") && <button className="secondary-button cash-reverse-button"
+        onClick={() => onCorrect(item)} aria-label={`${movementTitle(item)} hareketini düzelt`}><RotateCcw size={14} /> Düzelt</button>}
   </article>)}</div>;
 }

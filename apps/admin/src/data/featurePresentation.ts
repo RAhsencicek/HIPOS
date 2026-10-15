@@ -6,7 +6,7 @@ export type FeaturePresentation = {
   description: string;
 };
 
-type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http"; inventorySource?: "mock" | "http"; cashSource?: "mock" | "http" };
+type Sources = { catalogSource: "mock" | "http"; featureSource: "mock" | "http"; cariSource?: "mock" | "http"; serviceSource?: "mock" | "http"; inventorySource?: "mock" | "http"; cashSource?: "mock" | "http"; expenseSource?: "mock" | "http" };
 
 const configuredSources: Sources = {
   catalogSource: import.meta.env.VITE_CATALOG_PROVIDER === "http" ? "http" : "mock",
@@ -15,6 +15,7 @@ const configuredSources: Sources = {
   serviceSource: import.meta.env.VITE_SERVICE_PROVIDER === "http" ? "http" : "mock",
   inventorySource: import.meta.env.VITE_INVENTORY_PROVIDER === "http" ? "http" : "mock",
   cashSource: import.meta.env.VITE_CASH_PROVIDER === "http" ? "http" : "mock",
+  expenseSource: import.meta.env.VITE_EXPENSE_PROVIDER === "http" ? "http" : "mock",
 };
 
 // Alt ekranların görünür olgunluğu. Burada bulunmayan yol gelecekteki ürün planıdır.
@@ -55,6 +56,8 @@ const routeDescriptions: Record<string, string> = {
   "finance/payables": "Tedarikçi borçları cari hareketlerinden beslenecek; finans ekranı henüz etkin değil.",
   "finance/receivables": "Müşteri alacakları cari hareketlerinden beslenecek; finans ekranı henüz etkin değil.",
   "finance/supplier-debts": "Tedarikçi borcu için ayrı kayıt oluşturulmayacak; cari temelinden okunacak.",
+  "finance/expenses": "Gider kaydı için PostgreSQL gider migration'ı ve VITE_EXPENSE_PROVIDER=http gerekir.",
+  "finance/expense-categories": "Gider kategorileri PostgreSQL seed'i sonrasında kullanılabilir.",
   "catalog/scheduled-prices": "İleri tarihli fiyatların geçerlilik ve yayın kuralları sonraki sürüme bırakıldı.",
   "reports/staff": "Personelin çalışma süresi ve performansı için güvenilir veri kaynağı henüz yok.",
   "reports/kitchen": "Kişi bazlı mutfak performansı bu sürümde hesaplanmıyor.",
@@ -73,6 +76,8 @@ const futureBySection: Record<string, string> = {
 
 export function featurePresentation(section: string, item: string, sources: Sources): FeaturePresentation {
   const key = `${section}/${item}`;
+  if (section === "finance" && ["expenses", "expense-categories"].includes(item) && sources.expenseSource === "http")
+    return { stage: "working", label: "Çalışıyor", description: "Gider ve kategori kayıtları ayrı finance PostgreSQL şemasına bağlıdır. Kaynak yalnızca manuel; kasa, cari ve muhasebe fişiyle bağlantı yoktur." };
   if (key === "catalog/menus" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description: "Menü taslağı, özel bölüm, ikonlu ürün seçimi ve şubede tek yayındaki menü PostgreSQL'e bağlıdır. QR ve web yayını sonraki ürün aşamasıdır." };
   if (key === "overview/daily")
