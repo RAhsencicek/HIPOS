@@ -127,8 +127,8 @@ export function ModulesPage({ ctx }: { ctx: ViewContext }) {
       />
       <DemoNotice>
         {source === "http"
-          ? "Yerel .NET sunucu prototipine bağlı. Tercihler sunucunun bellek veya PostgreSQL ayarına göre saklanır; gerçek işletme ve kullanıcı hesabı henüz bağlı değildir."
-          : "Bu katalog tasarım önizlemesidir. Açma/kapama seçimleri yalnız bu oturumdaki görünümü etkiler; veritabanına kayıt yapılmaz."}
+          ? "Modül tercihlerini seçili şube için yönetin. Kapatılan modüllerde geçmiş kayıtları incelemeye devam edebilirsiniz."
+          : "Örnek görünüm: açma ve kapama tercihleri yalnızca bu oturumda saklanır."}
       </DemoNotice>
       {!currentBranch && (
         <div className="notice branch-pick-notice">
@@ -353,13 +353,12 @@ export function ModulesPage({ ctx }: { ctx: ViewContext }) {
               )}
               {selected.availability === "planned" && (
                 <div>
-                  <Clock3 size={16} className="warn-icon" /> Gerçek işlem henüz
-                  plan aşamasında
+                  <Clock3 size={16} className="warn-icon" /> Çok yakında kullanıma açılacak
                 </div>
               )}
               {selected.availability === "backend_preview" && (
                 <div>
-                  <Clock3 size={16} className="warn-icon" /> Gerçek taslak komutu yalnız yerel PostgreSQL API'de; panel formu ve kullanıcı girişi henüz bağlı değil
+                  <Clock3 size={16} className="warn-icon" /> Bu özellik için kurulumun tamamlanması gerekiyor
                 </div>
               )}
               {isEnabled &&
@@ -372,8 +371,8 @@ export function ModulesPage({ ctx }: { ctx: ViewContext }) {
             </div>
             <div className="modal-note">
               {selected.key === "catalog.drafts" && source === "http"
-                ? "Bu tercih, PostgreSQL hazırsa yerel API'de gerçek taslak oluşturma/güncelleme iznini değiştirir. Panel formu henüz bağlı değildir; üretim hesabı değildir. Kapatma geçmiş taslakları silmez."
-                : "Bu panelden gerçek işletme kaydı oluşturulmaz. Modül kapatıldığında yeni işler engellenir; geçmiş kayıtlar okunabilir kalır."}
+                ? "Bu tercih yeni ürün taslağı oluşturma ve düzenleme işlemlerini yönetir. Modülü kapatmak geçmiş taslakları silmez."
+                : "Modül kapatıldığında yeni işler durdurulur. Geçmiş kayıtlar görüntülenmeye devam eder."}
             </div>
             <div className="modal-actions">
               <button className="soft-button" onClick={() => setSelected(null)}>

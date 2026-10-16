@@ -62,7 +62,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
         method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    } catch { throw new Error("Stok API'sine bağlanılamadı. API ve PostgreSQL sağlayıcısını kontrol edin."); }
+    } catch { throw new Error("Stok bilgilerine şu anda ulaşılamıyor. Lütfen tekrar deneyin."); }
     if (!response.ok) {
       const problem = await response.json().catch(() => ({})) as { detail?: string };
       throw new Error(problem.detail ?? `Stok işlemi başarısız (${response.status}).`);
@@ -129,7 +129,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
     await run(async () => {
       await api(`${scope}/ingredients`, "POST", { requestId: crypto.randomUUID(), name: ingredientName.trim(), unit: ingredientUnit, criticalBelow: Number(criticalBelow) });
       setIngredientName(""); setCriticalBelow("0");
-    }, "Hammadde kartı PostgreSQL'e kaydedildi.");
+    }, "Hammadde kartı kaydedildi.");
   }
 
   async function addMovement(event: FormEvent) {
@@ -158,7 +158,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
       await api(`${scope}/recipes/${encodeURIComponent(recipeProduct)}`, "PUT", {
         requestId: crypto.randomUUID(), expectedVersion: current?.version ?? 0, portion: recipePortion.trim(), lines,
       });
-    }, "Yeni reçete sürümü PostgreSQL'e kaydedildi; önceki sürüm korundu.");
+    }, "Yeni reçete sürümü kaydedildi. Önceki sürümü geçmişte inceleyebilirsiniz.");
   }
 
   async function startCount() {
@@ -217,19 +217,19 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
   const pageTitle = labels[view];
   const visibleIngredients = view === "critical" ? critical : ingredients;
   return <>
-    <PageHeading eyebrow="STOK VE TEDARİK · POSTGRESQL" title={pageTitle}
-      description={`${ctx.selectedBranch?.name ?? "Seçili şube"} · miktarlar değiştirilebilir bir bakiye alanından değil, kalıcı hareket defterinden hesaplanır.`}
-      action={<StatusPill tone={loading ? "neutral" : error ? "orange" : "green"}>{loading ? "Yükleniyor" : error ? "Bağlantı/kurulum gerekli" : "PostgreSQL · ilk stok dilimi"}</StatusPill>} />
-    <DemoNotice>Bu geliştirme dilimi tek şube ve tek stok alanı içindir. Reçete sürümlüdür; satış reçeteden otomatik stok düşmez. Sayım farkı onay öncesi stoğu değiştirmez. API aktörü geliştirme kimliğidir, üretim yetkilendirmesi değildir.</DemoNotice>
+    <PageHeading eyebrow="STOK VE TEDARİK" title={pageTitle}
+      description={`${ctx.selectedBranch?.name ?? "Seçili şube"} · hammadde, reçete ve stok hareketlerini birlikte takip edin.`}
+      action={<StatusPill tone={loading ? "neutral" : error ? "orange" : "green"}>{loading ? "Yükleniyor" : error ? "Bağlantı/kurulum gerekli" : "Stok yönetimi"}</StatusPill>} />
+    <DemoNotice>Stok giriş ve çıkışlarını elle kaydedebilirsiniz. Satışlar stoğu otomatik değiştirmez; sayım farkları onayınızdan sonra uygulanır.</DemoNotice>
     <div className="inventory-toolbar"><label>Fiziksel depo<select aria-label="Fiziksel depo" value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label><span>Depo, stok miktarlarının tutulduğu fiziksel konumdur.</span></div>
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}
-    {!branchId && <div className="card generic-empty">Kalıcı stok işlemleri için tek bir şube seçin.</div>}
+    {!branchId && <div className="card generic-empty">Stok işlemleri için bir şube seçin.</div>}
     {loading && <div className="card generic-empty" role="status">Stok, reçete ve sayım verileri yükleniyor…</div>}
 
     {!loading && !error && view === "summary" && <>
       <div className="metric-grid compact-grid">
-        <MetricCard icon={<Boxes size={23} />} title="HAMMADDE" value={String(ingredients.length)} foot="PostgreSQL kartları" tone="blue" />
+        <MetricCard icon={<Boxes size={23} />} title="HAMMADDE" value={String(ingredients.length)} foot="Kayıtlı hammadde kartları" tone="blue" />
         <MetricCard icon={<ClipboardCheck size={23} />} title="KRİTİK STOK" value={String(critical.length)} foot="Eşik altındaki miktarlar" tone="orange" />
         <MetricCard icon={<ClipboardCheck size={23} />} title="REÇETE" value={String(recipes.length)} foot="En güncel sürüm / ürün" tone="purple" />
         <MetricCard icon={<ClipboardCheck size={23} />} title="AÇIK SAYIM" value={String(counts.filter((count) => count.status === "draft").length)} foot="Onay bekleyen taslaklar" tone="green" />
@@ -244,7 +244,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
           <label>Hammadde adı<input value={ingredientName} onChange={(event) => setIngredientName(event.target.value)} minLength={2} maxLength={160} required /></label>
           <label>Birim<select value={ingredientUnit} onChange={(event) => setIngredientUnit(event.target.value)}><option value="g">g · gram</option><option value="kg">kg · kilogram</option><option value="ml">ml · mililitre</option><option value="l">l · litre</option><option value="adet">adet</option></select></label>
           <label>Kritik eşik<input type="number" min="0" step="0.001" value={criticalBelow} onChange={(event) => setCriticalBelow(event.target.value)} required /></label>
-          <button className="primary-button" disabled={busy || hasOpenCount}><Plus size={15} /> PostgreSQL'e kaydet</button>
+          <button className="primary-button" disabled={busy || hasOpenCount}><Plus size={15} /> Hammaddeyi kaydet</button>
         </form>
         {hasOpenCount && <p className="card-note">Depoda açık sayım var. Yeni hammadde kartı, sayım onaylanana veya iptal edilene kadar kilitli.</p>}
       </section>}

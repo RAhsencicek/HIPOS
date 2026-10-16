@@ -6,6 +6,7 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
+  Clock3,
   CircleHelp,
   LayoutGrid,
   Menu,
@@ -37,7 +38,10 @@ export function Shell({
   const location = useLocation();
   const navigate = useNavigate();
   const sectionId = location.pathname.split("/")[2] || "overview";
+  const itemSlug = location.pathname.split("/")[3];
+  const futurePreview = Boolean(itemSlug && isFutureSidebarItem(sectionId, itemSlug));
   const [expanded, setExpanded] = useState(sectionId);
+  const [futureExpanded, setFutureExpanded] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -51,12 +55,16 @@ export function Shell({
 
   useEffect(() => {
     setExpanded(sectionId);
+    const itemSlug = location.pathname.split("/")[3];
+    setFutureExpanded(
+      itemSlug && isFutureSidebarItem(sectionId, itemSlug) ? sectionId : "",
+    );
     setSidebarOpen(false);
     setSearchOpen(false);
   }, [sectionId, location.pathname]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${futurePreview ? "kitchen-preview-shell" : ""}`}>
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="brand-row">
           <Link to="/admin/" className="brand">
@@ -97,18 +105,43 @@ export function Shell({
                 </button>
                 {expanded === section.id && (
                   <div className="nav-children">
-                    {section.items.map((item) => (
+                    {section.items.filter((item) => !isFutureSidebarItem(section.id, item.slug)).map((item) => (
                       <Link
                         key={item.slug}
                         to={`/admin/${section.id}/${item.slug}`}
-                        className={[
-                          location.pathname === `/admin/${section.id}/${item.slug}` ? "active" : "",
-                          isFutureSidebarItem(section.id, item.slug) ? "nav-future" : "",
-                        ].filter(Boolean).join(" ")}
+                        className={location.pathname === `/admin/${section.id}/${item.slug}` ? "active" : ""}
                       >
                         {item.label}
                       </Link>
                     ))}
+                    {section.items.some((item) => isFutureSidebarItem(section.id, item.slug)) && (
+                      <div className="nav-future-group">
+                        <button
+                          className={`nav-future-toggle ${futureExpanded === section.id ? "open" : ""}`}
+                          onClick={() => setFutureExpanded(futureExpanded === section.id ? "" : section.id)}
+                          aria-expanded={futureExpanded === section.id}
+                          aria-controls={`future-${section.id}`}
+                        >
+                          <Clock3 size={14} aria-hidden="true" />
+                          <span>Gelecekte</span>
+                          <small>{section.items.filter((item) => isFutureSidebarItem(section.id, item.slug)).length}</small>
+                          <ChevronDown size={14} className={futureExpanded === section.id ? "rotated" : ""} aria-hidden="true" />
+                        </button>
+                        {futureExpanded === section.id && (
+                          <div className="nav-future-children" id={`future-${section.id}`}>
+                            {section.items.filter((item) => isFutureSidebarItem(section.id, item.slug)).map((item) => (
+                              <Link
+                                key={item.slug}
+                                to={`/admin/${section.id}/${item.slug}`}
+                                className={location.pathname === `/admin/${section.id}/${item.slug}` ? "active" : ""}
+                              >
+                                {item.label}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -120,8 +153,8 @@ export function Shell({
             <Sparkles size={17} />
           </div>
           <div>
-            <strong>Yönetim önizlemesi</strong>
-            <small>İlk frontend · örnek senaryo</small>
+            <strong>Yönetim paneli</strong>
+            <small>İşletmenizin kontrol merkezi</small>
           </div>
         </div>
       </aside>
@@ -133,6 +166,12 @@ export function Shell({
         />
       )}
       <div className="main-column">
+        {futurePreview && <header className="kitchen-preview-mobile-header">
+          <button className="icon-button" onClick={() => setSidebarOpen(true)} aria-label="Menüyü aç">
+            <Menu size={21} />
+          </button>
+          <span>hipos<span className="brand-dot">.</span></span>
+        </header>}
         <header className="topbar">
           <button
             className="icon-button mobile-menu"

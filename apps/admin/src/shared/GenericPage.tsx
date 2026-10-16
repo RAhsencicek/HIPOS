@@ -1,7 +1,8 @@
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 import type { NavSection } from "../data/catalog";
-import { featurePresentation } from "../data/featurePresentation";
+import { featurePresentation, isFutureSidebarItem } from "../data/featurePresentation";
+import { FutureFeaturePage } from "./FutureFeaturePage";
 import type { FeaturePresentation } from "../data/featurePresentation";
 import { Icon, StatusPill, PageHeading } from "./ui";
 
@@ -19,11 +20,14 @@ export function GenericPage({ section, slug, sources }: {
 }) {
   const item = section.items.find((entry) => entry.slug === slug);
   const selected = item ? featurePresentation(section.id, item.slug, sources) : null;
+  if (item && selected && (selected.stage === "future" || selected.stage === "inactive")) {
+    return <FutureFeaturePage section={section} title={item.label} slug={item.slug} />;
+  }
   return <>
     <PageHeading
       eyebrow={section.label.toLocaleUpperCase("tr-TR")}
       title={item?.label ?? section.label}
-      description={item ? selected!.description : "Bu alanın bugün görülebilen ve sonraki aşamalarda gelecek alt ekranları."}
+      description={item ? selected!.description : "İşletmenizin bu alanındaki araçları keşfedin."}
       action={selected && <StatusPill tone={tone(selected.stage)}>{selected.label}</StatusPill>}
     />
     <div className="generic-intro card">
@@ -31,7 +35,7 @@ export function GenericPage({ section, slug, sources }: {
       <div>
         <span className="card-kicker">{item ? "ÖZELLİK DURUMU" : "ALAN REHBERİ"}</span>
         <h2>{item?.label ?? section.label}</h2>
-        <p>{item ? selected!.description : "Alt ekranlarda örnek ve çalışan işlevler, daha sonra gelecek işlerden ayrı gösterilir. Her ekran kendi durumunu açıkça belirtir."}</p>
+        <p>{item ? selected!.description : "Günlük işlerinizi kolaylaştıran araçlara buradan ulaşın. İşletmenize katılacak yeni özellikleri de Gelecekte bölümünde keşfedebilirsiniz."}</p>
         {selected && <StatusPill tone={tone(selected.stage)}>{selected.label}</StatusPill>}
       </div>
     </div>
@@ -45,14 +49,14 @@ export function SectionDirectory({ section, slug, sources }: {
   sources: Sources;
 }) {
   const current = section.items.filter((entry) =>
-    featurePresentation(section.id, entry.slug, sources).stage !== "future");
+    !isFutureSidebarItem(section.id, entry.slug, sources));
   const future = section.items.filter((entry) =>
-    featurePresentation(section.id, entry.slug, sources).stage === "future");
+    isFutureSidebarItem(section.id, entry.slug, sources));
 
   function tile(entry: NavSection["items"][number], index: number) {
     const presentation = featurePresentation(section.id, entry.slug, sources);
     return <Link
-      className={`card generic-tile ${entry.slug === slug ? "current" : ""} ${presentation.stage === "future" ? "future-tile" : ""}`}
+      className={`card generic-tile ${entry.slug === slug ? "current" : ""} ${isFutureSidebarItem(section.id, entry.slug, sources) ? "future-tile" : ""}`}
       to={`/admin/${section.id}/${entry.slug}`}
       key={entry.slug}
       aria-current={entry.slug === slug ? "page" : undefined}
@@ -61,7 +65,7 @@ export function SectionDirectory({ section, slug, sources }: {
       <div>
         <strong>{entry.label}</strong>
         <small>{presentation.description}</small>
-        <StatusPill tone={tone(presentation.stage)}>{presentation.label}</StatusPill>
+        <StatusPill tone={isFutureSidebarItem(section.id, entry.slug, sources) ? "red" : tone(presentation.stage)}>{presentation.label}</StatusPill>
       </div>
       <ArrowRight size={16} />
     </Link>;
@@ -74,11 +78,11 @@ export function SectionDirectory({ section, slug, sources }: {
         <span>{current.length} ekran</span>
       </div>
       {current.length ? <div className="generic-grid">{current.map(tile)}</div> :
-        <div className="card generic-empty">Bu alanda henüz etkin veya örnek gösterimli alt ekran yok.</div>}
+        <div className="card generic-empty">Bu alana katılacak yeni özellikleri aşağıda keşfedin.</div>}
     </section>
     <section className="future-section" aria-labelledby="future-screens">
       <div className="generic-section-title">
-        <div><span className="card-kicker">YOL HARİTASI</span><h2 id="future-screens">Gelecekte neler olacak?</h2></div>
+        <div><span className="card-kicker">YENİ KOLAYLIKLAR</span><h2 id="future-screens">Gelecekte neler olacak?</h2></div>
         <span>{future.length} özellik</span>
       </div>
       {future.length ? <div className="generic-grid">{future.map(tile)}</div> :

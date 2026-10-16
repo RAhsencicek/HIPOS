@@ -114,7 +114,7 @@ export function ExpenseManagementPage({ ctx, canWrite, view = "expenses" }: {
       });
       setSelected(result.expense); setAmount(""); setDescription("");
       setPage(1);
-      setNotice("Gider PostgreSQL'e kaydedildi. Kasa ve cari hareketi oluşturulmadı.");
+      setNotice("Gider kaydedildi. Bu kayıt kasa ve cari bakiyesini değiştirmez.");
       await reload();
       setSelected(result.expense);
     } catch (cause) {

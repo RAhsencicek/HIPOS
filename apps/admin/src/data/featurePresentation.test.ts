@@ -17,8 +17,7 @@ describe("alt ekran durum sözleşmesi", () => {
 
       expect(presentation.stage).toBe("working");
       expect(presentation.label).toBe("Çalışıyor");
-      expect(presentation.description).toContain("PostgreSQL API");
-      expect(presentation.description).toContain("POS/kart tahsilatı");
+      expect(presentation.description).not.toMatch(/PostgreSQL|API|VITE_/);
     }
   });
 
@@ -26,7 +25,7 @@ describe("alt ekran durum sözleşmesi", () => {
     const presentation = featurePresentation("cash", "movements", mockSources);
 
     expect(presentation.stage).toBe("future");
-    expect(presentation.label).toBe("Gelecek planı");
+    expect(presentation.label).toBe("Çok yakında");
   });
 
   it("yan menüde etkin kasa ekranlarını kırmızı gelecek rengi dışında tutar", () => {
@@ -45,7 +44,7 @@ describe("alt ekran durum sözleşmesi", () => {
         expenseSource: "http",
       });
       expect(presentation.stage).toBe("working");
-      expect(presentation.description).toContain("finance PostgreSQL şemasına bağlıdır");
+      expect(presentation.description).not.toMatch(/PostgreSQL|API|VITE_/);
       expect(isFutureSidebarItem("finance", item, { ...mockSources, expenseSource: "http" })).toBe(false);
       expect(isFutureSidebarItem("finance", item, mockSources)).toBe(true);
     }

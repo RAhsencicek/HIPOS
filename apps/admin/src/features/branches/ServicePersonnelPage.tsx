@@ -103,10 +103,10 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
 
   return <>
     <PageHeading eyebrow="MUTFAK VE SERVİS · EKİP" title="Personel"
-      description="Çalışan kartlarını bölüm ve görevlerine göre yönetin. Kişi kaydı, POS giriş yetkisi veya çalışma saati kaydı değildir."
-      action={<StatusPill tone={source === "http" ? "green" : "purple"}>{source === "http" ? "Personel API'si" : "Örnek gösterim"}</StatusPill>} />
-    {source === "http" ? <DemoNotice>Personel kartları seçili şubenin PostgreSQL kayıtlarıdır. İsteğe bağlı telefon bilgisi dışında hassas kişisel veri tutulmaz; maaş/bordro, vardiya ve puantaj bu sürümde yoktur.</DemoNotice>
-      : <div className="notice" role="status">Gerçek personel kayıtları için VITE_SERVICE_PROVIDER=http sağlayıcısını etkinleştirin.</div>}
+      description="Ekibinizi bölüm ve görevlerine göre düzenleyin. Aradığınız çalışan bilgisine kolayca ulaşın."
+      action={<StatusPill tone={source === "http" ? "green" : "purple"}>{source === "http" ? "Ekip kayıtları" : "Örnek gösterim"}</StatusPill>} />
+    {source === "http" ? <DemoNotice>Personel kartlarını seçili şube için yönetin. Bu kartlar çalışana giriş yetkisi vermez; çalışma saati veya bordro kaydı oluşturmaz.</DemoNotice>
+      : <div className="notice" role="status">Personel kayıtlarını yönetmek için servis bağlantısının kurulması gerekiyor.</div>}
     {!scope && <div className="card generic-empty">Personel işlemleri için önce bir şube seçin.</div>}
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}

@@ -64,7 +64,7 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
       response = await fetch(`${apiBase}${path}`, { method,
         headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}) });
-    } catch { throw new Error("Kasa API'sine bağlanılamadı. API ve PostgreSQL sağlayıcısını kontrol edin."); }
+    } catch { throw new Error("Kasa bilgilerine şu anda ulaşılamıyor. Lütfen tekrar deneyin."); }
     if (!response.ok) {
       const problem = await response.json().catch(() => ({})) as { detail?: string };
       throw new Error(problem.detail ?? `Kasa işlemi başarısız (${response.status}).`);
@@ -160,7 +160,7 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
     <PageHeading eyebrow="KASA · POSTGRESQL" title={titleFor[view]}
       description="Tek şube için manuel nakit vardiyası. POS, kart tahsilatı ve mali muhasebe bağlantısı bu sürümde yoktur."
       action={<button className="secondary-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={15} /> Yenile</button>} />
-    <DemoNotice>Hareketler PostgreSQL'e kalıcı yazılır. Başlangıçtaki geçmiş vardiyalar kurgusal örnek veridir; bugünden itibaren ekleyeceğiniz kayıtlar bu işletme akışında saklanır. Nakit satış toplamı elle girilir; simüle ödeme denemeleri kasayı değiştirmez.</DemoNotice>
+    <DemoNotice>Nakit giriş ve çıkışlarını bu ekrandan elle kaydedebilirsiniz. Başlangıç vardiyaları örnek kayıtlardır. Ödeme denemeleri kasa bakiyesini değiştirmez.</DemoNotice>
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {loading ? <div className="card empty-list">Kasa kayıtları yükleniyor…</div> : !overview?.registers.length ?

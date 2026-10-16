@@ -75,7 +75,7 @@ export function CategoriesPage({ ctx }: { ctx: ViewContext }) {
     <PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Kategoriler"
       description="Seçili kapsamdaki ürünleri kategoriye göre inceleyin." />
     <DemoNotice>{source === "http"
-      ? "Kategoriler PostgreSQL ürünlerinden okunur. Kategori oluşturma veya düzenleme henüz gerçek işlem değildir."
+      ? "Ürünlerinizi kategorilerine göre inceleyin. Bu görünümde kategori bilgileri yalnızca okunabilir."
       : "Kategoriler örnek ürünlerden oluşturulur; kalıcı kayıt yapılmaz."}</DemoNotice>
     {load.status !== "success" ? <CatalogStatePanel load={load} /> :
       <div className="card content-card">
@@ -152,7 +152,7 @@ export function ProductsPage({ ctx, canPreviewNewWork, canWriteDraft }: { ctx: V
       />
       <DemoNotice>
         {source === "http"
-          ? "Ürünler PostgreSQL'den okunur. Taslak, fiyat sürümü ve ilk POS yayını seçili şubede gerçek API kaydıdır; ödeme ve yeniden yayın henüz yoktur."
+          ? "Ürün taslaklarını hazırlayın, fiyatları düzenleyin ve ilk satış yayınına gönderin. İşlem yapmak için ilgili şubeyi seçin."
           : "Ürünler örnek veridir. Ürün ekleme ve kaydetme akışı henüz gerçek kayıt oluşturmaz."}
       </DemoNotice>
       {source === "http" && !canWriteDraft && <div className="notice" role="status">
@@ -348,7 +348,7 @@ export function ProductsPage({ ctx, canPreviewNewWork, canWriteDraft }: { ctx: V
             <div className="table-footer">
               <span>{load.data.pageInfo.totalItems} ürün gösteriliyor</span>
               <span>
-                {source === "http" ? "PostgreSQL kataloğu" : "Örnek menü"} · sayfa {load.data.pageInfo.page} /{" "}
+                {source === "http" ? "Ürün kataloğu" : "Örnek menü"} · sayfa {load.data.pageInfo.page} /{" "}
                 {Math.max(1, load.data.pageInfo.totalPages)}
               </span>
             </div>
@@ -540,7 +540,7 @@ export function ProductDetail({
                 {inventorySource === "http"
                   ? recipeState.status === "loading" ? "Reçete yükleniyor"
                     : recipeState.status === "error" ? "Reçete API'si kullanılamıyor"
-                      : recipeState.recipe ? `PostgreSQL · sürüm ${recipeState.recipe.version}` : "Kalıcı reçete yok"
+                      : recipeState.recipe ? `Reçete sürümü ${recipeState.recipe.version}` : "Kayıtlı reçete yok"
                   : product.recipeLinked ? "Kalıcı bağlantı" : demoRecipe ? "Örnek gösterim" : "Bu özellik henüz etkin değil"}
               </StatusPill>
             </div>

@@ -229,14 +229,14 @@ export class MockCatalogProvider implements CatalogProvider {
   createDraft(_request: CreateDraftRequest): Promise<CatalogProductDetail> {
     return Promise.reject(new CatalogProviderError(
       "DRAFT_NOT_AVAILABLE", 409,
-      "Bu önizleme gerçek ürün taslağı oluşturmaz. Yerel PostgreSQL API'sini seçin.",
+      "Örnek görünümde ürün taslağı kaydedilemez. Kayıt işlemleri için katalog bağlantısı gerekiyor.",
     ));
   }
 
   updateDraft(_request: UpdateDraftRequest): Promise<CatalogProductDetail> {
     return Promise.reject(new CatalogProviderError(
       "DRAFT_NOT_AVAILABLE", 409,
-      "Bu önizleme gerçek ürün taslağı güncellemez. Yerel PostgreSQL API'sini seçin.",
+      "Örnek görünümde ürün taslağı düzenlenemez. Kayıt işlemleri için katalog bağlantısı gerekiyor.",
     ));
   }
 

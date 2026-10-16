@@ -107,13 +107,13 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
 
   return <>
       <PageHeading eyebrow="MASA SERVİSİ" title="Masa planı"
-      description="Masa-adisyon bağını ve servis sorumlusunu şube bazında inceleyin. Satış adisyonları masa servisinden bağımsızdır."
+      description="Masalarınızı ve servis sorumlularını takip edin; salonun durumunu tek bakışta görün."
       action={<div className="service-actions"><StatusPill tone={error ? "orange" : data?.tablesEnabled ? "green" : "neutral"}>
-        {loading ? "Yükleniyor" : source !== "http" ? "Sağlayıcı gerekli" : error ? "Kurulum gerekiyor" : data?.tablesEnabled ? "PostgreSQL · etkin" : "Masa servisi kapalı"}
+        {loading ? "Yükleniyor" : source !== "http" ? "Bağlantı gerekli" : error ? "Kurulum gerekiyor" : data?.tablesEnabled ? "Masa servisi etkin" : "Masa servisi kapalı"}
       </StatusPill><button type="button" className="service-refresh" onClick={() => void reload()} disabled={!scope || loading}>Yenile</button></div>} />
-    <DemoNotice>Bu görünüm yerel PostgreSQL kayıtlarını okur; başlangıç siparişleri kurgusal demodur. Yönetim paneli adisyon veya ödeme durumunu değiştirmez. X-Demo-Actor üretim kimlik doğrulaması değildir.</DemoNotice>
-    {source !== "http" && <div className="notice" role="status">Masa planı şube listesinden ayrıdır ve servis API’sinden beslenir. Yerel servis ekranı için VITE_SERVICE_PROVIDER=http ayarını yapıp paneli yeniden başlatın.</div>}
-    {!scope && <div className="card generic-empty">Bu şube için API kapsamı seçilmedi.</div>}
+    <DemoNotice>Masa düzenini ve servis sorumlularını buradan yönetebilirsiniz. Adisyon ve ödeme bilgileri bu ekranda yalnızca görüntülenir.</DemoNotice>
+    {source !== "http" && <div className="notice" role="status">Masa planını kullanabilmek için servis bağlantısının kurulması gerekiyor.</div>}
+    {!scope && <div className="card generic-empty">Masa planını görmek için bir şube seçin.</div>}
     {loading && <div className="card generic-empty" role="status">Masa ve adisyonlar yükleniyor…</div>}
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}

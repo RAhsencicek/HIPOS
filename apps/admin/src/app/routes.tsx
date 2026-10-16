@@ -2,7 +2,7 @@ import { Link, useParams } from "react-router";
 import type { ReactNode } from "react";
 import { ArrowRight, Clock3 } from "lucide-react";
 import { sections } from "../data/catalog";
-import { featurePresentation } from "../data/featurePresentation";
+import { featurePresentation, isFutureSidebarItem } from "../data/featurePresentation";
 import type { ViewContext } from "./context";
 import { useFeatureCatalog } from "../features/modules/useFeatureCatalog";
 import { useCatalogProvider, useFeatureProvider } from "./providers";
@@ -24,6 +24,7 @@ import { ReportsPage } from "../features/reports/ReportsPage";
 import { ModulesPage } from "../features/settings/ModulesPage";
 import { IntegrationsPage } from "../features/settings/IntegrationsPage";
 import { GenericPage, SectionDirectory } from "../shared/GenericPage";
+import { FutureFeaturePage } from "../shared/FutureFeaturePage";
 import { CarilerDemoPage, RecipesDemoPage, StockDemoPage } from "../features/demo/DemoBusinessPages";
 import { CarilerHttpPage } from "../features/demo/CarilerHttpPage";
 import { InventoryHttpPage } from "../features/inventory/InventoryHttpPage";
@@ -177,6 +178,11 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const expenseState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "finance.expenses") : undefined;
   const canWriteExpenses = Boolean(scope && expenseSource === "http" && featureSource === "http" && expenseState?.effectiveForNewWork);
   const sources = { catalogSource, featureSource, cariSource, serviceSource, inventorySource, cashSource, expenseSource };
+  const futureSection = sections.find((entry) => entry.id === section);
+  const futureItem = futureSection?.items.find((entry) => entry.slug === item);
+  if (futureSection && futureItem && isFutureSidebarItem(futureSection.id, futureItem.slug, sources)) {
+    return <FutureFeaturePage section={futureSection} title={futureItem.label} slug={futureItem.slug} />;
+  }
   let content: ReactNode;
   let generic = false;
   if (productId) {
@@ -296,7 +302,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
           görünümünde yeni işlem için önce hedef şubeyi seçin.
         </div>
       )}
-      {!generic && <div className="notice feature-stage-notice" role="status">
+      {!generic && !(presentationSection === "overview" && presentationItem === "daily") && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>
       </div>}
