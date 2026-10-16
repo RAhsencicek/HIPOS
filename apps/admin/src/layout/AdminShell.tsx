@@ -4,20 +4,21 @@ import { Link, useLocation, useNavigate } from "react-router";
 import {
   ArrowRight,
   Bell,
+  Building2,
   ChevronDown,
-  ChevronRight,
   Clock3,
   CircleHelp,
   LayoutGrid,
   Menu,
   Search,
   Sparkles,
+  Store,
   X,
 } from "lucide-react";
 import { sections } from "../data/catalog";
 import { isFutureSidebarItem } from "../data/featurePresentation";
 import type { ViewContext } from "../app/context";
-import { Icon, DemoBadge } from "../shared/ui";
+import { Icon } from "../shared/ui";
 
 const allSections = sections.flatMap((section) => [
   { label: section.label, path: `/admin/${section.id}`, group: "Ana alan" },
@@ -180,19 +181,48 @@ export function Shell({
           >
             <Menu size={21} />
           </button>
-          <div className="topbar-context">
-            <span className="topbar-context-label">AKTİF KAPSAM</span>
-            <div className="context-line">
-              <span className="context-firm">{ctx.firm}</span>
-              <ChevronRight size={14} />
-              <span>{ctx.selectedBranch?.name ?? "Tüm şubeler"}</span>
+          <div className="topbar-scope-selector">
+            <div className="topbar-firm-badge" title="Aktif İşletme">
+              <Store size={15} />
+              <span className="firm-name">{ctx.firm}</span>
+            </div>
+
+            <span className="topbar-scope-divider">/</span>
+
+            <div className="topbar-select-pill branch-pill" title="Aktif Şube Seçimi">
+              <Building2 size={13} className="pill-leading-icon" />
+              <select
+                aria-label="Şube seçimi"
+                value={ctx.branchId}
+                onChange={(e) => ctx.setBranchId(e.target.value)}
+              >
+                {ctx.isMulti && <option value="all">Tüm Şubeler</option>}
+                {ctx.branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={12} className="pill-arrow" />
+            </div>
+
+            <div className="topbar-select-pill scenario-pill" title="İşletme Modu (Tek / Çok Şubeli)">
+              <select
+                aria-label="İşletme senaryosu"
+                value={ctx.scenarioId}
+                onChange={(e) => ctx.setScenarioId(e.target.value)}
+              >
+                <option value="single">Tek Şube Modu</option>
+                <option value="multi">Çok Şubeli Zincir</option>
+              </select>
+              <ChevronDown size={12} className="pill-arrow" />
             </div>
           </div>
           <div className="global-search">
-            <Search size={17} />
+            <Search size={16} />
             <input
               aria-label="Panelde ara"
-              placeholder="Panelde ara..."
+              placeholder="Panelde ara... (Menü, Stok, Kasa)"
               value={globalSearch}
               onFocus={() => setSearchOpen(true)}
               onChange={(e) => {
@@ -233,63 +263,37 @@ export function Shell({
             )}
           </div>
           <div className="topbar-actions">
-            <DemoBadge compact />
+            <div className="topbar-env-pill" title="Canlı Önizleme Ortamı">
+              <span className="live-dot" />
+              <span>Önizleme Ortamı</span>
+            </div>
             <button
               className="icon-button topbar-icon"
               title="Bildirimler"
               aria-label="Bildirimler"
               onClick={() => navigate("/admin/overview/alerts")}
             >
-              <Bell size={19} />
+              <Bell size={18} />
               <i />
             </button>
             <button
               className="icon-button topbar-icon"
-              title="Yardım"
+              title="Yardım ve Ayarlar"
               aria-label="Yardım"
               onClick={() => navigate("/admin/settings/modules")}
             >
-              <CircleHelp size={19} />
+              <CircleHelp size={18} />
             </button>
-            <div className="user-avatar">YA</div>
+            <div className="topbar-profile" title="Yönetici Profili">
+              <div className="user-avatar">YA</div>
+              <div className="user-info">
+                <strong>Yönetici</strong>
+                <small>{ctx.isMulti ? "Merkez Ofis" : "Şube Müdürü"}</small>
+              </div>
+            </div>
           </div>
         </header>
         <main className="page-content">
-          <div className="scope-bar">
-            <div className="scope-bar-left">
-              <span className="scope-label">Görünüm</span>
-              <select
-                aria-label="İşletme senaryosu"
-                value={ctx.scenarioId}
-                onChange={(e) => ctx.setScenarioId(e.target.value)}
-              >
-                <option value="single">Tek şubeli işletme</option>
-                <option value="multi">Çok şubeli işletme</option>
-              </select>
-              <span className="scope-separator" />
-              {ctx.brand && (
-                <>
-                  <span className="scope-brand">{ctx.brand}</span>
-                  <ChevronRight size={14} />
-                </>
-              )}
-              <select
-                aria-label="Şube seçimi"
-                value={ctx.branchId}
-                onChange={(e) => ctx.setBranchId(e.target.value)}
-              >
-                {ctx.isMulti && <option value="all">Tüm şubeler</option>}
-                {ctx.branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <span className="scope-hint">
-              <span className="live-dot" /> Önizleme ortamı
-            </span>
-          </div>
           {children}
         </main>
       </div>
