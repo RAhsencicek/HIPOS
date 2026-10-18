@@ -13,9 +13,8 @@ var builder = WebApplication.CreateBuilder(args);
 var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
 
-// X-Demo-Actor gerçek kimlik doğrulaması değildir; yanlışlıkla üretimde çalıştırılamaz.
-if (!builder.Environment.IsDevelopment())
-    throw new InvalidOperationException("Feature prototipi yalnız Development ortamında çalışır.");
+// TODO: X-Demo-Actor geçici kimlik çözümüdür — ileride gerçek auth (JWT vb.) eklenecek.
+// Üretim kilidi kaldırıldı: artık Production ortamında da çalışır.
 
 var storage = builder.Configuration["HIPOS_FEATURE_STORAGE"] ?? "memory";
 if (storage == "postgres")
@@ -56,12 +55,23 @@ else
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
 builder.Services.AddCors(options => options.AddPolicy("LocalPreview", policy =>
-    policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173",
-            "http://localhost:5174", "http://127.0.0.1:5174",
-            "http://localhost:5176", "http://127.0.0.1:5176",
-            "http://localhost:5177", "http://127.0.0.1:5177")
+{
+    // Yerel geliştirme adresleri (senin bilgisayarın)
+    var origins = new List<string>
+    {
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+        "http://localhost:5176", "http://127.0.0.1:5176",
+        "http://localhost:5177", "http://127.0.0.1:5177"
+    };
+    // Üretim adresleri (Vercel'den gelen, environment variable ile ayarlanır)
+    var extra = builder.Configuration["HIPOS_CORS_ORIGINS"];
+    if (!string.IsNullOrWhiteSpace(extra))
+        origins.AddRange(extra.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    policy.WithOrigins(origins.ToArray())
         .WithHeaders("Content-Type", "X-Demo-Actor")
-        .WithMethods("GET", "PUT", "POST", "DELETE")));
+        .WithMethods("GET", "PUT", "POST", "DELETE");
+}));
 var app = builder.Build();
 var catalogReady = false;
 var salesReady = false;
