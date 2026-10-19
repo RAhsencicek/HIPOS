@@ -1,6 +1,6 @@
 # HIPOS — Modüler backend uygulama planı
 
-Durum: Öncelik kararı. İlk pilot hesap akışı kontrollü ve küçük tutulur. Ana geliştirme hedefi, yönetim panelindeki iş alanlarının backend'de tam, şube kapsamına duyarlı ve birbirleriyle tutarlı çalışmasıdır. Bu belge **tamamlanmış özellik listesi değildir**; uygulama ve kabul sırasıdır.
+Durum: Tarihsel modüler backend planı. 19 Ekim 2026 ürün kararıyla sonraki sprint önceliği gerçek auth ile kasa/POS ve LAN/offline akışlarını da kapsar; aşağıdaki eski uygulama sırası canlı plan değildir. Güncel devir [Mühendis Devir Rehberi](DEVIR_REHBERI.md), gerçekleşen durum [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) içindedir.
 
 Güncel gerçekleşen şemalar, bağımlılıklar, API yüzeyleri ve açık servis kapatma sorunu [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) belgesinde tutulur. Aşağıdaki plan/tablolar ürün ve teknik karar bağlamıdır; güncel teslim durumunda kanonik belge ve [yol haritası](DURUM_VE_YOL_HARITASI.md) esas alınır.
 
@@ -15,7 +15,7 @@ Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğru
 
 ## 2. İlk teknik boşluklar
 
-- Backend'deki 18 özellik tanımı paneldeki çok sayıdaki alt işin tamamını temsil etmiyor. **Capability envanteri** ayrıntılandırılmalı: hangisi temel alan, hangisi ayrı aç/kapa yeteneği, hangisi sadece ekran/rapor?
+- Capability kataloğu şu an 26 tanım içeriyor; paneldeki her alt işi bire bir temsil etmez. Katalog değiştiğinde `catalogVersion`, açıklamalar ve bağımlılıklar güncel tutulmalıdır.
 - Modül tanımları paylaşılan katalogdan okunuyor; sonraki iş API sözleşmesi/tip üretimiyle ekran–backend davranışını da eşleştirmek.
 - Ürün taslağı, fiyat sürümü, ilk POS yayını, test POS siparişi ve **simüle ödeme girişimi/sonucu** kalıcı komutlara bağlandı. Gerçek tahsilat, stok tüketimi, yeniden fiyatlandırma ve yeniden yayın komutları henüz yok.
 - `setup_required`, `provider_pending` ve `draining` örnek durumlar. Gerçek kurulum/sağlayıcı/iş tamamlama sinyalleri ilgili modüller tarafından üretilmeli.
@@ -50,12 +50,12 @@ Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalış
 | Modül yönetimi | Tanım, şube tercihi, yaşam döngüsü, denetim | Bütün yeni iş komutları | Tercih PostgreSQL'de doğrulandı; taslak komutuyla ilk atomik bağlantı kuruldu. |
 | Ürün, menü ve fiyat | Ürün, kategori, seçenek, alerjen, kanal/şube görünürlüğü, fiyat sürümü, yayın | Satış, kampanya, reçete, merkez yayın | PostgreSQL okuması, panelde taslak/fiyat/ilk POS yayını, kategori API'si ve geçmiş okuması var; kategori panel yazması, tekrar yayın ve diğer işler planlı. |
 | Şube ve masa servisi | Masa ve garson kartı, açık masa-adisyon bağı | Satış adisyonunu okur; satışın varlık şartı değildir | `service` PostgreSQL şeması, kapılı API, demo seed ve yönetsel masa ayrıntısı var; gerçek servis POS akışı yok. |
-| Satış ve adisyon | Sipariş/adisyon yaşam döngüsü, kalem ve fiyat anlık görüntüsü | Menü, mutfak, ödeme, stok, rapor | Ayrı test POS'tan ilk kalıcı açık sipariş ve yöneticide HTTP salt okunur liste var; tam adisyon yaşam döngüsü yok. |
+| Satış ve adisyon | Ortak check, sipariş, kalem/fiyat snapshot'ı ve simüle ödeme denemesi | Menü, mutfak, ödeme, stok, rapor | Check açma/listeme/detay ve sipariş ekleme API'si var; taşıma/birleştirme/kapama ve gerçek ödeme yok. Operasyonel kasa `sales.cashier` planned capability'sidir. |
 | Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
 | Stok ve reçete | Depo, hammadde/eşik, immutable hareket, reçete sürümü, snapshot/fiziksel/onaylı sayım | Menü, satış, satın alma, rapor | `inventory` migration/API/seed/panel + API ve PostgreSQL tarayıcı kabul akışı tamamlandı. İlk örnek tek depodur. Satıştan otomatik tüketim, satın alma belgesi, maliyet ve depo transferi planlıdır. |
 | Satın alma | Talep, onay, sipariş, mal kabul, tedarikçi | Stok, gider/borç | Planlı yönetsel akış. |
 | Kasa ve ödeme | Manuel kasa vardiyası, nakit hareket defteri ve kapanış sayımı; POS/ödeme entegrasyonu ayrı sonraki dilim | Satışla ileride olay bağlantısı; ilk kasa MVP'si bağımsız | `cash.management` migration/API/seed/panel ve PostgreSQL kabul testiyle yerel önizlemede çalışır. Gerçek POS/kart tahsilatı, iade, mali belge ve üretim kimlik doğrulaması yok. [Kasa sözleşmesi](KASA_MVP_SOZLESMESI.md). |
-| Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Planlı. |
+| Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Manuel TRY gider dilimi `finance` şemasında; muhasebe/banka/vergi bağlantısı yok. Cari ayrı `cari` şemasındadır. |
 | Müşteri ve pazarlama | Müşteri, segment, izin, sadakat, kampanya | Satış, menü, rapor | Planlı. |
 | Raporlama | Tanımlı satış/ödeme/stok projeksiyonları | Kaynak modüllerin olayları | Görsel prototip. |
 | Entegrasyonlar | Bağlantı, sağlayıcı durumu, eşleme, hata | Satış, ödeme, menü, mali belge | Katalogda görünür; gerçek bağlantı yok. |

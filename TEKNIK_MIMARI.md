@@ -2,14 +2,16 @@
 
 Bu belge teknoloji kararlarının kaydıdır; eski “yalnız modül tercihi kalıcıdır” ve “diğer alanlarda backend yoktur” ifadeleri güncel değildir. Uygulanmış şema, modül sahibi ve bağımlılıkları [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), bugünkü teslimler [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) içindedir.
 
+**Tarihsel kapsam notu:** Bu kararlar yazılırken yalnız `apps/admin` ilk uygulama kabul edilmişti. Bugünkü monorepoda `apps/admin`, `apps/pos` ve `.NET apps/api` bulunur. Yeni operasyon ürünü ve gerçek restoran gereksinimleri için [Devir Rehberi](DEVIR_REHBERI.md), online/LAN/offline topology için [Çevrimdışı Çalışma Sözleşmesi](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md) güncel ürün kaynağıdır. Aşağıdaki yapı önerileri gerçekleşmiş mimari olarak okunmamalıdır.
+
 ## 1. Tasarım hedefleri
 
-1. İlk teslim, yönetim panelinin kullanılabilir frontend prototipidir.
+1. İlk teslim yönetim paneli prototipiydi; bu tarihsel başlangıç kararı gerçek POS hedefini kapsamıyordu.
 2. Firma/şube kapsamı tüm veri ve yapılandırma işlemlerinde açık taşınır; marka isteğe bağlı alan olarak desteklenir.
 3. Modül açma/kapama, modül verisinin varlığından ayrıdır. Kapatmak kayıt silme veya veritabanı şeması değiştirme anlamına gelmez.
 4. Prototip, gerçek API ve planlı özellikler aynı arayüzde karışıklık yaratmadan temsil edilir.
-5. Yönetici paneli günlük operasyon komutları üretmez; yalnız tanımlı yönetsel işlemleri sunar.
-6. İkinci ürün yüzü geldiğinde ortak bileşen ve sözleşmeler paylaşılabilir; bugün gereksiz paket ve servis çoğaltılmaz.
+5. Yönetici paneli günlük garson/kasa/mutfak komutları üretmez; operasyon ekranları kendi domain sözleşmelerine bağlanır.
+6. Birden çok ürün yüzü aynı monorepoda bulunabilir; ortak paket yalnız gerçek paylaşım ihtiyacı varsa açılır.
 
 ## 2. Önerilen teknoloji seçimi
 
@@ -32,7 +34,7 @@ Seçim, her ihtimal için en fazla araç kurma hedefiyle yapılmaz. Bir kütüph
 
 ```text
 apps/
-  admin/                  # İlk ve tek uygulama: yönetim paneli
+  admin/                  # Yönetim paneli
     src/
       app/                # Uygulama açılışı, yönlendirme, sağlayıcılar
       features/           # Alan bazlı bağımsız özellikler
@@ -54,6 +56,8 @@ packages/                 # Ortak ihtiyaç ortaya çıktığında eklenir
   contracts/              # Gelecekte paylaşılan API/veri sözleşmeleri
   ui/                     # Gelecekte ürün yüzleri arasında paylaşılan tasarım sistemi
 ```
+
+Gerçek repo yapısı yukarıdaki öneriyle bire bir aynı değildir; şu an ayrıca `apps/pos` ve `apps/api/Hipos.Api` vardır. Kasa için ayrı `apps/cashier` açılıp açılmayacağı henüz karara bağlanmamıştır.
 
 `packages/` altındaki klasörler hedef yapıyı gösterir; ilk günden boş paket olarak oluşturulmaları gerekmez. Bir özelliğin sayfası, veri erişimi, türleri ve ekran durumları kendi `features/` alanında kalır. Bir özellik başka özelliğin iç dosyalarını doğrudan içe aktarmaz; açık dışa aktarım veya paylaşılan sözleşme kullanır. Döngüsel bağımlılık kabul edilmez.
 

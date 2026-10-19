@@ -1,6 +1,6 @@
 # HIPOS — Tek Şube Kasa Yönetimi MVP Sözleşmesi
 
-Durum: İlk yerel PostgreSQL/API/panel diliminin kabul sözleşmesi ve uygulama kaydı. Tarih: 13 Ekim 2026. Bu önizleme gerçek müşteri üretim kurulumu değildir; API yalnız Development'ta çalışır.
+Durum: İlk yerel PostgreSQL/API/panel diliminin kabul sözleşmesi ve uygulama kaydı. Tarih: 13 Ekim 2026. Bu sözleşme yalnız **manuel kasa vardiyası ve nakit defteri** içindir; yeni nesil satış/POS ekranı değildir. API Production ortamında da başlatılabilir, ancak `X-Demo-Actor` taklit edilebilir ve gerçek kullanıcı kimliği olmadığı için bu dilim müşteri trafiğine güvenli değildir. Yeni kasa ürün hedefi [Kasa/POS Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md) içindedir.
 
 Bu dilim, tek şubeli bir restoranın POS entegrasyonu olmadan kasa vardiyasını ve nakit hareketlerini kaydedebilmesini sağlar. Ürün **POS, banka bağlantısı, mali muhasebe veya e-belge sistemi değildir**. Bu sınır kullanıcı arayüzünde de açıkça belirtilmelidir.
 

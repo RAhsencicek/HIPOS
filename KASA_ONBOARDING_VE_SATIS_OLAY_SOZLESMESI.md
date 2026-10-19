@@ -2,6 +2,8 @@
 
 Durum: taslak sözleşme; satıştan kasaya gerçek ödeme entegrasyonu uygulanmış değildir. Kasa MVP'si dondurulmuştur. Bu belge yeni POS endpoint'i, migration veya ödeme davranışı eklemez; sonraki dilimler için kabul edilmiş sınırları ve çözülmesi gereken kararları kaydeder.
 
+Bu belge yalnızca mevcut **manuel kasa defterine doğrulanmış POS nakit olayını yansıtma** sınırını tartışır. Yeni kasa ekranının satış/adisyon/ödeme domain kapsamı daha geniştir ve [Kasa/POS Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md) içindedir. Token/Beko başvuru ve teknik bilgi toplama süreci [Entegrasyon Envanteri](ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md) içindedir. Bu belgelerin hiçbiri gerçek provider entegrasyonu değildir.
+
 ## 1. Onboarding ve varsayılan kasa
 
 ### Bugünkü davranış

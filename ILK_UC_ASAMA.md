@@ -1,10 +1,10 @@
 # HIPOS — İlk üç ürün aşaması
 
-Durum: 8 Ekim 2026. Arkadaşlarla yapılan değerlendirme ve [yön taslağı](YENI_URUN_YONU_TASLAK.md) üzerine uygulama planı. İşletme adı ve ayrıntılı iş kuralları ekipçe değiştirilebilir; aşağıdaki varsayımlar ilerlemeyi başlatmak içindir.
+Durum: 8 Ekim 2026'da oluşturulan tarihsel teslim planı. 19 Ekim 2026 itibarıyla yeni ürün önceliği gerçek restoran kasa/POS, auth ve LAN/offline çalışmasını da kapsar; bu sıra güncel sprint planı değildir. Yeni devir sırası [Mühendis Devir Rehberi](DEVIR_REHBERI.md) içindedir.
 
 ## Ürün odağı
 
-İlk tanıtım tek şubeli bir fırın-kafeye odaklanır. Yönetici ürün ve fiyatı, reçete, stok, sayım ve müşteri/tedarikçi carisini aynı işletme verisi üzerinden görür. Gerçek POS, tahsilat, mali belge, web sitesi yayını, kişi bazlı mutfak performansı ve çok şubeli merkez işleri ilk anlatımın parçası değildir. Mevcut test POS ve ödeme simülatörü teknik kanıt olarak kalır.
+Bu tarihsel aşama planı tek şubeli fırın-kafe yöneticisi için katalog, cari ve stok temelini öncelemişti. Yeni hedefte gerçek operasyon ve kasa ekranı da ürün kapsamındadır; gerçek ödeme/mali cihaz hâlâ ayrı entegrasyon kapısıdır.
 
 Geçici örnek: **Mahalle Fırını → Kadıköy Şubesi**. Örnek kişi ve kurumlar kurgusaldır. TRY tek para birimidir. Aynı cari ileride müşteri ve tedarikçi türlerini birlikte taşıyabilecek şekilde tasarlanır. Reçete otomatik stok tüketmez. Sayımın fiziksel girişi stoku değiştirmez; yönetici onayından sonra izli düzeltme hareketi oluşur.
 

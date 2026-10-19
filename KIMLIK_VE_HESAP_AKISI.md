@@ -4,7 +4,7 @@ Durum: İlk giriş yöntemi ve pilot başlangıç yolu kararlaştırıldı. Bu b
 
 ## Net karar
 
-Yönetici ilk sürümde **HIPOS hesabıyla** (e-posta ve şifre) giriş yapar. Google/Gmail, Microsoft veya başka bir harici hesapla giriş ilk sürümün önceliği değildir; ileride eklenebilir. Bugünkü `X-Demo-Actor` test başlığı gerçek kullanıcı hesabı değildir ve üretimde kullanılmayacaktır.
+Yönetici ilk sürümde **HIPOS hesabıyla** (e-posta ve şifre) giriş yapar. Google/Gmail, Microsoft veya başka bir harici hesapla giriş ilk sürümün önceliği değildir; ileride eklenebilir. Bugünkü `X-Demo-Actor` test başlığı gerçek kullanıcı hesabı değildir; mevcut API route'larında her ortamda okunabildiği ve taklit edilebildiği için gerçek oturum/üyelik/erişim kontrolü uygulanmadan müşteri trafiğine açık ortamda bırakılmamalıdır.
 
 ## Kullanıcının göreceği basit akış
 
@@ -38,6 +38,8 @@ Bu bir **öneridir**, çalışan özellik değildir. İlk firma sahibinin pilott
 - Modül tercihinin denetim kaydı örnek aktör adını değil gerçek kullanıcı kimliğini taşır. Sürüm/bağımlılık/`draining` kuralları değişmez.
 - Giriş, davet, şifre sıfırlama ve oturum sonlandırma akışlarında başarı mesajı yalnız gerçekten tamamlanan işlem için gösterilir. E-posta sağlayıcısı kurulmadan “davet gönderildi” denmez.
 - E-posta doğrulama, güvenli parola sıfırlama, oturum iptali ve hassas hesaplar için çok faktörlü giriş yayın güvenliği kontrolüne dahildir.
+- İlk restoran sürümünde garsonlar için ayrıca PIN veya ayrı cihaz kimlik doğrulama akışı istenmiyor; cihazda açık HIPOS oturumu yeterlidir. Her operasyon yine oturumdaki kullanıcı kimliğiyle kaydedilir. Ortak kullanıcıyla açık cihaz kullanılırsa kişi bazında audit sağlanmış gibi sunulmamalıdır.
+- İnternet kesintisinde restoran LAN'ındaki yerel API çalışmaya devam etmelidir. Yerel API'nin oturumu internet olmadan nasıl doğrulayacağı, token/session süresi ve kullanıcı/rol iptallerinin LAN'a yansıma süresi [çevrimdışı senkronizasyon sözleşmesinde](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md) uygulama öncesi karardır. Garson PIN'i ekleyerek bu gereksinimin etrafından dolaşılmayacaktır.
 
 ## Uygulama sırası önerisi
 

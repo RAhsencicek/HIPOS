@@ -1,5 +1,7 @@
 # Ortak Adisyon Çekirdeği
 
+Durum: `sales.checks` veri modeli ve listelenen API dilimleri uygulanmış durumdadır; bu sözleşme tam restoran POS'u, üretim güvenliği veya sağlayıcı entegrasyonu anlamına gelmez. Güncel ürün hedefi [Kasa/POS operasyon sözleşmesinde](KASA_POS_VE_OPERASYON_SOZLESMESI.md), mevcut kod sınırı [durum belgesinde](DURUM_VE_YOL_HARITASI.md) tutulur. API `X-Demo-Actor` başlığıyla çalışır; bu başlık taklit edilebilir ve gerçek oturum/rol doğrulaması değildir.
+
 ## Kapsam
 
 `sales.checks` her satışın ortak adisyon kaydıdır. Bir adisyon bir veya daha fazla `sales.orders` siparişi taşır. Ürün kalemleri siparişe bağlı kalır; `sales.payment_attempts` ödeme girişimleri siparişin kaynak bağlantısını korurken adisyona da bağlanır. Firma ve şube kapsamı her okumada ve yazmada doğrulanır.

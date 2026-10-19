@@ -4,7 +4,7 @@ Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **fir
 
 ## Bugün çalışan okuma dilimi
 
-Development ortamında, PostgreSQL ve `CatalogDbContext` migration'ı kurulmuşsa:
+Yerel geliştirme örneğinde, PostgreSQL ve `CatalogDbContext` migration'ı kurulmuşsa:
 
 ```text
 GET /api/v1/firms/{firmId}/catalog/products
@@ -15,7 +15,7 @@ GET /api/v1/firms/{firmId}/catalog/categories?branchId={branchId}
 
 Yanıtlar mevcut frontend `CatalogProvider` biçimini izler. `branchId` yoksa yalnız **bütün şubelerine erişimi olan** demo aktör firma kataloğunu görür; bu durumda merkez fiyatı gösterilir. Şube seçilirse yalnız o şubeye görünür ürünler döner ve şube fiyat istisnası varsa o fiyat seçilir. Kategori listesi artık `catalog.categories` tablosundan gelir; `{scope, items: [{id, name, productCount, version, isActive, sortOrder}]}` döner. Firma kategorileri her şube görünümünde yer alır; `productCount` yalnız seçilen şubenin ürünlerini sayar ve sıfır olabilir. Ürün listesindeki kategori filtresi aynı şube kapsamını kullanır. Arama ürün adı/SKU üzerinde çalışır; ürün listesi sayfalıdır. Ürün başka firma veya seçili şube kapsamında değilse detay `404` döner. Yetkisiz kapsam `403`, girişsiz istek `401` döner.
 
-Başlangıç veritabanı boş olabilir. Şema migration'ı deployment komutudur, modül aç/kapa düğmesi bunu çalıştırmaz. Katalog migration'ı eksikse API `CATALOG_STORAGE_UNAVAILABLE` ile `503` döner. `X-Demo-Actor` hâlâ yalnız yerel test kimliğidir; gerçek kullanıcı güvenliği değildir.
+Başlangıç veritabanı boş olabilir. Şema migration'ı deployment komutudur, modül aç/kapa düğmesi bunu çalıştırmaz. Katalog migration'ı eksikse API `CATALOG_STORAGE_UNAVAILABLE` ile `503` döner. `X-Demo-Actor` yerel geliştirme akışından gelir ama API route'ları bunu Development/Production ayrımı olmadan okuyabilir; başlık taklit edilebilir ve gerçek kullanıcı güvenliği sağlamaz.
 
 `catalog.products` genel prototip anahtarı için `effectiveForNewWork=false` kalır. Taslak komutları ayrı `catalog.drafts` anahtarına bağlıdır. Bu anahtar katalogda **`backend_preview`** etiketlidir: yalnız PostgreSQL şeması hazır, demo yönetici yetkili ve özellik ilgili şubede etkinse `effectiveForNewWork=true` olur; üretime hazır anlamına gelmez. Kapatma yeni taslak yazmasını durdurur, mevcut ürün okumasını kapatmaz. HTTP okuması `VITE_CATALOG_PROVIDER=http` ile seçilebilir; varsayılan ekran mock kalır.
 

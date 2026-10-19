@@ -1,5 +1,7 @@
 # Gider Yönetimi MVP
 
+Durum: `finance` şeması, API ve yönetim paneli sağlayıcısı uygulanmış manuel gider dilimi. API `X-Demo-Actor` ile çalışır; bu başlık taklit edilebilir ve Production ortamında da route'lar için auth yerine kullanılır. Gerçek kullanıcı trafiğine açılmamalıdır.
+
 İlk sürüm, şube kapsamında yalnızca manuel gider kaydı oluşturur. Giderler `finance` PostgreSQL şemasında saklanır; kasa, cari ve muhasebe fişine yazılmaz.
 
 ## Kapsam ve davranış

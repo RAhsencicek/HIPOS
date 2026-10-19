@@ -1,6 +1,6 @@
 # HIPOS — Test ödeme çekirdeği sözleşmesi
 
-Durum: **Yalnız Development prototipi.** Bu dilim PostgreSQL'de ödeme **girişimi ve sonucu** saklar; banka, Koddata cihazı, gerçek nakit tahsilatı, mali belge veya mutabakat yapmaz. `simulated: true` alanı ve arayüz etiketleri hiçbir sonucu gerçek ödeme gibi sunmaz.
+Durum: **Test/simülasyon dilimi; gerçek ödeme değildir.** ASP.NET API özel bir `Development` guard ile kısıtlanmıyor; simülatör feature'ı açık olduğu sürece endpoint çağrılabilir. PostgreSQL'de ödeme **girişimi ve sonucu** saklar; banka, KODDATA cihazı, gerçek nakit tahsilatı, mali belge veya mutabakat yapmaz. `simulated: true` ve arayüz etiketleri hiçbir sonucu gerçek ödeme gibi sunmaz. `X-Demo-Actor` her ortamda taklit edilebilir; gerçek kullanıcı trafiğine açılmamalıdır.
 
 ## 1. Sahiplik ve kapsam
 

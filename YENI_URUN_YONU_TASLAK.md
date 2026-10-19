@@ -2,7 +2,7 @@
 
 Durum: 8 Ekim 2026, **tartışma geçmişi**. Bu belge yeni önceliklerin konuşulduğu taslak kaydıdır; yaşayan karar/uygulama kaynağı değildir. Sonraki kararlar ve gerçekleşen durum için [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md), [İlk Üç Aşama](ILK_UC_ASAMA.md) ve [Durum/Yol Haritası](DURUM_VE_YOL_HARITASI.md) esas alınır. Eski metindeki “kararlar netleşince diğer belgeler güncellenecek” notu tarihsel kalmıştır.
 
-Uygulama notu: Bu taslaktaki cari kararı ilk dilim için **manuel hareket dahil** biçiminde uygulandı. PostgreSQL kart/hareket API'si, isteğe bağlı HTTP paneli, kart düzenleme ve devir/dönem/kapanış ekstresi hazır; finans ekranı bağlantısı hâlâ açık. Ürün detayında demo reçete kalemleri görünür, fakat kalıcı reçete düzenlemesi yoktur. Güncel teslim/kalan ayrımı [İlk Üç Aşama](ILK_UC_ASAMA.md) belgesindedir.
+Uygulama notu (tarihsel): Bu taslaktaki cari kararı ilk dilim için **manuel hareket dahil** biçiminde uygulandı. PostgreSQL kart/hareket API'si, isteğe bağlı HTTP paneli, kart düzenleme ve devir/dönem/kapanış ekstresi hazır. Taslak yazıldığında finans ekranı bağlantısı açıktı; daha sonra manuel gider için `finance` API/panel dilimi eklendi. Ürün detayında demo reçete kalemleri görünür, kalıcı reçete düzenlemesi yoktur. Güncel teslim/kalan ayrımı [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) belgesindedir.
 
 ## 1. Ürün tezi ve tanıtım sınırı
 

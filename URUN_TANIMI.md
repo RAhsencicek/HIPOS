@@ -1,8 +1,8 @@
 # Restoran Yönetim Platformu — Ana Ürün Dokümanı
 
-> Bu belge geniş ürün vizyonudur. Güncel backend, bağımlılıklar ve uygulama sınırları için [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md); teslim/kalan işler için [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) ve [İlk Üç Aşama](ILK_UC_ASAMA.md) esas alınır. Tek şube demo ürün detayındaki reçete `VITE_INVENTORY_PROVIDER=http` ile kalıcı API'den okunabilir; stok/sayım MVP'si PostgreSQL'e yazılır. Kapsam ve tamamlanmayan kısıtlar kanonik belgededir.
+> Bu ana ürün belgesi önceki yönetim paneli öncelikleriyle yazılmıştır. Gerçek restoran POS/kasa, garson, mutfak ve internet kesintisinde LAN çalışma hedefi 19 Ekim 2026'da netleşti; güncel kapsam için [Mühendis Devir Rehberi](DEVIR_REHBERI.md), [Kasa/POS Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md), [Çevrimdışı Çalışma](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md), gerçekleşen kod için [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) esas alınır.
 
-Durum: İlk ürün tanımı. Bu belge, kesinleşen kararları kaydeder; `Açık karar` olarak işaretlenen konular henüz kararlaştırılmamıştır.
+Durum: Geniş ürün vizyonu ve yönetim paneli gereksinimleri. İlk prototip önceliklerinden kalan açık sorular yeni POS/offline kapsamı için otomatik ürün kararı sayılmaz.
 
 ## 1. Ürünün amacı
 
@@ -12,9 +12,9 @@ Restoran işletmelerinin ayrı yazılımlarda yürüttüğü yönetim işlerini 
 
 ### İlk tanıtımın sınırı
 
-İlk tanıtım tek şubeli bir işletmenin yönetici başlangıç ekranı ve günlük yönetim temelidir. Ürün/katalog, cari, masa servisi, test POS, ödeme simülatörü ve temel reçete/stok/sayım dilimleri PostgreSQL'e bağlıdır; bu, uçtan uca veya üretime hazır restoran sistemi anlamına gelmez. Satıştan stok tüketimi, barkod, satın alma/depo, gerçek yetki ve tahsilat kapsam dışıdır. Ekran her veri alanında örnek, API, kapalı veya henüz etkin değil durumunu açıkça göstermelidir. Güncel gerçeklik için bu belgenin üstündeki kanonik backend ve durum belgelerine bakın.
+İlk yönetim paneli hedefi tek şubeli işletme yöneticisinin günlük yönetim temelidir. Sonraki gerçek ürün hedefi kasa/POS, garson ve mutfak operasyon yüzlerini; internet olmadığında yerel sunucu/LAN üzerinden ortak çalışmayı; internet geldiğinde merkezi eşitlemeyi kapsar. Bugünkü kod bu hedefin yalnız bir bölümünü sağlar; ayrıntılı mevcut/eksik ayrımı devir ve backend belgelerindedir. Demo/fixture verisi gerçek müşteri kaydı değildir.
 
-Gelecekte aynı ürün ailesine POS/kasa, garson, mutfak/KDS, kurye, QR/web müşteri, kiosk ve patron/mobil raporlama yüzleri eklenebilir. Bu yüzler ilk projenin kullanıcı ekranları değildir. İlk tasarımda bunlara ait verilerin ve durumların yönetim panelinde nasıl izleneceği düşünülür.
+Ürün ailesinde admin, kasa/POS, garson ve mutfak/KDS ayrı kullanıcı yüzleridir; kurye, QR/web müşteri, kiosk ve patron/mobil raporlama daha sonraki ürün kapsamlarıdır. Her yüz aynı API domain ve firma/şube kapsamını kullanmalıdır.
 
 ## 2. Hedef kullanıcı ve işletme
 
@@ -22,7 +22,7 @@ Gelecekte aynı ürün ailesine POS/kasa, garson, mutfak/KDS, kurye, QR/web mü�
 
 İlk gerçek giriş yöntemi HIPOS hesabıdır (e-posta/şifre). Google/Gmail veya diğer harici hesaplarla giriş daha sonraki seçeneklerdir; ilk yayın için şart değildir. Hesap kimliği ile firma/şube üyeliği ayrı tutulur; aynı yönetim arayüzünü görme kararı sunucudaki veri kapsamı denetimini kaldırmaz. İlk hesap ve davet akışı [Kimlik ve Hesap Akışı](KIMLIK_VE_HESAP_AKISI.md) içinde tasarlanır.
 
-Garson, kasiyer, mutfak personeli, kurye ve müşteri bu panelin kullanıcıları değildir.
+Garson, kasiyer ve mutfak personeli yönetim panelini değil kendi operasyon ekranlarını kullanır. İlk sürümde garson için ayrıca PIN kararı yoktur; açık HIPOS cihaz oturumu yeterlidir. Bu, kişiye göre auth/işlem audit'inin olmadığı anlamına gelmez.
 
 Uzun vadeli hedef; bağımsız restoran, zincir, franchise, pizza, kahvaltı, kafe, bar, hızlı servis, fine dining, pastane, bulut mutfak ve paket servis işletmeleridir. İlk tasarım iki senaryoda doğrulanır: tek şubeli pizza/kahvaltı işletmesi ve en az iki şubeli restoran.
 
@@ -57,7 +57,7 @@ Her ekran ve işlem aşağıdaki durumlarından biriyle tanımlanır:
 | Prototip / akış gösterimi | Ekran ve adımlar incelenebilir; gerçek kayıt oluşturulmaz. | “Bu akış henüz gerçek kayıt oluşturmaz” açıklaması görünür. |
 | Planlandı | Ürün kapsamındadır; akış henüz tasarlanmamış veya uygulanmamıştır. | Kapsam ve beklenen değer açıklanır; sahte eylem sunulmaz. |
 
-İlk frontend aşamasında backend bulunmadığından tüm kaydetme davranışları açıkça prototip olarak etiketlenir. Örnek veri kullanılabilir; örnek olduğu görünür. Gerçek işlem etiketi ancak gerçekten bağlı, doğrulanmış API için kullanılır. “Başarılı kaydedildi”, “ödeme alındı” veya “entegrasyon bağlandı” gibi bildirimler gerçek sonuç yoksa gösterilmez.
+Bazı alanlar bugün PostgreSQL API'sine bağlı, bazı ekranlar mock, bazıları tasarım/plan durumundadır. Ekran hangi kaynak ve operasyon durumunda olduğunu doğru gösterir. API'de kayıt kalıcı olsa bile demo aktör veya simülatör kullanıyorsa gerçek kullanıcı/ödeme gibi sunulmaz. “Başarılı kaydedildi”, “ödeme alındı” veya “entegrasyon bağlandı” yalnız gerçek, doğrulanmış sonuçtan sonra gösterilir.
 
 Ek kurulum ve bağlantı durumları: `Kapalı`, `Kurulum gerekiyor`, `Sağlayıcı bekleniyor`, `Bağlantı kurulmadı`, `Pilot gerekiyor`, `Yakında`. Bunlar gerçek/prototip/planlandı olgunluk durumundan ayrı düşünülür. Örneğin bir entegrasyon planlanmış ve aynı anda sağlayıcı bekliyor olabilir.
 
@@ -120,11 +120,11 @@ Yetkisiz durum ilk frontend'de rol bazlı menü ayrımı gerektirmez; gelecektek
 
 ## 9. Entegrasyon görünürlüğü
 
-Katalogda Yemeksepeti, GetirYemek, Trendyol Yemek, Migros Yemek, banka/ödeme, sanal POS, yemek kartları, ÖKC, e-Fatura/e-Arşiv, yazıcı, terazi, Caller ID, menuboard ve muhasebe/ERP grupları görünür. Her biri gerçek bağlantı durumu, gerekli kurulum, pilot ve planlama bilgisiyle gösterilir. İlk frontend'de dış sağlayıcı bağlantısı kurulmaz ve sahte “bağlandı” durumu kullanılmaz.
+Katalogda Yemeksepeti, GetirYemek, Trendyol Yemek, Migros Yemek, banka/ödeme, sanal POS, yemek kartları, ÖKC, e-Fatura/e-Arşiv, yazıcı, terazi, Caller ID, menuboard ve muhasebe/ERP grupları görünür. Her biri gerçek bağlantı durumu, gerekli kurulum, pilot ve planlama bilgisiyle gösterilir. Bugün repoda bu dış sistemlerin çalışan adapter'ı yoktur; sahte “bağlandı” durumu kullanılmaz. Token/Beko ÖKC sürecinin işletim adımları ve sağlayıcıdan alınması gereken sözleşmeler [Entegrasyon Envanteri](ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md) içindedir.
 
 ## 10. Ödeme ve raporlama için gelecekteki gereksinimler
 
-Gelecek ödeme/kasa aşaması kısmi ve karma ödemeyi, belirsiz ödeme sonucunu, iade sözleşmesini, kasa vardiyasını, mutabakatı ve ilk rapor projeksiyonunu kapsar. Gerçek sağlayıcı yerine simülatör kullanılabilir; bu da açıkça belirtilir. Ödeme doğrulanmadan sipariş kapanmış sayılmamalı, belirsiz sonuç başarıya çevrilmemeli ve yinelenen istek çift tahsilat oluşturmamalıdır. Satış ve ödeme raporları aynı tanımlı hesaplama kurallarına dayanmalıdır. Mali belge, ÖKC ve gerçek banka bağlantıları sonraki entegrasyon çalışmalarıdır.
+Kasa/POS hedefi hızlı satış, masa/adisyon, ödeme yöntemi ve sonuçları, iptal/iade, vardiya ve mali/operasyonel fiş ayrımını kapsar. Bugünkü ortak adisyon ve ödeme simülatörü tam ödeme ürünü değildir. Ödeme doğrulanmadan adisyon paid/closed sayılamaz; `pending/unknown` başarıya çevrilmez; tekrar istek çift tahsilat üretmez. Gerçek banka, Token/Beko ÖKC ve mali belge sağlayıcısı ayrı doğrulanır. Ayrıntı [Kasa/POS Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md) ve [entegrasyon envanterindedir](ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md).
 
 ## 11. İlk frontend için kabul ölçütleri
 
@@ -137,9 +137,9 @@ Gelecek ödeme/kasa aşaması kısmi ve karma ödemeyi, belirsiz ödeme sonucunu
 - Ürün/menü, stok/satın alma, satış izleme, şube bağlamı ve modül yönetimi en az birer uçtan uca prototip senaryosunda gezilebilir.
 - Türkçe metinler, Türkiye para biçimi ve masaüstü/tablet kullanımında okunabilir düzen sağlanır.
 
-## 12. Açık kararlar
+## 12. İlk panel taslağından kalan kararlar
 
-Bu belge ekran tasarımı başlamadan önce aşağıdaki konuları karara bağlamak için kullanılacaktır:
+Bu bölüm ilk yönetim paneli prototipinden kalan soruları tutar. Bunlar yeni operasyon kapsamındaki [devir rehberinde](DEVIR_REHBERI.md) yer alan açık kararların yerine geçmez:
 
 - İlk prototipin verisi sayfa yenilemelerinde yerel olarak korunacak mı, yoksa her açılışta örnek senaryoya mı dönecek?
 - Ürün/fiyat/menü yayınlama akışlarının ilk prototipte hangi adımları etkileşimli olacak?
@@ -151,6 +151,6 @@ Bu açık kararlar, yukarıdaki kesinleşmiş ürün sınırlarını değiştirm
 
 ## 13. Proje başlangıcı ve teknik yaklaşım
 
-Çalışma alanı boş olarak başlamıştır; mevcut uygulama veya eski proje kodu bu ürünün temeli kabul edilmez. İlk uygulama yönetim panelidir. Modüler frontend sınırları, veri sözleşmeleri ve örnek veri kaynakları baştan tanımlanır; diğer ürün yüzleri ihtiyaç doğduğunda eklenir. Teknoloji seçimi ve modül kuralları [Teknik Mimari](TEKNIK_MIMARI.md) belgesindedir.
+Bu bölüm proje başlangıcının tarihsel kaydıdır. Bugünkü monorepo ve uygulama sınırları için [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md); yeni ürün yüzlerinin devir sırası için [Devir Rehberi](DEVIR_REHBERI.md) okunmalıdır.
 
 İlk örnek veri biçimi ve API yanıtları [API ve Mock Veri Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) içinde tasarlanmıştır. Modül kullanımdayken kapatılırsa yeni iş başlatılmaz, devam eden kritik işler güvenli şekilde sonuçlanır ve geçmiş kayıtlar okunabilir kalır. Görsel tasarım için kullanıcı tarafından seçilen referans [Görsel Tasarım Yönü](TASARIM_YONU.md) belgesinde somutlaştırılmıştır.

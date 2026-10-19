@@ -1,24 +1,24 @@
 # HIPOS backend mimarisi ve modül bağımlılıkları
 
-Durum: 8 Ekim 2026. Bu belge mevcut kodu, veritabanı şemalarını, capability bağımlılıklarını ve henüz yapılmamış işleri tek yerde toplar. Eski tasarım metinleri ürün niyetini anlatabilir; uygulama durumu için bu belge ve [durum/yol haritası](DURUM_VE_YOL_HARITASI.md) esas alınır.
+Durum tarihi: 19 Ekim 2026. Bu belge mevcut codebase, veritabanı şemaları, capability bağımlılıkları ve uygulanmamış işleri toplar. Eski tasarım metinleri tarihsel ürün kararlarını anlatabilir; kod durumu için bu belge ve [durum/yol haritası](DURUM_VE_YOL_HARITASI.md), yeni ürün hedefi için [devir rehberi](DEVIR_REHBERI.md) esas alınır.
+
+**19 Ekim 2026 ürün yönü:** Gerçek restoran kasa/POS, garson ve mutfak operasyonu; internet yokken LAN/yerel sunucuda ortak çalışma; bağlantı gelince merkezi eşitleme hedefi kabul edildi. Bu hedef bu belge tarihindeki kod envanterinde uygulanmış sayılmaz. Ürün hedefi ve devir sınırları [Devir Rehberi](DEVIR_REHBERI.md), domain davranışı [Kasa/POS operasyon sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md), offline protokol gereksinimi [Çevrimdışı çalışma ve senkronizasyon](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md) içinde günceldir.
 
 ## Ürün odağı
 
-İlk tanıtım, tek şubeli bir restoran yöneticisinin günlük işini anlayabileceği basit bir paneldir. Örnek işletme Mahalle Fırını / Kadıköy Şubesi’dir. Demo kişi, sipariş ve hareketler kurgusaldır. Yönetici başlangıç ekranı temel durumu ve sık kullanılan işlere geçişi vermeli; uygulanmamış işleri çalışan özellik gibi göstermemelidir.
-
-Öncelik sırası: ortak veri ve modül kuralları → müşteri/tedarikçi carisi → reçete, stok hareketi ve onaylı sayım → şube bazlı personel kartları. Gerçek tahsilat, üretim KDS’i, kişi bazlı mutfak performansı, web sitesi yayını, gelişmiş yetkilendirme ve çok şubeli merkez yönetimi sonraki aşamalardır. Personel kartı çalışma saati/performans verisi değildir.
+Ürün hedefi gerçek restoranın yönetim ve operasyon akışlarını kapsar: admin, kasa/POS, garson ve mutfak yüzleri. İnternet yokken LAN ve yerel sunucuda ortak iş, internet geri gelince merkezi veritabanına eşitleme isteniyor. Bu offline/central sync hedefi henüz koda uygulanmamıştır. Örnek işletme/seed verisi kurgusaldır; müşteri verisi gibi kullanılmamalıdır. İş hedefi ve öncelikleri [Devir Rehberi](DEVIR_REHBERI.md) açıklar.
 
 ## Teknoloji ve çalışma şekli
 
 | Katman | Kullanılan teknoloji | Görevi / sınırı |
 |---|---|---|
 | Yönetim paneli | React 19, TypeScript, Vite 8, React Router 7, lucide-react | Yönetici görünümü, form ve okuma ekranları. Ekran gizleme güvenlik kontrolü değildir. |
-| API | .NET 10 / ASP.NET Core 10, C# | Geliştirme API’si; firma/şube kapsamı, iş kuralları ve modül kapıları. |
+| API | .NET 10 / ASP.NET Core 10, C# | Modüler HTTP API. Development/Production ortamında başlatılabilir; mevcut aktör çözümleme `X-Demo-Actor` olduğu için herhangi bir ortamda gerçek müşteri güvenliği sağlamaz. |
 | Kalıcılık | EF Core 10.0.12, Npgsql EF Core 10.0.3, PostgreSQL | Her iş alanı kendi şemasını ve migration’ını yönetir. Tek yerel veritabanı kullanılır. |
 | Otomatik test | Node.js `node:test`, Vitest 5, Playwright 1.63 | Birim, HTTP, tarayıcı ve geçici PostgreSQL senaryoları. |
 | Demo başlangıç verisi | `contracts/demo-single-branch.v1.json`, `scripts/seed-demo.mjs` | Sabit kimlikli ve tekrar çalıştırılabilir kurgusal katalog/cari/servis/stok/reçete/sayım verisi. |
 
-API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm workspaces, .NET 10 SDK ve yerel PostgreSQL’dir. Paket sürümlerinin kesin kaynağı kök ve uygulama `package.json` dosyaları ile `apps/api/Hipos.Api/Hipos.Api.csproj` dosyasıdır. Migrations önce ayrı deployment/kurulum adımıyla uygulanır; modül açma-kapama migration çalıştırmaz. `X-Demo-Actor` yalnız Development içindir ve üretim kimlik doğrulaması sayılmaz.
+API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm workspaces, .NET 10 SDK ve PostgreSQL’dir. Paket sürümlerinin kesin kaynağı kök/uygulama `package.json` dosyaları ve `apps/api/Hipos.Api/Hipos.Api.csproj` dosyasıdır. `HIPOS_FEATURE_STORAGE=postgres` seçildiğinde migration'lar ayrı deployment/kurulum adımıyla uygulanır; modül açma-kapama migration çalıştırmaz. `X-Demo-Actor` header'ı API'de ortamdan bağımsız okunur ve taklit edilebilir; üretim kimlik doğrulaması değildir. **Production'da API'yi başlatmak güvenli biçimde müşteri trafiğine açmaya yetmez.**
 
 ## Modül sahibi, şema ve bugünkü durum
 
@@ -26,18 +26,21 @@ API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm w
 |---|---|---|---|
 | Özellik yönetimi | `modules` | Şube bazlı tercih, etkin yeni iş durumu, sürüm ve audit | PostgreSQL’de çalışıyor; kullanıcı/rol kimliği demo. |
 | Ürünler ve Menü | `catalog` | Kategori, ürün, fiyat sürümü, yayın anlık görüntüsü, taslak, menü, menüye özel adlandırılmış bölümler ve sıralı ürün bağları | Liste/detay, taslak, fiyat sürümü ve ilk yayın yanında; mevcut ürünleri farklı katalog kategorilerinden seçip özel menü başlığı altında yeniden kullanma, menü sıralama ve aktif menü seçimi API’ye bağlı. Menü yeni ürün/fiyat kopyası üretmez. |
-| Satış ve Adisyon | `sales` | Sipariş, kalemler, fiyat anlık görüntüsü, simüle ödeme girişimi | API'de Test POS/servis siparişleri PostgreSQL'de ve salt okunur izlenir; bu şema şimdilik yalnız açık sipariş ve simüle ödeme durumlarını destekler, kapanış/tahsilat yoktur. Mock panelde Satış Özeti, Adisyonlar ve Açık Adisyonlar birbirinden ayrı, örnek veri etiketiyle gösterilir. Mock kapanış/ürün/garson ayrıntıları veritabanına yazılmaz. |
+| Satış ve Adisyon | `sales` | `checks`, `orders`, kalemler, fiyat snapshot'ı, simüle payment attempts/audit | Ortak adisyon API'si check açma, sipariş ekleme, liste/detay ve check üzerinden simüle ödeme başlatma/sonuçlandırmayı sağlar. Garson endpoint'i de `sales.checks` kaydı kullanır. Tam check kapama/taşıma/birleştirme, gerçek tahsilat/refund, mali belge ve operasyonel KDS state machine yoktur. |
 | Personel ve Masa Servisi | `service` | Şube kapsamlı personel, masa, personel-adisyon bağı ve audit | `staff.records` personel kartını; `branches.tables`/`service.waiters` masa-servis bağını yönetir. Panel bölüm/görev kartı CRUD ve ayrı çalışan ızgaraları sunar. Bordro, puantaj, POS kimliği yok. |
 | Cari | `cari` | Müşteri/tedarikçi kartı ve iletişimi, semantik hareket defteri, ekstre, audit | PostgreSQL'de kalıcı; müşteri ve tedarikçi capability'leri ayrı. Tahsilat/ödeme elle girilen işletme kaydıdır; banka/POS/fatura değildir. |
 | Reçete ve stok | `inventory` | Depo, hammadde/eşik, değiştirilemez hareket defteri, reçete sürümleri, sayım snapshot/onayı ve denetim | `InventoryDbContext` migration, API, demo seed ve PostgreSQL kabul testi var. İlk örnek tek şube/tek depo; depo kimliği hareket/sayım kapsamındadır. Satıştan otomatik tüketim ve satın alma belgesi yok. |
+| Giderler | `finance` | Sabit firma gider kategorileri, şube manuel giderleri, request idempotency ve audit | `ExpenseDbContext`, kategori seed'i, API ve panel sağlayıcısı vardır. Yalnız TRY manuel kayıt; kasa/cari/muhasebe/e-belgeye otomatik yazım yok. |
 | Kasa yönetimi | `cash` | Kasa kaydı, vardiya, değiştirilemez nakit hareketi, fiziksel kapanış sayımı/farkı, manuel reversal zinciri, POS olay kimliği zarfı ve audit | `cash.management` tek şube önizlemesinde PostgreSQL API/panel ile çalışır. Yalnız manuel `manual_in/manual_out` için aynı tutarlı, gerekçeli ve tekil ters kayıt desteklenir; `MAIN / Ana Kasa / manual` provisioning'i transaction/kilit altında idempotenttir, aktif başka kasayı veya uyumsuz MAIN'i korur ve modülü açmaz. Simüle ödeme kasa/cari hareketi üretmez. POS/kart tahsilatı, mali belge, gerçek auth/rol yoktur. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md); gelecek kararlar [onboarding ve satış–kasa olay taslağında](KASA_ONBOARDING_VE_SATIS_OLAY_SOZLESMESI.md). |
-| Mutfak/KDS, satın alma, finans, rapor | henüz yok | İlgili iş verileri | Örnek/planlanan alanlar; çalışan backend olarak sunulmaz. |
+| Mutfak/KDS domain'i, satın alma, finansal rapor | henüz yok | İstasyon, hazırlık state machine, satın alma/mal kabul ve rapor projeksiyonları | `/kitchen` bir operasyon UI demosudur; KDS domain/API değil. `finance` şemasında gider dilimi vardır, fakat tam finansal muhasebe/rapor yoktur. |
 
 ### Capability bağımlılıkları
 
 ```mermaid
 flowchart LR
   monitor[Satış izleme\nsales.monitoring] --> pos[Test POS siparişi\nsales.pos_orders]
+  monitor --> checks[Ortak adisyon\nsales.checks]
+  pos --> checks
   monitor --> tables[Masa servisi\nbranches.tables]
   tables --> waiters[Garson ataması\nservice.waiters]
   staff[Personel kayıtları\nstaff.records]
@@ -98,21 +101,23 @@ Temel endpoint envanteri:
 - `GET /api/v1/features/definitions`; `GET/PUT /api/v1/firms/{firmId}/branches/{branchId}/features...`
 - `/api/v1/firms/{firmId}/catalog/...`: ürün/kategori okuma, taslak, fiyat sürümü ve ilk yayın.
 - `/api/v1/firms/{firmId}/branches/{branchId}/catalog/menus`: menü genel bakışı ve düzenleyici sözlüğü, sürümlü içerik yazma, tek aktif menü seçimi. [Menü sözleşmesi](MENU_YONETIMI_MVP.md).
-- `/api/v1/firms/{firmId}/sales/orders...`: sipariş listeleme/oluşturma ve simüle ödeme akışı.
+- `/api/v1/firms/{firmId}/sales/orders...`: legacy/test sipariş listeleme/oluşturma ve simüle ödeme akışı.
+- `/api/v1/firms/{firmId}/branches/{branchId}/sales/checks...`: ortak adisyon açma, sipariş ekleme, liste/detay ve adisyona bağlı simüle ödeme. [Ortak Adisyon Sözleşmesi](ORTAK_ADISYON_SOZLESMESI.md).
 - `/api/v1/firms/{firmId}/branches/{branchId}/caris...`: cari kart, hareket ve ekstre.
 - `/api/v1/firms/{firmId}/branches/{branchId}/service/...`: masa/garson listesi ve oluşturma, atama ve atamayı kapatma.
 - `/api/v1/firms/{firmId}/branches/{branchId}/inventory/...`: hammadde, hareket, reçete sürümü ve sayım/tekil onaylı düzeltme.
 - `/api/v1/firms/{firmId}/branches/{branchId}/cash/...`: kasa/shift özeti, hareket ve vardiya geçmişi, varsayılan kasa provisioning'i, vardiya açma, manuel hareket/düzeltme ve fiziksel sayımla kapama. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md).
+- `/api/v1/firms/{firmId}/branches/{branchId}/expense-categories` ve `/expenses...`: firma kategori okuması; şube kapsamlı manuel gider liste/detay/oluşturma. [Gider MVP sözleşmesi](GIDER_YONETIMI_MVP.md).
 
-İstek kapsamı her API’de sunucuda doğrulanmalıdır. Bugünkü aktör başlığı sahte/Development kimliğidir; gerçek üyelik ve rol modeli gelene kadar pilot işletmeye açılmaz. Ayrıntılı rotalar ilgili dilim belgelerinde ve kaynak kodda bulunur.
+İstek kapsamı endpoint'lerde bugünkü DemoAccess aktörü üzerinden doğrulanır; bu bir test/örnek kapsam denetimidir, gerçek kullanıcı üyeliği veya role-based auth değildir. `X-Demo-Actor` Production ortamında da kullanılabilir ve taklit edilebilir; auth uygulanmadan dış müşteri ağına yayınlanmamalıdır. Ayrıntılı rotalar modül belgeleri ve kaynak koddadır; tüm yüzeyi kapsayan canonical OpenAPI artefaktı henüz repoda yoktur.
 
 ## Migration ve demo veri kaynağı
 
-EF migration context’leri: `FeatureDbContext` → `modules`, `CatalogDbContext` → `catalog`, `SalesDbContext` → `sales`, `CariDbContext` → `cari`, `ServiceDbContext` → `service`, `InventoryDbContext` → `inventory`, `CashDbContext` → `cash`. Inventory ürün kimlikleri katalog ürünlerine referans verir; hareket defteri ve reçete/sayım tablolarının sahibi envanter modülüdür. Service migration satış şemasındaki sipariş kimliğine referans verir; servis kayıtları satış kaydının sahibi olmaz. Kasa hareketi kendi firması/şubesi/kasası/vardiyasına composite FK ile bağlanır; POS event identity alanları gelecekteki adaptörler için ayrılmıştır.
+EF migration context’leri: `FeatureDbContext` → `modules`, `CatalogDbContext` → `catalog`, `SalesDbContext` → `sales`, `CariDbContext` → `cari`, `ServiceDbContext` → `service`, `InventoryDbContext` → `inventory`, `CashDbContext` → `cash`, `ExpenseDbContext` → `finance`. Sales schema hem ortak check hem order/payment kayıtlarını sahiplenir; Service assignment `check_id` ile sales check'e bağlanır. Inventory ürün kimlikleri kataloğa referans verir. Kasa hareketi kendi firması/şubesi/kasası/vardiyasına composite FK ile bağlanır; sağlayıcı event alanları henüz etkin POS adaptörü değildir. Expense kendi kategorisini ve manuel gider defterini yönetir.
 
-`contracts/demo-single-branch.v1.json` tek şube demo kimliklerinin kaynağıdır. `npm run demo:check` sözleşme tutarlılığını denetler. `demo:seed`, `demo:seed:cari`, `demo:seed:service`, `demo:seed:inventory`, `demo:seed:cash` yalnız `HIPOS_DEMO_DATABASE_URL` açıkça verilmiş yerel `hipos_features` veritabanına yazar. Inventory seed'inden önce catalog ve inventory migration’ları uygulanmalı, reçete ürünleri katalogda bulunmalıdır; kasa seed'inden önce `CashDbContext` migration'ı uygulanmalıdır. Seed komutları var olan satırları değiştirmez.
+`contracts/demo-single-branch.v1.json` tek şube örnek kimliklerinin kaynağıdır. `contracts/feature-catalog.v1.json` API ve panelin capability kataloğudur (şu an `catalogVersion: 15`, 26 tanım). `npm run demo:check` demo veri sözleşmesini doğrular. `demo:seed`, `demo:seed:cari`, `demo:seed:service`, `demo:seed:inventory`, `demo:seed:cash`, `demo:seed:expenses` yalnız `HIPOS_DEMO_DATABASE_URL` açıkça verilmiş yerel `hipos_features` veritabanına yazar. Expense seed'inden önce `ExpenseDbContext` migration'ı, inventory seed'inden önce catalog/inventory migration'ları ve katalog ürünleri gerekir. Seed komutları var olan satırları değiştirmez.
 
-Kurulum ve komutların güncel kopyası [README](README.md) içindedir. Elle masa denemesi [MASA_SERVISI_TEST](MASA_SERVISI_TEST.md), cari denemesi [CARI_MANUEL_TEST](CARI_MANUEL_TEST.md), inventory panel denemesi [STOK_REÇETE_SAYIM_MANUEL_TEST](STOK_REÇETE_SAYIM_MANUEL_TEST.md), kasa panel denemesi [KASA_MANUEL_TEST](KASA_MANUEL_TEST.md) içindedir. Inventory ve kasa API kabulü geçici PostgreSQL entegrasyon testinde doğrulanır.
+Kurulum ve komutların güncel kopyası [README](README.md) içindedir. Elle masa denemesi [MASA_SERVISI_TEST](MASA_SERVISI_TEST.md), cari denemesi [CARI_MANUEL_TEST](CARI_MANUEL_TEST.md), inventory panel denemesi [STOK_REÇETE_SAYIM_MANUEL_TEST](STOK_REÇETE_SAYIM_MANUEL_TEST.md), kasa panel denemesi [KASA_MANUEL_TEST](KASA_MANUEL_TEST.md), gider API/panel sözleşmesi [GIDER_YONETIMI_MVP](GIDER_YONETIMI_MVP.md) içindedir. Geliştirme LAN demosu [YARIN_DEMO_KILAVUZU](YARIN_DEMO_KILAVUZU.md) ile gösterilir; yerelden merkeze offline sync değildir.
 
 ## Yönetici başlangıç ekranı
 
@@ -145,7 +150,7 @@ Bir iş “tamamlandı” denmeden en azından gerekli otomatik senaryo, ilgili 
 
 ## Güncel olmayan belgelerin kullanımı
 
-- [Ana ürün tanımı](URUN_TANIMI.md) geniş ürün vizyonudur; ilk tanıtımın canlı sınırı bu belge ve [durum belgesi](DURUM_VE_YOL_HARITASI.md) ile güncellenir.
+- [Ana ürün tanımı](URUN_TANIMI.md), eski yönetim paneli önceliklerini içerir; gerçek operasyon yüzlerinin güncel kapsamı [Devir Rehberi](DEVIR_REHBERI.md) ve ilgili POS/offline sözleşmelerindedir.
 - [Teknik mimari](TEKNIK_MIMARI.md) teknoloji kararlarının geçmişini korur; gerçekleşen modül sınırları için bu sayfa esastır.
-- [API ve Mock Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) başlangıç taslağıdır; gerçek endpoint ve tabloların kaynağı uygulama kodu ve bu sayfadaki envanterdir.
+- [API ve Mock Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) tarihsel başlangıç taslağıdır; gerçek endpoint ve tabloların kaynağı uygulama kodu ve modül sözleşmeleridir. Tam kapsamlı OpenAPI henüz üretilmiyor.
 - [Yeni ürün yön taslağı](YENI_URUN_YONU_TASLAK.md) tartışma kaydıdır; uygulanmış karar gibi okunmamalıdır.
