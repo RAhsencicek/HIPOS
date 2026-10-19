@@ -400,7 +400,7 @@ export function ProductDetail({
     if (inventorySource !== "http" || !ctx.branchApiId) { setRecipeState({ status: "loaded", recipe: null }); return; }
     let cancelled = false;
     setRecipeState({ status: "loading" });
-    const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+    const base = import.meta.env.VITE_API_BASE_URL ?? "";
     const actor = ctx.isMulti ? "manager-multi" : "manager-single";
     void fetch(`${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/inventory/recipes/${encodeURIComponent(productId)}`, {
       headers: { "X-Demo-Actor": actor },

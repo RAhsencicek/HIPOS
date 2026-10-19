@@ -66,6 +66,58 @@ public static class ServiceEndpoints
             return Results.Ok(new { items = rows.Select(row => new ServiceWaiterView(row.Id, row.Name, row.IsActive)).ToArray() });
         });
 
+        group.MapPost("/tables/{tableId}/orders", async (string firmId, string branchId, string tableId,
+            CreateWaiterOrder command, HttpContext context, ServiceDbContext db, SalesDbContext salesDb,
+            SalesOrders salesOrders) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.OrderId == Guid.Empty || string.IsNullOrWhiteSpace(command.WaiterId) ||
+                command.WaiterId.Length > 80 || string.IsNullOrWhiteSpace(tableId))
+                return Fail(context, "INVALID_WAITER_ORDER", 400, "Sipariş, masa veya garson bilgisi geçersiz.");
+
+            var table = await db.Tables.AsNoTracking().SingleOrDefaultAsync(row => row.Id == tableId &&
+                row.FirmId == firmId && row.BranchId == branchId && row.IsActive, context.RequestAborted);
+            if (table is null) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            var waiter = await db.Employees.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.WaiterId &&
+                row.FirmId == firmId && row.BranchId == branchId && row.Department == "service" && row.IsActive,
+                context.RequestAborted);
+            if (waiter is null) return Fail(context, "WAITER_NOT_FOUND", 404, "Bu şubede aktif garson bulunamadı.");
+
+            var assignment = await db.Assignments.AsNoTracking().SingleOrDefaultAsync(row => row.FirmId == firmId &&
+                row.BranchId == branchId && row.TableId == tableId && row.ClosedAt == null, context.RequestAborted);
+            SalesCheckRow check;
+            Guid checkId;
+            if (assignment is not null)
+            {
+                if (assignment.WaiterId != command.WaiterId)
+                    return Fail(context, "TABLE_ASSIGNED_TO_OTHER_WAITER", 409, "Bu masa başka bir garsona atanmış.");
+                checkId = assignment.CheckId;
+                var existingCheck = await salesDb.Checks.AsNoTracking().SingleOrDefaultAsync(row => row.Id == checkId &&
+                    row.FirmId == firmId && row.BranchId == branchId && row.Status == "open", context.RequestAborted);
+                if (existingCheck is null)
+                    return Fail(context, "CHECK_NOT_FOUND", 409, "Masanın açık adisyonu bulunamadı; yönetim ekranından yenileyin.");
+                check = existingCheck;
+            }
+            else
+            {
+                checkId = command.OrderId;
+                check = new SalesCheckRow { Id = checkId, FirmId = firmId, BranchId = branchId,
+                    TableId = tableId, WaiterId = waiter.Id, Status = "open", Currency = "TRY",
+                    CreatedAt = DateTimeOffset.UtcNow, Version = 1 };
+            }
+
+            var result = await salesOrders.CreateAsync(firmId, branchId,
+                new CreatePosOrder(command.OrderId, command.Items), waiter.Name, context.RequestAborted,
+                requestedCheckId: checkId, checkToCreate: assignment is null ? check : null,
+                source: "waiter_web");
+            if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
+            return result.Created
+                ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/orders/{command.OrderId}",
+                    new { order = result.Order, table = table.Name, waiter = waiter.Name })
+                : Results.Ok(new { order = result.Order, table = table.Name, waiter = waiter.Name });
+        });
+
         group.MapGet("/employees", async (string firmId, string branchId, HttpContext context, ServiceDbContext db) =>
         {
             var denied = Guard(context, firmId, branchId, ready, false);

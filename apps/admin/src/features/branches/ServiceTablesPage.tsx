@@ -20,7 +20,7 @@ const dateTime = (value: string) => new Intl.DateTimeFormat("tr-TR", {
 async function serviceApi<T>(path: string, actor: string, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180"}${path}`, {
+    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
       method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });

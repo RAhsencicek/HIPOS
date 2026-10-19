@@ -17,7 +17,7 @@ type ShiftPage = { items: Shift[]; total: number };
 type MovementPage = { items: Movement[]; total: number };
 type View = "summary" | "movements" | "shifts" | "opening-closing";
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (value: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(value / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const amountMinor = (value: string) => {

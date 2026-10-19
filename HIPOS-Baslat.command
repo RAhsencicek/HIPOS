@@ -136,14 +136,14 @@ fi
   cd "$ROOT_DIR/apps/admin"
   exec env VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_SALES_PROVIDER=http \
     VITE_CARI_PROVIDER=http VITE_SERVICE_PROVIDER=http VITE_INVENTORY_PROVIDER=http VITE_CASH_PROVIDER=http VITE_EXPENSE_PROVIDER=http \
-    VITE_API_BASE_URL=http://127.0.0.1:5180 HIPOS_DEV_API_TARGET=http://127.0.0.1:5180 \
+    VITE_API_BASE_URL= HIPOS_DEV_API_TARGET=http://127.0.0.1:5180 \
     "$ROOT_DIR/node_modules/.bin/vite" --host 0.0.0.0 --port 5173 --strictPort
 ) >"$LOG_DIR/admin.log" 2>&1 &
 ADMIN_PID=$!
 
 (
   cd "$ROOT_DIR/apps/pos"
-  exec env VITE_API_BASE_URL=http://127.0.0.1:5180 \
+  exec env VITE_API_BASE_URL= HIPOS_DEV_API_TARGET=http://127.0.0.1:5180 \
     "$ROOT_DIR/node_modules/.bin/vite" --host 0.0.0.0 --port 5176 --strictPort
 ) >"$LOG_DIR/pos.log" 2>&1 &
 POS_PID=$!
@@ -169,6 +169,18 @@ printf '\nHIPOS hazır.\n'
 printf 'Yönetim paneli: http://localhost:5173/admin\n'
 printf 'Cari hesaplar:  http://localhost:5173/admin/customers/accounts\n'
 printf 'Test POS:       http://localhost:5176\n'
+printf 'Garson ekranı:  http://localhost:5176/waiter\n'
+printf 'Mutfak ekranı:  http://localhost:5176/kitchen\n'
+LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+if [[ -n "$LAN_IP" ]]; then
+  printf '\nAynı Wi-Fi/LAN ağındaki telefonlardan açın:\n'
+  printf 'Yönetim: http://%s:5173/admin\n' "$LAN_IP"
+  printf 'Garson:  http://%s:5176/waiter\n' "$LAN_IP"
+  printf 'Mutfak:  http://%s:5176/kitchen\n' "$LAN_IP"
+  printf 'POS:     http://%s:5176\n' "$LAN_IP"
+else
+  printf '\nTelefon bağlantısı için Mac’in yerel IP adresini bulun; telefonlar aynı Wi-Fi ağına bağlı olmalı.\n'
+fi
 printf 'API sağlık:     http://localhost:5180/health\n'
 printf 'Loglar:         %s\n' "$LOG_DIR"
 printf 'Uygulama sunucularını durdurmak için bu Terminal penceresinde Ctrl+C kullanın. PostgreSQL verisi korunur.\n\n'

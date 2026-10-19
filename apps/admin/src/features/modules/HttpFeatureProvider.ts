@@ -11,7 +11,7 @@ type ApiProblem = { code?: string; detail?: string };
 
 // Yalnız yerel .NET prototipi: X-Demo-Actor gerçek oturum veya üretim yetkisi değildir.
 export class HttpFeatureProvider implements FeatureProvider {
-  constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180") {}
+  constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "") {}
 
   private actor(scope?: FeatureScope): string {
     return scope?.firmId === "11111111-1111-4111-8111-111111111111"

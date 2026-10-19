@@ -10,6 +10,7 @@ using System.Data.Common;
 namespace Hipos.Api.Sales;
 
 public sealed record CreatePosOrder(Guid OrderId, IReadOnlyList<PosOrderItem> Items);
+public sealed record CreateWaiterOrder(Guid OrderId, string WaiterId, IReadOnlyList<PosOrderItem> Items);
 public sealed record PosOrderItem(Guid ProductId, int Quantity);
 public sealed record SalesOrderLine(
     string ProductId, string ProductName, string Sku, int Quantity,
@@ -30,7 +31,8 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
     public async Task<SalesOrderResult> CreateAsync(
         string firmId, string branchId, CreatePosOrder command, string actor,
         CancellationToken cancellationToken, Guid? requestedCheckId = null,
-        SalesCheckRow? checkToCreate = null, string featureKey = "sales.pos_orders")
+        SalesCheckRow? checkToCreate = null, string featureKey = "sales.pos_orders",
+        string source = "test_pos")
     {
         if (command.OrderId == Guid.Empty || command.Items is null ||
             command.Items.Count is < 1 or > 20 ||
@@ -39,8 +41,11 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             return SalesOrderResult.Rejected("INVALID_ORDER", 400, "Sipariş kimliği veya kalemleri geçersiz.");
 
         var sorted = command.Items.OrderBy(item => item.ProductId).ToArray();
+        if (source is not ("test_pos" or "waiter_web"))
+            return SalesOrderResult.Rejected("INVALID_ORDER_SOURCE", 400, "Sipariş kaynağı geçersiz.");
+        var itemFingerprint = string.Join("|", sorted.Select(item => $"{item.ProductId:N}:{item.Quantity}"));
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            string.Join("|", sorted.Select(item => $"{item.ProductId:N}:{item.Quantity}")))));
+            source == "test_pos" ? itemFingerprint : $"{source}|{itemFingerprint}")));
         var checkId = requestedCheckId ?? command.OrderId;
         if (checkToCreate is null && featureKey == "sales.pos_orders")
             checkToCreate = new SalesCheckRow
@@ -125,7 +130,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         var order = new SalesOrderRow
         {
             Id = command.OrderId, CheckId = checkId, FirmId = firmId, BranchId = branchId,
-            Source = "test_pos", Status = "open", PaymentStatus = "unpaid",
+            Source = source, Status = "open", PaymentStatus = "unpaid",
             TotalMinor = total, Currency = "TRY", RequestFingerprint = fingerprint,
             CreatedAt = now, Version = 1, Lines = lines,
         };

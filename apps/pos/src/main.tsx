@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PaymentSimulatorPanel } from "./PaymentSimulatorPanel";
+import { mountOperationalApp } from "./OperationalApps";
+import { createRequestId } from "./requestId";
 import type { TestOrder } from "./PaymentSimulatorPanel";
 import "./styles.css";
 
@@ -30,7 +32,7 @@ const scopes = [
   },
 ] as const;
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (amountMinor: number) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(amountMinor / 100);
 
@@ -90,7 +92,7 @@ function App() {
   const selected = products.find((item) => item.id === productId);
   async function createOrder() {
     if (!selected || saving || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) return;
-    const orderId = retryId ?? crypto.randomUUID();
+    const orderId = retryId ?? createRequestId();
     setRetryId(orderId);
     setSaving(true);
     setError("");
@@ -113,6 +115,7 @@ function App() {
       <header>
         <span className="brand">HIPOS <span>TEST POS</span></span>
         <p>Yalnız geliştirme ortamı · Gerçek tahsilat yapılmaz</p>
+        <nav className="role-links"><a href="/waiter">Garson ekranı</a><a href="/kitchen">Mutfak kuyruğu</a></nav>
       </header>
       <section className="card">
         <p className="eyebrow">AYRI OPERASYON YÜZÜ</p>
@@ -150,4 +153,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+if (!mountOperationalApp()) createRoot(document.getElementById("root")!).render(<App />);

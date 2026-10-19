@@ -133,7 +133,7 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
   const branchId = ctx.selectedBranch?.apiId ?? null;
   useEffect(() => {
     let active = true;
-    const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+    const base = import.meta.env.VITE_API_BASE_URL ?? "";
     const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : "manager-multi";
     const path = `/api/v1/firms/${ctx.firmId}/sales/orders${branchId ? `?branchId=${branchId}` : ""}`;
     setState("loading");
@@ -174,7 +174,7 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
 
 function LiveOrderTable({ orders, ctx }: { orders: LiveOrder[]; ctx: ViewContext }) {
   return <div className="table-scroll"><table><thead><tr><th>SİPARİŞ</th><th>ŞUBE</th><th>ÜRÜNLER</th><th>DURUM</th><th>ÖDEME</th><th>TOPLAM</th><th>AÇILIŞ</th></tr></thead><tbody>{orders.map(order => <tr key={order.id}>
-    <td><strong title={order.id}>{order.id.slice(0, 8)}…{order.id.slice(-4)}</strong><small>{order.source === "demo_service" ? "Kurgu demo" : order.source === "test_pos" ? "Test POS" : order.source}</small></td>
+    <td><strong title={order.id}>{order.id.slice(0, 8)}…{order.id.slice(-4)}</strong><small>{order.source === "demo_service" ? "Kurgu demo" : order.source === "test_pos" ? "Test POS" : order.source === "waiter_web" ? "Garson ekranı" : order.source}</small></td>
     <td>{ctx.branches.find(branch => branch.apiId === order.branchId)?.name ?? order.branchId}</td><td>{order.items.map(item => `${item.quantity}× ${item.productName}`).join(", ")}</td>
     <td><StatusPill tone="blue">{order.status === "open" ? "Açık" : order.status}</StatusPill></td><td><StatusPill tone={order.paymentStatus === "paid" ? "green" : order.paymentStatus === "unknown" ? "orange" : "purple"}>{paymentLabel[order.paymentStatus] ?? order.paymentStatus}</StatusPill><small>Ödenen: {moneyMinor(order.paidMinor)} · Kalan: {moneyMinor(order.remainingMinor)}</small></td>
     <td className="numeric strong">{moneyMinor(order.totalMinor)}</td><td className="muted">{new Date(order.createdAt).toLocaleString("tr-TR")}</td></tr>)}</tbody></table><div className="table-footer">{orders.length} kayıt · API sağlayıcısı · en fazla son 100 sipariş</div></div>;

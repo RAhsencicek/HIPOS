@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { createRequestId } from "./requestId";
 
 export type TestOrder = {
   id: string;
@@ -23,7 +24,7 @@ type PaymentAttempt = {
 type PaymentResult = { attempt: PaymentAttempt; order: TestOrder };
 type ApiProblem = { code?: string; detail?: string };
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (minor: number) => new Intl.NumberFormat("tr-TR", {
   style: "currency", currency: "TRY",
 }).format(minor / 100);
@@ -69,7 +70,7 @@ export function PaymentSimulatorPanel({ scope, order, onOrderChange }: {
   const [amount, setAmount] = useState(() => (order.remainingMinor / 100).toFixed(2));
   const [method, setMethod] = useState<"card" | "cash">("card");
   const [scenario, setScenario] = useState<"succeeded" | "failed" | "pending" | "unknown">("succeeded");
-  const [attemptId, setAttemptId] = useState(() => crypto.randomUUID());
+  const [attemptId, setAttemptId] = useState(() => createRequestId());
   const [latest, setLatest] = useState<PaymentAttempt | null>(null);
   const [resolution, setResolution] = useState<"succeeded" | "failed" | "cancelled">("succeeded");
   const [busy, setBusy] = useState(false);
@@ -100,12 +101,12 @@ export function PaymentSimulatorPanel({ scope, order, onOrderChange }: {
         attemptId, amountMinor, method, simulatedOutcome: scenario, expectedOrderVersion: order.version,
       });
       setLatest(result.attempt); onOrderChange(result.order);
-      setAttemptId(crypto.randomUUID()); setUncertain(false);
+      setAttemptId(createRequestId()); setUncertain(false);
       setNotice(`Simülatör sonucu: ${statusLabel[result.attempt.status]}. Gerçek tahsilat yapılmadı.`);
     } catch (cause) {
       const next = cause instanceof PaymentApiError ? cause : new PaymentApiError("Ödeme simülasyonu başarısız.");
       setError(next.message); setUncertain(next.uncertain);
-      if (!next.uncertain) setAttemptId(crypto.randomUUID());
+      if (!next.uncertain) setAttemptId(createRequestId());
     } finally { setBusy(false); }
   }
 
@@ -139,7 +140,7 @@ export function PaymentSimulatorPanel({ scope, order, onOrderChange }: {
         : attempts.some((attempt) => attempt.id === latest?.id &&
             attempt.status !== "pending" && attempt.status !== "unknown"));
       setUncertain(!confirmed);
-      if (confirmed) setAttemptId(crypto.randomUUID());
+      if (confirmed) setAttemptId(createRequestId());
       setNotice(confirmed
         ? "Sunucudaki sipariş ve simülatör kayıtları yenilendi."
         : "İsteğin kesin sonucu henüz görülmüyor; aynı işlem kimliğiyle tekrar deneyin.");
@@ -157,15 +158,15 @@ export function PaymentSimulatorPanel({ scope, order, onOrderChange }: {
       <label htmlFor="payment-amount">Simüle tutar (TL)</label>
       <input id="payment-amount" inputMode="decimal" value={amount}
         disabled={busy || uncertain || order.remainingMinor === 0 || unresolved}
-        onChange={(event) => { setAmount(event.target.value); setAttemptId(crypto.randomUUID()); }} />
+        onChange={(event) => { setAmount(event.target.value); setAttemptId(createRequestId()); }} />
       <label htmlFor="payment-method">Yöntem</label>
       <select id="payment-method" value={method} disabled={busy || uncertain || unresolved}
-        onChange={(event) => { setMethod(event.target.value as typeof method); setAttemptId(crypto.randomUUID()); }}>
+        onChange={(event) => { setMethod(event.target.value as typeof method); setAttemptId(createRequestId()); }}>
         <option value="card">Kart senaryosu</option><option value="cash">Nakit senaryosu</option>
       </select>
       <label htmlFor="payment-outcome">Simüle sonuç</label>
       <select id="payment-outcome" value={scenario} disabled={busy || uncertain || unresolved}
-        onChange={(event) => { setScenario(event.target.value as typeof scenario); setAttemptId(crypto.randomUUID()); }}>
+        onChange={(event) => { setScenario(event.target.value as typeof scenario); setAttemptId(createRequestId()); }}>
         <option value="succeeded">Başarılı</option><option value="failed">Başarısız</option>
         <option value="pending">Bekliyor</option><option value="unknown">Belirsiz</option>
       </select>

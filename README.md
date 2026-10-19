@@ -72,6 +72,8 @@ npm run test:e2e
 
 Gereksinim: [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). İki terminal kullanın:
 
+Telefonlarla yerel ağ demosu, garson ekranı ve mutfak sipariş kuyruğu için [HIPOS yerel restoran demo kılavuzuna](YARIN_DEMO_KILAVUZU.md) bakın. Garson ve mutfak ekranları `apps/pos` web uygulamasında `/waiter` ve `/kitchen` yollarındadır; gerçek Beko bağlantısı ve otomatik termal yazıcı servisi değildir.
+
 ```bash
 ASPNETCORE_ENVIRONMENT=Development dotnet run --project apps/api/Hipos.Api/Hipos.Api.csproj --urls http://127.0.0.1:5180
 ```

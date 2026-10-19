@@ -22,7 +22,7 @@ const blankDraft = (): Draft => ({ name: "", department: "service", jobTitle: "G
 async function personnelApi<T>(path: string, actor: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180"}${path}`, {
+    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
       method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });

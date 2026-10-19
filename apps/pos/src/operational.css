@@ -1,0 +1,77 @@
+* { box-sizing: border-box; }
+body:has(.ops-shell) { margin: 0; background: #f5f4ef; color: #20251f; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+button, select { font: inherit; }
+.ops-shell { width: min(100% - 28px, 980px); margin: 0 auto; padding: 16px 0 40px; }
+.ops-shell .ops-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; border-bottom: 1px solid #deded5; padding: 5px 0 14px; }
+.ops-brand { color: #243b2c; font-size: 18px; font-weight: 850; letter-spacing: .04em; text-decoration: none; }
+.ops-brand span { color: #a2622b; font-size: 11px; letter-spacing: .1em; margin-left: 5px; }
+.ops-link { color: #365941; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.ops-intro { padding: 22px 0 12px; }
+.ops-eyebrow { color: #8b6536; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.ops-intro h1 { margin: 5px 0; font-size: clamp(26px, 6vw, 36px); letter-spacing: -.04em; }
+.ops-intro p { color: #687168; margin: 4px 0; font-size: 14px; line-height: 1.5; }
+.ops-selection { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0 18px; }
+.ops-selection label { display: grid; gap: 6px; margin: 0; font-size: 12px; font-weight: 750; color: #566157; }
+.ops-selection select { min-width: 0; border: 1px solid #d5d8ce; border-radius: 12px; padding: 12px; background: #fff; color: #20251f; }
+.ops-product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ops-product { display: flex; justify-content: space-between; align-items: center; min-height: 86px; gap: 8px; padding: 13px; background: #fff; border: 1px solid #e5e5dc; border-radius: 16px; box-shadow: 0 4px 14px #25331b08; }
+.ops-product>div:first-child { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.ops-product strong { font-size: 14px; line-height: 1.3; }
+.ops-product span { color: #687168; font-size: 12px; }
+.ops-quantity { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ops-quantity button { border: 1px solid #d8ded5; border-radius: 50%; width: 36px; height: 36px; padding: 0; color: #294d35; background: #f5f8f2; font-size: 20px; line-height: 1; }
+.ops-quantity b { display: inline-grid; place-items: center; width: 20px; min-width: 20px; text-align: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.ops-cart { margin-top: 16px; padding: 16px; border: 1px solid #dfe2d8; border-radius: 18px; background: #fff; }
+.ops-cart>div { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 700; }
+.ops-cart>div strong { font-size: 20px; }
+.ops-cart ul { list-style: none; margin: 10px 0 14px; padding: 0; }
+.ops-cart li { display: flex; justify-content: space-between; border-top: 1px solid #efefe9; padding: 9px 0; font-size: 13px; }
+.ops-cart p { color: #7b827a; font-size: 13px; }
+.ops-shell button { width: auto; cursor: pointer; }
+.ops-shell .ops-quantity button { display: inline-grid; place-items: center; flex: 0 0 36px; width: 36px; min-width: 36px; height: 36px; padding: 0; line-height: 1; }
+.ops-shell .ops-primary { border: 0; border-radius: 12px; width: 100%; padding: 14px; background: #294d35; color: #fff; font-weight: 800; }
+.ops-shell .ops-primary:disabled { opacity: .55; cursor: not-allowed; }
+.ops-message, .ops-error, .ops-success { border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.45; }
+.ops-message { background: #fff; color: #687168; }
+.ops-error { background: #fff0ed; color: #9a3e2d; }
+.ops-success { background: #edf7ee; color: #315e3d; }
+.ops-success small { display: block; margin-top: 4px; }
+.ops-footer { color: #737a71; font-size: 12px; line-height: 1.5; margin: 14px 2px; }
+.kitchen-toolbar { display: flex; align-items: center; gap: 8px; color: #5a665b; font-size: 12px; margin: 10px 0 15px; }
+.ops-shell .kitchen-toolbar button { flex: 0 0 auto; margin-left: auto; border: 1px solid #d5d8ce; border-radius: 9px; background: #fff; color: #365941; padding: 7px 12px; font-weight: 700; }
+.online-dot, .offline-dot { width: 9px; height: 9px; border-radius: 50%; background: #43a15b; }
+.offline-dot { background: #cf694f; }
+.kitchen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 13px; }
+.kitchen-ticket { padding: 16px; background: #fff; border: 1px solid #e2e3da; border-radius: 15px; box-shadow: 0 5px 16px #25331b08; }
+.kitchen-ticket header, .kitchen-ticket footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kitchen-ticket header span { color: #8b6536; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.kitchen-ticket h2 { margin: 3px 0; font-size: 19px; }
+.kitchen-ticket time { color: #657067; font-size: 12px; }
+.kitchen-ticket ul { margin: 13px 0; padding: 0; list-style: none; }
+.kitchen-ticket li { display: flex; gap: 10px; border-top: 1px dashed #d8dbd2; padding: 10px 0; font-size: 14px; }
+.kitchen-ticket li strong { min-width: 28px; }
+.kitchen-ticket footer { border-top: 1px solid #eceee8; padding-top: 11px; color: #687168; font-size: 12px; }
+.ops-shell .kitchen-ticket footer button { flex: 0 0 auto; border: 0; border-radius: 9px; background: #294d35; color: #fff; padding: 9px 11px; font-weight: 700; white-space: nowrap; }
+.kitchen-empty { border: 1px dashed #cad2c7; border-radius: 15px; padding: 40px 18px; color: #758075; text-align: center; }
+@media (max-width: 520px) {
+  .ops-shell { width: min(100% - 22px, 980px); padding-top: 12px; }
+  .ops-shell .ops-header { align-items: center; }
+  .ops-brand { font-size: 16px; }
+  .ops-link { font-size: 12px; }
+  .ops-intro { padding: 20px 0 10px; }
+  .ops-selection { grid-template-columns: 1fr; gap: 10px; margin: 12px 0 14px; }
+  .ops-selection select { min-height: 46px; }
+  .ops-product-grid { grid-template-columns: 1fr; gap: 8px; }
+  .ops-product { min-height: 76px; }
+  .ops-cart { padding: 14px; }
+  .kitchen-toolbar { align-items: center; }
+  .kitchen-grid { grid-template-columns: 1fr; }
+  .kitchen-ticket { padding: 14px; }
+}
+@media print {
+  body { background: #fff; }
+  body * { visibility: hidden !important; }
+  .print-target, .print-target * { visibility: visible !important; }
+  .print-target { position: absolute; left: 0; top: 0; width: 78mm; margin: 0; border: 0; box-shadow: none; border-radius: 0; }
+  .print-target footer, .print-target button { display: none !important; }
+}

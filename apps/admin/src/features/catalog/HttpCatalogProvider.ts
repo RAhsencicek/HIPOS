@@ -22,7 +22,7 @@ type ApiProblem = { code?: string; detail?: string };
 
 // Yalnız Development API prototipi; X-Demo-Actor gerçek kullanıcı oturumu değildir.
 export class HttpCatalogProvider implements CatalogProvider {
-  constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180") {}
+  constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "") {}
 
   private actor(scope: CatalogScope): string {
     return scope.firmId === "11111111-1111-4111-8111-111111111111"

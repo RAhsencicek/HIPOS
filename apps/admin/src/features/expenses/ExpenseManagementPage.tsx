@@ -9,7 +9,7 @@ type Expense = { id: string; categoryId: string; categoryName: string; expenseDa
   amountMinor: number; currency: "TRY"; description: string; source: "manual"; actor: string; createdAt: string };
 type ListResponse = { items: Expense[]; pageInfo: { page: number; pageSize: number; totalItems: number; totalPages: number } };
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const todayIstanbul = () => new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());

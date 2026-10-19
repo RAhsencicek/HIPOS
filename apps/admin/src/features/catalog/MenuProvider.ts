@@ -13,7 +13,7 @@ export class MenuApiError extends Error {
 }
 
 export class HttpMenuProvider {
-  constructor(private baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180") {}
+  constructor(private baseUrl = import.meta.env.VITE_API_BASE_URL ?? "") {}
   private path(scope: CatalogScope) {
     if (!scope.branchId) throw new MenuApiError("BRANCH_REQUIRED", "Menü yönetimi için şube seçin.");
     return `/api/v1/firms/${encodeURIComponent(scope.firmId)}/branches/${encodeURIComponent(scope.branchId)}/catalog/menus`;

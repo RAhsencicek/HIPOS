@@ -2,6 +2,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 .shell { max-width: 760px; padding: 24px; margin: 0 auto; }
+.role-links { display: flex; gap: 12px; margin-left: auto; }
+.role-links a { color: #355842; font-size: 12px; font-weight: 700; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 30px; }
 header p { color: #738396; font-size: 13px; text-align: right; }
 .brand { font-size: 23px; font-weight: 800; letter-spacing: -.05em; color: #233758; }
