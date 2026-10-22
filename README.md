@@ -40,6 +40,17 @@ Durdurmak için:
 ./HIPOS-Durdur.command
 ```
 
+### Windows Kolay Başlatma
+Repo kök dizinindeki batch dosyasına çift tıklayın veya terminalden (CMD / PowerShell) çalıştırın:
+```cmd
+HIPOS-Windows-Baslat.bat
+```
+
+Durdurmak için:
+```cmd
+HIPOS-Windows-Durdur.bat
+```
+
 ### Manuel Başlatma (Adım Adım)
 1. **Yerel Veritabanını Başlatın:**
    ```bash
