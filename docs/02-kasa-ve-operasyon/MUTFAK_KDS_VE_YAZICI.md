@@ -17,6 +17,12 @@
 
 ## 2. Mutfak ve Hazırlık Durum Makinesi (KDS State Machine)
 
+22 Ekim 2026 kararı: sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı seçilmiştir. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer; `served` görev son servis edilenlerde görünür, kaydı ve audit geçmişi korunur. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
+
+İlk istasyon yönlendirmesi de uygulanmıştır. Demo şubede ürün kategorileri `pizza → Fırın`, `sandwich → Sıcak Mutfak`, `drinks → Bar`, `dessert → Soğuk Mutfak` olarak eşlenir. Görev oluşturulurken eşleşme bulunamazsa `station_id` boş kalır ve ekran görevi `Atanmamış` kuyruğunda gösterir; sipariş hiçbir durumda sessizce kaybolmaz. Bu eşleştirmelerin yönetim ekranından değiştirilmesi henüz kapsamda değildir.
+
+İptal entegrasyonunun mutfak veri modeli de hazırdır: `cancelled_at`, `cancellation_reason` ve `cancelled_by` saklanır; `served` veya daha önce `cancelled` olmuş görev yeniden iptal edilemez. KDS iptal geçmişini kırmızı/üzeri çizili gösterir. Kaynak komut mutfaktan verilmez; satış/adisyon modülündeki gerekçeli kalem iptali ve gerekli müdür onayı tamamlandığında aynı transaction/olay sınırından mutfak görevine aktarılacaktır.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Submitted: Garson Siparişi Gönderdi (Bilet Yazıcıya Basılır)
@@ -60,7 +66,7 @@ CREATE TABLE kitchen.tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     branch_id UUID NOT NULL,
     order_id UUID NOT NULL REFERENCES sales.orders(id),
-    order_line_id UUID NOT NULL REFERENCES sales.order_lines(id),
+    order_line_id BIGINT NOT NULL REFERENCES sales.order_lines(id),
     station_id UUID NOT NULL REFERENCES kitchen.stations(id),
     table_name VARCHAR(50) NOT NULL,
     product_name VARCHAR(150) NOT NULL,

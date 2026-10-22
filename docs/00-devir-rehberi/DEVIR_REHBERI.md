@@ -43,7 +43,7 @@ HIPOS; bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waiter) ve ka
 Bir restoranın günlük hayatında sistem şöyle akar:
 * **Yönetici:** Ofisinden menüleri, ürün fiyatlarını, masaları, stokları ve cari hesapları yönetir.
 * **Garson:** Ürün seçip masaya sipariş gönderir; ortak adisyon çekirdeği PostgreSQL'e yazılır. Masa taşıma, birleştirme ve adisyon kapatma henüz yoktur.
-* **Mutfak:** `/kitchen` siparişleri salt okunur polling ile gösterir. KDS durum makinesi ve otomatik yazıcı bağlantısı henüz yoktur.
+* **Mutfak:** `/kitchen`, garsonun gönderdiği her sipariş kalemini ayrı ve kalıcı görev olarak gösterir. Görev `Bekliyor → Hazırlanıyor → Hazır` ilerler; sonradan eklenen sipariş kendi süresini başlatır. Otomatik yazıcı bağlantısı henüz yoktur.
 * **Kasa:** Yönetim panelinde manuel vardiya ve nakit defteri çalışır. Gerçek POS, parçalı ödeme, otomatik satış-kasa akışı ve Z-Raporu henüz yoktur; test POS ve ödeme simülatörü gerçek tahsilat yapmaz.
 * **İnternet Kesilirse:** Gerçek Offline LAN ve merkezi senkronizasyon uygulanmamıştır; bu bir ürün hedefidir.
 

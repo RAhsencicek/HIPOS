@@ -12,8 +12,12 @@ type ApiProblem = { detail?: string };
 type Product = { id: string; name: string; status: string; isActive: boolean; channels: string[]; price: { amountMinor: number; currency: string } };
 type Waiter = { id: string; name: string; isActive: boolean };
 type Table = { id: string; number: number; name: string; isActive: boolean; assignment?: { waiterId: string | null; waiterName: string | null } | null };
-type Order = { id: string; source: string; status: string; paymentStatus: string; totalMinor: number; createdAt: string; tableName?: string; waiterName?: string; items: Array<{ productName: string; quantity: number; lineTotalMinor: number }> };
-type ActiveTable = { name: string; assignment?: { orderId: string; waiterName: string | null } | null };
+type KitchenTask = { id: string; orderId: string; orderLineId: number; productName: string; quantity: number;
+  status: "submitted" | "preparing" | "ready" | "served" | "cancelled"; version: number; submittedAt: string;
+  preparedAt?: string; readyAt?: string; servedAt?: string; tableName?: string; waiterName?: string;
+  cancelledAt?: string; cancellationReason?: string; cancelledBy?: string;
+  stationId?: string; stationCode: string; stationName: string };
+type KitchenStation = { id: string; code: string; name: string };
 
 async function request<T>(path: string, actor: string, body?: unknown): Promise<T> {
   let response: Response;
@@ -37,7 +41,6 @@ async function request<T>(path: string, actor: string, body?: unknown): Promise<
 
 const servicePath = `/api/v1/firms/${firmId}/branches/${branchId}/service`;
 const catalogPath = `/api/v1/firms/${firmId}/catalog/products?branchId=${branchId}&page=1&pageSize=100`;
-const ordersPath = `/api/v1/firms/${firmId}/sales/orders?branchId=${branchId}`;
 
 export function WaiterApp() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -128,36 +131,80 @@ export function WaiterApp() {
 }
 
 export function KitchenApp() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [tasks, setTasks] = useState<KitchenTask[]>([]);
+  const [stations, setStations] = useState<KitchenStation[]>([]);
+  const [stationFilter, setStationFilter] = useState("all");
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<Order | null>(null);
+  const [selected, setSelected] = useState<KitchenTask | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [savingTaskId, setSavingTaskId] = useState("");
   const load = useCallback(async () => {
     try {
-      const [result, tableResult] = await Promise.all([
-        request<{ items: Order[] }>(ordersPath, "manager-single"),
-        request<{ items: ActiveTable[] }>(`${servicePath}/tables`, "manager-single"),
+      const [result, stationResult] = await Promise.all([
+        request<{ items: KitchenTask[] }>(`/api/v1/firms/${firmId}/branches/${branchId}/kitchen/tasks?status=all`, "manager-single"),
+        request<{ items: KitchenStation[] }>(`/api/v1/firms/${firmId}/branches/${branchId}/kitchen/stations`, "manager-single"),
       ]);
-      const tableByOrder = new Map(tableResult.items.flatMap((table) => table.assignment
-        ? [[table.assignment.orderId, { tableName: table.name, waiterName: table.assignment.waiterName ?? undefined }] as const]
-        : []));
-      setOrders(result.items.filter((order) => order.source === "waiter_web" && order.status === "open")
-        .map((order) => ({ ...order, ...tableByOrder.get(order.id) })));
+      setTasks(result.items); setStations(stationResult.items);
       setError(""); setLastRefresh(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Mutfak kuyruğu alınamadı."); }
   }, []);
   useEffect(() => { void load(); const timer = window.setInterval(() => { void load(); }, 3000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer); }, []);
+
+  async function changeStatus(task: KitchenTask) {
+    const nextStatus = task.status === "submitted" ? "preparing" : task.status === "preparing" ? "ready" : "served";
+    setSavingTaskId(task.id); setError("");
+    try {
+      await request(`/api/v1/firms/${firmId}/branches/${branchId}/kitchen/tasks/${task.id}/status`, "manager-single",
+        { requestId: createRequestId(), nextStatus, expectedVersion: task.version });
+      await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Görev durumu değiştirilemedi."); }
+    finally { setSavingTaskId(""); }
+  }
+
+  function taskAge(task: KitchenTask) {
+    const minutes = Math.max(0, Math.floor((now - new Date(task.submittedAt).getTime()) / 60_000));
+    return { minutes, level: minutes >= 20 ? "late" : minutes >= 10 ? "warning" : "normal" };
+  }
+
+  const visibleTasks = tasks.filter((task) => stationFilter === "all" || task.stationCode === stationFilter);
+  const activeTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+  const readyTasks = visibleTasks.filter((task) => task.status === "ready");
+  const servedTasks = visibleTasks.filter((task) => task.status === "served").slice(-6).reverse();
+  const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
+
+  function ticket(task: KitchenTask, ready = false) {
+    const age = taskAge(task);
+    return <article className={`kitchen-ticket ${ready ? "kitchen-ready" : `kitchen-${age.level}`} ${selected?.id === task.id ? "print-target" : ""}`} key={task.id}>
+      <header><div><span>{task.tableName ?? "MASA SİPARİŞİ"}{task.waiterName ? ` · ${task.waiterName}` : ""}</span><h2>{task.orderId.slice(0, 8).toUpperCase()}</h2></div><time>{new Date(task.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time></header>
+      <div className="kitchen-station-label">{task.stationName}</div>
+      <div className="kitchen-ticket-status"><b>{task.status === "submitted" ? "BEKLİYOR" : task.status === "preparing" ? "HAZIRLANIYOR" : "SERVİSE HAZIR"}</b><span>{age.minutes} dk</span></div>
+      <ul><li><strong>{task.quantity}×</strong><span>{task.productName}</span></li></ul>
+      <div className="kitchen-actions">
+        <button className="kitchen-status-button" disabled={savingTaskId === task.id} onClick={() => void changeStatus(task)}>
+          {savingTaskId === task.id ? "Kaydediliyor…" : task.status === "submitted" ? "Hazırlamaya başla" : task.status === "preparing" ? "Hazır" : "Servis edildi"}
+        </button>
+        <button className="kitchen-print-button" onClick={() => { setSelected(task); window.setTimeout(() => window.print(), 50); }}>Fiş yazdır</button>
+      </div>
+    </article>;
+  }
+
   return <main className="ops-shell kitchen-shell">
     <header className="ops-header"><a href="/kitchen" className="ops-brand">HIPOS <span>MUTFAK</span></a><a className="ops-link" href="/waiter">Garson ekranı</a></header>
     <section className="ops-intro"><span className="ops-eyebrow">SİPARİŞ KUYRUĞU</span><h1>Mutfak fişleri</h1><p>Yeni garson siparişleri yerel sunucudan otomatik olarak yenilenir.</p></section>
     <div className="kitchen-toolbar"><span className={error ? "offline-dot" : "online-dot"} />{error ? "Sunucuya ulaşılamıyor" : `Bağlı · son yenileme ${lastRefresh?.toLocaleTimeString("tr-TR") ?? "—"}`}<button onClick={() => void load()}>Yenile</button></div>
+    <nav className="kitchen-filters" aria-label="Mutfak istasyonları">
+      <button className={stationFilter === "all" ? "active" : ""} onClick={() => setStationFilter("all")}>Tümü</button>
+      {[...stations].sort((a, b) => ["hot", "oven", "bar", "cold"].indexOf(a.code) - ["hot", "oven", "bar", "cold"].indexOf(b.code)).map((station) => <button className={stationFilter === station.code ? "active" : ""} key={station.id} onClick={() => setStationFilter(station.code)}>{station.name}</button>)}
+      <button className={stationFilter === "unassigned" ? "active" : ""} onClick={() => setStationFilter("unassigned")}>Atanmamış</button>
+    </nav>
     {error && <p className="ops-error" role="alert">{error}</p>}
-    {orders.length === 0 && !error && <div className="kitchen-empty">Yeni sipariş bekleniyor.</div>}
-    <section className="kitchen-grid">{orders.map((order) => <article className={`kitchen-ticket ${selected?.id === order.id ? "print-target" : ""}`} key={order.id}>
-      <header><div><span>{order.tableName ?? "MASA SİPARİŞİ"}{order.waiterName ? ` · ${order.waiterName}` : ""}</span><h2>{order.id.slice(0, 8).toUpperCase()}</h2></div><time>{new Date(order.createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time></header>
-      <ul>{order.items.map((item, index) => <li key={`${item.productName}-${index}`}><strong>{item.quantity}×</strong><span>{item.productName}</span></li>)}</ul>
-      <footer><span>{order.items.reduce((sum, item) => sum + item.quantity, 0)} ürün</span><button onClick={() => { setSelected(order); window.setTimeout(() => window.print(), 50); }}>Mutfak fişi yazdır</button></footer>
-    </article>)}</section>
+    {activeTasks.length === 0 && !error && <div className="kitchen-empty">Aktif hazırlık görevi yok. Yeni sipariş bekleniyor.</div>}
+    <section className="kitchen-grid">{activeTasks.map((task) => ticket(task))}</section>
+    {readyTasks.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyTasks.length}</b></div><div className="kitchen-grid">{readyTasks.map((task) => ticket(task, true))}</div></section>}
+    {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
+    {servedTasks.length > 0 && <section className="kitchen-section kitchen-history"><div className="kitchen-section-title"><span>SON SERVİS EDİLENLER</span><b>{servedTasks.length}</b></div><ul>{servedTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()}</small></span><time>{task.servedAt ? new Date(task.servedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
     <p className="ops-footer">Yazdır düğmesi cihazın tarayıcı baskı penceresini açar. Gerçek otomatik yazdırma için mutfak yazıcısının modeli ve sürücüsü ayrıca gerekir.</p>
   </main>;
 }

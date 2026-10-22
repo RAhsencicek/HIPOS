@@ -17,7 +17,7 @@ const repo = fileURLToPath(new URL("../../../", import.meta.url));
 const project = fileURLToPath(
   new URL("../Hipos.Api/Hipos.Api.csproj", import.meta.url),
 );
-const pgBin = "/opt/homebrew/opt/postgresql@18/bin";
+const pgBin = process.env.HIPOS_POSTGRES_BIN ?? "/opt/homebrew/opt/postgresql@18/bin";
 const firm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const moda = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 const besiktas = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
@@ -365,6 +365,11 @@ test(
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ExpenseDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "KitchenDbContext"],
         { cwd: repo, env },
       );
       const migratedCategory = await runPg("psql", [
@@ -1463,6 +1468,78 @@ test(
       assert.equal(tableDetail.data.items[0].assignment.waiterName, "Demo Garson");
       assert.equal(tableDetail.data.items[0].assignment.items[0].productName, "Margherita Pizza");
       assert.equal(tableDetail.data.items[0].assignment.items[0].quantity, 2);
+
+      // Aynı açık adisyona sonradan gelen sipariş ayrı mutfak görevleri üretmeli;
+      // görevler ilk siparişin order_id'sine değil ortak check_id'ye göre masa/garsonu bulmalı.
+      const kitchenStationId = "a2000000-0000-4000-8000-000000000001";
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO kitchen.stations (id,firm_id,branch_id,code,name,is_active)
+         VALUES ('${kitchenStationId}','${firm}','${moda}','oven','Test Fırın',true);
+         INSERT INTO kitchen.station_categories (firm_id,branch_id,category_id,station_id)
+         VALUES ('${firm}','${moda}','pizza','${kitchenStationId}');`]);
+      const waiterOrderId = "88888888-8888-4888-8888-888888888851";
+      const waiterOrderBody = { orderId: waiterOrderId, waiterId: waiter.data.id,
+        items: [{ productId: pizzaId, quantity: 3 }] };
+      const waiterOrder = await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
+        waiterOrderBody, "pos-moda");
+      assert.equal(waiterOrder.status, 201);
+      assert.equal((await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
+        waiterOrderBody, "pos-moda")).status, 200);
+
+      const kitchenPath = `/api/v1/firms/${firm}/branches/${moda}/kitchen`;
+      const kitchenAll = await request(`${kitchenPath}/tasks?status=all`);
+      assert.equal(kitchenAll.status, 200);
+      const kitchenTask = kitchenAll.data.items.find((item) => item.orderId === waiterOrderId);
+      assert.ok(kitchenTask, "Sonradan eklenen garson siparişi mutfak görevi oluşturmalı.");
+      assert.equal(kitchenTask.productName, "Margherita Pizza");
+      assert.equal(kitchenTask.quantity, 3);
+      assert.equal(kitchenTask.status, "submitted");
+      assert.equal(kitchenTask.version, 1);
+      assert.equal(kitchenTask.stationCode, "oven");
+      assert.equal(kitchenTask.tableName, "Masa 12");
+      assert.equal(kitchenTask.waiterName, "Demo Garson");
+
+      const preparingRequest = "88888888-8888-4888-8888-888888888852";
+      const preparing = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "preparing", expectedVersion: 1,
+      }, "pos-moda");
+      assert.equal(preparing.status, 200);
+      assert.equal(preparing.data.status, "preparing");
+      assert.equal(preparing.data.version, 2);
+      assert.ok(preparing.data.preparedAt);
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "preparing", expectedVersion: 1,
+      }, "pos-moda")).data.version, 2, "Aynı durum isteği ikinci audit veya sürüm üretmemeli.");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "ready", expectedVersion: 2,
+      }, "pos-moda")).data.code, "REQUEST_ID_CONFLICT");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888853", nextStatus: "served", expectedVersion: 2,
+      }, "pos-moda")).data.code, "INVALID_KITCHEN_STATUS_TRANSITION");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888854", nextStatus: "ready", expectedVersion: 1,
+      }, "pos-moda")).data.code, "VERSION_CONFLICT");
+      const ready = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888855", nextStatus: "ready", expectedVersion: 2,
+      }, "pos-moda");
+      assert.equal(ready.data.status, "ready");
+      assert.equal(ready.data.version, 3);
+      assert.ok((await request(`${kitchenPath}/tasks?status=ready`)).data.items.some((item) => item.id === kitchenTask.id));
+      assert.ok(!(await request(`${kitchenPath}/tasks?status=active`)).data.items.some((item) => item.id === kitchenTask.id));
+      const served = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888856", nextStatus: "served", expectedVersion: 3,
+      }, "pos-moda");
+      assert.equal(served.data.status, "served");
+      assert.equal(served.data.version, 4);
+      assert.ok(served.data.servedAt);
+      assert.ok((await request(`${kitchenPath}/tasks?status=served`)).data.items.some((item) => item.id === kitchenTask.id));
+      const kitchenRows = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM kitchen.tasks WHERE order_id='${waiterOrderId}')||','||
+                (SELECT count(*) FROM kitchen.task_audit WHERE task_id='${kitchenTask.id}')`]);
+      assert.equal(kitchenRows.stdout.trim(), "1,4",
+        "Tek sipariş kalemi bir görev; oluşturma ve üç geçiş toplam dört audit kaydı üretmeli.");
       assert.equal((await request(`${modaService}/tables/${table.data.id}`, "DELETE")).data.code, "TABLE_HAS_OPEN_CHECK");
       const nextTable = await request(`${modaService}/tables`, "POST", { name: null });
       assert.equal(nextTable.status, 201);

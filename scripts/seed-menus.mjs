@@ -31,7 +31,7 @@ for (const menu of menus) {
   statements.push(`DO $seed$ BEGIN IF EXISTS (SELECT 1 FROM catalog.menus WHERE id=${quote(menu.id)} AND (firm_id<>${firm} OR branch_id<>${branch})) THEN RAISE EXCEPTION 'Demo menü kimliği farklı kapsamda kullanılıyor.'; END IF; IF NOT EXISTS (SELECT 1 FROM catalog.menus WHERE id=${quote(menu.id)}) THEN ${inserts.join("\n")} END IF; END $seed$;`);
 }
 statements.push("COMMIT;");
-const child = spawn("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], { env: { ...process.env,
+const child = spawn("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], { shell: process.platform === "win32", env: { ...process.env,
   PGHOST: url.hostname, PGPORT: url.port || "5432", PGUSER: decodeURIComponent(url.username),
   PGPASSWORD: decodeURIComponent(url.password), PGDATABASE: "hipos_features" }, stdio: ["pipe", "inherit", "inherit"] });
 child.stdin.end(statements.join("\n"));

@@ -267,6 +267,7 @@ for (const product of demo.products) {
 }
 statements.push("COMMIT;");
 const child = spawn("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], {
+  shell: process.platform === "win32",
   env: {
     ...process.env,
     PGHOST: parsed.hostname,

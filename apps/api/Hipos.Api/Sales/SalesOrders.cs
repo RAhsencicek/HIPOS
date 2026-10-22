@@ -148,6 +148,8 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (runtime.KitchenReady && source == "waiter_web")
+                await CreateKitchenTasksAsync(order, actor, transaction.GetDbTransaction(), cancellationToken);
             if (createCheck && check.TableId is not null)
                 await CreateServiceAssignmentAsync(check, order, actor, transaction.GetDbTransaction(), cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -258,6 +260,33 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             VALUES (@check,@firm,@branch,@actor,'table_assigned',@version,@at)
             """, cancellationToken, ("check", check.Id), ("firm", check.FirmId),
             ("branch", check.BranchId), ("actor", actor), ("version", check.Version), ("at", now));
+    }
+
+    private async Task CreateKitchenTasksAsync(SalesOrderRow order, string actor,
+        DbTransaction transaction, CancellationToken cancellationToken)
+    {
+        foreach (var line in order.Lines)
+        {
+            var taskId = Guid.NewGuid();
+            await ExecuteAsync(db.Database.GetDbConnection(), transaction, """
+                WITH inserted AS (
+                    INSERT INTO kitchen.tasks
+                        (id,firm_id,branch_id,order_id,order_line_id,station_id,product_name,quantity,status,version,submitted_at)
+                    SELECT @id,@firm,@branch,@order,@line,mapping.station_id,@product,@quantity,'submitted',1,@submitted
+                    FROM (SELECT 1) AS seed
+                    LEFT JOIN catalog.products AS product ON product.id = @productId AND product.firm_id = @firm
+                    LEFT JOIN kitchen.station_categories AS mapping ON mapping.firm_id = @firm
+                        AND mapping.branch_id = @branch AND mapping.category_id = product.category_id
+                    ON CONFLICT (order_line_id) DO NOTHING
+                    RETURNING id
+                )
+                INSERT INTO kitchen.task_audit
+                    (request_id,task_id,firm_id,branch_id,actor,action,status,version,occurred_at)
+                SELECT @id,id,@firm,@branch,@actor,'created','submitted',1,@submitted FROM inserted
+                """, cancellationToken, ("id", taskId), ("firm", order.FirmId), ("branch", order.BranchId),
+                ("order", order.Id), ("line", line.Id), ("product", line.ProductName),
+                ("productId", line.ProductId), ("quantity", line.Quantity), ("submitted", order.CreatedAt), ("actor", actor));
+        }
     }
 
     private static async Task<bool> ExistsAsync(DbConnection connection, DbTransaction transaction, string sql,

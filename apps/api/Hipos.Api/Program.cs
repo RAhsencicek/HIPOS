@@ -6,6 +6,7 @@ using Hipos.Api.Service;
 using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
 using Hipos.Api.Expenses;
+using Hipos.Api.Kitchen;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -37,6 +38,8 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "cash")));
     builder.Services.AddDbContext<ExpenseDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "finance")));
+    builder.Services.AddDbContext<KitchenDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "kitchen")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -80,6 +83,7 @@ var serviceReady = false;
 var inventoryReady = false;
 var cashReady = false;
 var expensesReady = false;
+var kitchenReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -104,6 +108,8 @@ if (storage == "postgres")
     cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
     var expenseDb = scope.ServiceProvider.GetRequiredService<ExpenseDbContext>();
     expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
+    var kitchenDb = scope.ServiceProvider.GetRequiredService<KitchenDbContext>();
+    kitchenReady = salesReady && !(await kitchenDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -114,6 +120,7 @@ if (storage == "postgres")
     featureRuntime.InventoryReady = inventoryReady;
     featureRuntime.CashReady = cashReady;
     featureRuntime.ExpensesReady = expensesReady;
+    featureRuntime.KitchenReady = kitchenReady;
     if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");
@@ -124,6 +131,7 @@ if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
+if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

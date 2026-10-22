@@ -11,4 +11,5 @@ public sealed class FeatureRuntimeCapabilities
     public bool CariReady { get; set; }
     public bool CashReady { get; set; }
     public bool ExpensesReady { get; set; }
+    public bool KitchenReady { get; set; }
 }
