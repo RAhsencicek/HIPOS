@@ -1,4 +1,6 @@
 using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
 using Hipos.Api.Cari;
 using Hipos.Api.Features;
 using Hipos.Api.Service;
@@ -10,6 +12,8 @@ public sealed record CreateSalesCheck(Guid RequestId, Guid FirstOrderId, IReadOn
     string? CustomerId, string? TableId, string? WaiterId);
 public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long AmountMinor, string Method,
     string SimulatedOutcome, int ExpectedOrderVersion);
+public sealed record SplitCheckLine(long OrderLineId, int Quantity);
+public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
     string Method, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId, string Status,
@@ -66,6 +70,108 @@ public static class SalesCheckEndpoints
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
             return result.Created ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}", detail)
                 : Results.Ok(detail);
+        });
+
+        group.MapPost("/{checkId:guid}/split", async (string firmId, string branchId, Guid checkId,
+            SplitSalesCheck command, HttpContext context, SalesDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, salesReady, true);
+            if (denied is not null) return denied;
+            if (command.RequestId == Guid.Empty || command.ExpectedVersion < 1 || command.Items is null ||
+                command.Items.Count == 0 || command.Items.Any(item => item.OrderLineId < 1 || item.Quantity < 1) ||
+                command.Items.Select(item => item.OrderLineId).Distinct().Count() != command.Items.Count)
+                return Fail(context, "INVALID_SPLIT", 400, "Bölme isteği ve kalem miktarları geçersiz.");
+
+            var normalized = command.Items.OrderBy(item => item.OrderLineId).ToArray();
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                string.Join(";", normalized.Select(item => $"{item.OrderLineId}:{item.Quantity}")))));
+            var prior = await db.CheckSplits.AsNoTracking().SingleOrDefaultAsync(row => row.RequestId == command.RequestId &&
+                row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
+            if (prior is not null)
+            {
+                if (prior.SourceCheckId != checkId || prior.Fingerprint != fingerprint)
+                    return Fail(context, "SPLIT_REQUEST_CONFLICT", 409, "requestId farklı bölme isteğiyle kullanılmış.");
+                var replay = await DetailAsync(db, firmId, branchId, prior.TargetCheckId, context.RequestAborted);
+                return Results.Ok(new { repeated = true, sourceCheckId = checkId, check = replay });
+            }
+
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            try
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM sales.checks WHERE id={checkId} AND firm_id={firmId} AND branch_id={branchId} FOR UPDATE", context.RequestAborted);
+                var concurrentReplay = await db.CheckSplits.AsNoTracking().SingleOrDefaultAsync(row => row.RequestId == command.RequestId &&
+                    row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
+                if (concurrentReplay is not null)
+                {
+                    if (concurrentReplay.SourceCheckId != checkId || concurrentReplay.Fingerprint != fingerprint)
+                        return Fail(context, "SPLIT_REQUEST_CONFLICT", 409, "requestId farklı bölme isteğiyle kullanılmış.");
+                    var replay = await DetailAsync(db, firmId, branchId, concurrentReplay.TargetCheckId, context.RequestAborted);
+                    return Results.Ok(new { repeated = true, sourceCheckId = checkId, check = replay });
+                }
+                var source = await db.Checks.SingleOrDefaultAsync(row => row.Id == checkId && row.FirmId == firmId &&
+                    row.BranchId == branchId && row.Status == "open", context.RequestAborted);
+                if (source is null) return Fail(context, "CHECK_NOT_FOUND", 404, "Açık adisyon bulunamadı.");
+                if (source.Version != command.ExpectedVersion)
+                    return Fail(context, "STALE_CHECK_VERSION", 409, "Adisyon başka bir işlemle değişmiş.");
+                var orders = await db.Orders.AsSplitQuery().Include(row => row.Lines).Include(row => row.PaymentAttempts)
+                    .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+                    .ToListAsync(context.RequestAborted);
+                if (orders.SelectMany(row => row.PaymentAttempts).Any())
+                    return Fail(context, "CHECK_HAS_PAYMENTS", 409, "Ödeme girişimi bulunan adisyon bölünemez.");
+                var lineMap = orders.SelectMany(order => order.Lines.Select(line => (Order: order, Line: line)))
+                    .ToDictionary(pair => pair.Line.Id);
+                foreach (var requested in normalized)
+                    if (!lineMap.TryGetValue(requested.OrderLineId, out var pair) || requested.Quantity > pair.Line.Quantity)
+                        return Fail(context, "SPLIT_QUANTITY_EXCEEDED", 409, "Kalem adisyona bağlı değil veya istenen miktar mevcut miktarı aşıyor.");
+                var selectedTotal = normalized.Sum(item => checked(item.Quantity * lineMap[item.OrderLineId].Line.UnitPriceMinor));
+                var sourceTotal = orders.Sum(order => order.TotalMinor);
+                if (selectedTotal <= 0 || selectedTotal >= sourceTotal)
+                    return Fail(context, "SPLIT_REMAINS_EMPTY", 409, "Kaynak adisyonda en az bir ürün kalemi bırakılmalı.");
+
+                var targetId = Guid.NewGuid();
+                var now = DateTimeOffset.UtcNow;
+                var target = new SalesCheckRow { Id = targetId, FirmId = firmId, BranchId = branchId,
+                    Status = "open", CustomerId = source.CustomerId, TableId = source.TableId,
+                    WaiterId = source.WaiterId, Currency = source.Currency, CreatedAt = now, Version = 1 };
+                db.Checks.Add(target);
+                var targetOrder = new SalesOrderRow { Id = Guid.NewGuid(), CheckId = targetId, FirmId = firmId,
+                    BranchId = branchId, Source = "split", Status = "open", PaymentStatus = "unpaid",
+                    Currency = source.Currency, RequestFingerprint = fingerprint, CreatedAt = now, Version = 1 };
+                foreach (var requested in normalized)
+                {
+                    var line = lineMap[requested.OrderLineId].Line;
+                    var movedTotal = checked(requested.Quantity * line.UnitPriceMinor);
+                    targetOrder.Lines.Add(new SalesOrderLineRow { ProductId = line.ProductId, ProductName = line.ProductName,
+                        Sku = line.Sku, Quantity = requested.Quantity, UnitPriceMinor = line.UnitPriceMinor,
+                        LineTotalMinor = movedTotal, Currency = line.Currency });
+                    line.Quantity -= requested.Quantity;
+                    line.LineTotalMinor -= movedTotal;
+                    if (line.Quantity == 0) db.Lines.Remove(line);
+                }
+                targetOrder.TotalMinor = selectedTotal;
+                db.Orders.Add(targetOrder);
+                foreach (var order in orders)
+                {
+                    order.Lines.RemoveAll(line => line.Quantity == 0);
+                    if (order.Lines.Count == 0) db.Orders.Remove(order);
+                    else { order.TotalMinor = order.Lines.Sum(line => line.LineTotalMinor); order.Version++; }
+                }
+                source.Version++;
+                var actor = DemoAccess.Resolve(context)!.Name;
+                db.CheckAudit.AddRange(
+                    new SalesCheckAuditRow { CheckId = checkId, FirmId = firmId, BranchId = branchId, Actor = actor, Action = "split_source", Version = source.Version, OccurredAt = now },
+                    new SalesCheckAuditRow { CheckId = targetId, FirmId = firmId, BranchId = branchId, Actor = actor, Action = "split_created", Version = 1, OccurredAt = now });
+                db.CheckSplits.Add(new SalesCheckSplitRow { RequestId = command.RequestId, SourceCheckId = checkId,
+                    TargetCheckId = targetId, FirmId = firmId, BranchId = branchId, Fingerprint = fingerprint, CreatedAt = now });
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+                return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{targetId}",
+                    new { repeated = false, sourceCheckId = checkId, source = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted), check = await DetailAsync(db, firmId, branchId, targetId, context.RequestAborted) });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Fail(context, "STALE_CHECK_VERSION", 409, "Adisyon başka bir işlemle değişmiş.");
+            }
         });
 
         group.MapGet("", async (string firmId, string branchId, HttpContext context, SalesDbContext db) =>

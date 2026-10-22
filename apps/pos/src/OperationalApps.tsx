@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { PaymentSimulatorPanel, type TestOrder } from "./PaymentSimulatorPanel";
 import { createRequestId } from "./requestId";
 import "./operational.css";
 
@@ -8,10 +7,13 @@ const firmId = "11111111-1111-4111-8111-111111111111";
 const branchId = "33333333-3333-4333-8333-333333333333";
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (minor: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(minor / 100);
-type ApiProblem = { detail?: string };
+type ApiProblem = { detail?: string; message?: string };
 type Product = { id: string; name: string; status: string; isActive: boolean; channels: string[]; price: { amountMinor: number; currency: string } };
 type Waiter = { id: string; name: string; isActive: boolean };
-type Table = { id: string; number: number; name: string; isActive: boolean; assignment?: { waiterId: string | null; waiterName: string | null } | null };
+type Table = { id: string; number: number; name: string; isActive: boolean; assignment?: {
+  id: string; orderId: string; waiterId: string | null; waiterName: string | null; totalMinor: number;
+  paymentStatus: string; version: number; items: Array<{ productId: string; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }>;
+} | null };
 type Order = { id: string; source: string; status: string; paymentStatus: string; totalMinor: number; createdAt: string; tableName?: string; waiterName?: string; items: Array<{ productName: string; quantity: number; lineTotalMinor: number }> };
 type ActiveTable = { name: string; assignment?: { orderId: string; waiterName: string | null } | null };
 
@@ -30,7 +32,7 @@ async function request<T>(path: string, actor: string, body?: unknown): Promise<
   } finally { window.clearTimeout(timeout); }
   if (!response.ok) {
     const problem = await response.json().catch(() => ({})) as ApiProblem;
-    throw new Error(problem.detail ?? `İstek başarısız (${response.status}).`);
+    throw new Error(problem.message ?? problem.detail ?? `İstek başarısız (${response.status}).`);
   }
   return response.json() as Promise<T>;
 }
@@ -49,10 +51,11 @@ export function WaiterApp() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [connectionState, setConnectionState] = useState<"checking" | "connected" | "unavailable">("checking");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastOrderId, setLastOrderId] = useState("");
-  const [activeOrder, setActiveOrder] = useState<TestOrder | null>(null);
   const [retryOrderId, setRetryOrderId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -65,14 +68,22 @@ export function WaiterApp() {
       setProducts(catalog.items.filter((item) => item.status === "published" && item.isActive && item.channels.includes("pos") && item.price.amountMinor > 0));
       setTables(tableResult.items.filter((item) => item.isActive));
       setWaiters(waiterResult.items.filter((item) => item.isActive));
+      setConnectionState("connected");
+      setLastUpdated(new Date());
       setError("");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Veriler yüklenemedi."); }
+    } catch (cause) {
+      setConnectionState("unavailable");
+      setError(cause instanceof Error ? cause.message : "Veriler yüklenemedi.");
+    }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void reload(); }, [reload, refreshTick]);
 
   const selectedTable = tables.find((item) => item.id === tableId);
   const waiter = waiters.find((item) => item.id === waiterId);
+  const emptyTableCount = tables.filter((item) => !item.assignment).length;
+  const occupiedTableCount = tables.length - emptyTableCount;
+  const assignedToOtherWaiter = Boolean(selectedTable?.assignment && waiter && selectedTable.assignment.waiterId !== waiter.id);
   const cartRows = useMemo(() => products.filter((item) => cart[item.id]).map((item) => ({ ...item, quantity: cart[item.id] })), [products, cart]);
   const total = cartRows.reduce((sum, item) => sum + item.price.amountMinor * item.quantity, 0);
 
@@ -92,10 +103,10 @@ export function WaiterApp() {
     try {
       const orderId = retryOrderId ?? createRequestId();
       setRetryOrderId(orderId);
-      const result = await request<{ order: TestOrder; table: string; waiter: string }>(
+      const result = await request<{ order: { id: string }; table: string; waiter: string }>(
         `${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/orders`, "pos-single",
         { orderId, waiterId: waiter.id, items: cartRows.map((item) => ({ productId: item.id, quantity: item.quantity })) });
-      setCart({}); setRetryOrderId(null); setLastOrderId(result.order.id); setActiveOrder(result.order);
+      setCart({}); setRetryOrderId(null); setLastOrderId(result.order.id);
       setNotice(`${result.table} siparişi yönetim ekranına gönderildi. Mutfak kuyruğuna eklendi.`);
       setRefreshTick((tick) => tick + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Sipariş gönderilemedi."); }
@@ -103,27 +114,41 @@ export function WaiterApp() {
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand">HIPOS <span>GARSON</span></a><a className="ops-link" href="/">POS simülatörü</a></header>
-    <section className="ops-intro"><span className="ops-eyebrow">YEREL RESTORAN DEMOSU</span><h1>Yeni sipariş</h1><p>Garson telefonu, yönetim ekranı ve mutfak kuyruğu aynı HIPOS sunucusunu kullanır.</p></section>
-    <section className="ops-selection">
-      <label>Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-      <label>Masa<select value={tableId} onChange={(event) => { setTableId(event.target.value); setRetryOrderId(null); }}><option value="">Masa seçin</option>{tables.map((item) => <option value={item.id} key={item.id}>{item.name}{item.assignment ? ` · ${item.assignment.waiterName ?? "dolu"}` : " · boş"}</option>)}</select></label>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></header>
+    <section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
+      <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
     </section>
+    <section className="waiter-summary" aria-label="Masa özeti">
+      <div><strong>{tables.length}</strong><span>Toplam masa</span></div><div className="empty"><strong>{emptyTableCount}</strong><span>Boş</span></div><div className="occupied"><strong>{occupiedTableCount}</strong><span>Dolu</span></div>
+    </section>
+    <div className="waiter-section-heading"><h2>Masalar</h2><span>{tables.length} masa</span><button onClick={() => setRefreshTick((tick) => tick + 1)} disabled={loading} aria-label="Masaları yenile">Yenile</button></div>
     {loading && <p className="ops-message">Menü ve masalar yükleniyor…</p>}
     {error && <p className="ops-error" role="alert">{error}</p>}
-    {!loading && products.length === 0 && !error && <p className="ops-message">Satışa açık ürün bulunamadı. Yönetim panelinde ürünleri POS kanalına yayınlayın.</p>}
-    <section className="ops-product-grid" aria-label="Ürünler">{products.map((product) => <article className="ops-product" key={product.id}>
-      <div><strong>{product.name}</strong><span>{money(product.price.amountMinor)}</span></div>
-      <div className="ops-quantity"><button aria-label={`${product.name} azalt`} onClick={() => add(product.id, -1)}>−</button><b>{cart[product.id] ?? 0}</b><button aria-label={`${product.name} ekle`} onClick={() => add(product.id, 1)}>+</button></div>
-    </article>)}</section>
-    <section className="ops-cart"><div><span>Sepet</span><strong>{money(total)}</strong></div>
-      {cartRows.length ? <ul>{cartRows.map((item) => <li key={item.id}>{item.quantity} × {item.name}<span>{money(item.quantity * item.price.amountMinor)}</span></li>)}</ul> : <p>Ürün ekleyerek sipariş oluşturun.</p>}
-      <button className="ops-primary" disabled={!tableId || !waiterId || !cartRows.length || saving} onClick={() => void sendOrder()}>{saving ? "Gönderiliyor…" : "Siparişi mutfağa gönder"}</button>
-      {notice && <p className="ops-success" role="status">{notice}{lastOrderId && <small> Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}
-    </section>
-    {activeOrder && <PaymentSimulatorPanel key={activeOrder.id}
-      scope={{ firmId, branchId, actor: "pos-single" }} order={activeOrder} onOrderChange={setActiveOrder} />}
-    <footer className="ops-footer">İnternet kesilse bile bu demo, restoranın yerel ağı ve HIPOS ana bilgisayarı çalıştığı sürece kullanılabilir.</footer>
+    {!loading && !error && tables.length === 0 && <p className="ops-message">Gösterilecek aktif masa bulunamadı.</p>}
+    <section className="waiter-table-grid" aria-label="Masa listesi">{tables.map((item) => <button type="button" className={`waiter-table-card ${item.assignment ? "occupied" : "empty"} ${tableId === item.id ? "selected" : ""}`} key={item.id} onClick={() => { setTableId(item.id); setRetryOrderId(null); }} aria-pressed={tableId === item.id}>
+      <svg className="waiter-table-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="3" /><path d="M9 3h6M9 21h6M2 10v4M22 10v4" /></svg><strong>{item.name}</strong><span className="waiter-table-status">{item.assignment ? "Dolu" : "Boş"}</span>
+      {item.assignment && <><span className="waiter-table-owner">{item.assignment.waiterName ?? "Açık adisyon"}</span><b>{money(item.assignment.totalMinor)}</b></>}
+    </button>)}</section>
+    {selectedTable && <section className="waiter-order-area" aria-live="polite">
+      <div className="waiter-order-heading"><div><span className="ops-eyebrow">SEÇİLİ MASA</span><h2>{selectedTable.name}</h2></div><span className={`waiter-table-status ${selectedTable.assignment ? "occupied" : "empty"}`}>{selectedTable.assignment ? "Dolu" : "Boş"}</span></div>
+      {selectedTable.assignment && <div className="waiter-open-check"><div><strong>Açık adisyon</strong><span>{selectedTable.assignment.waiterName ?? "Garson atanmamış"}</span></div><b>{money(selectedTable.assignment.totalMinor)}</b>
+        {selectedTable.assignment.items.length > 0 && <ul>{selectedTable.assignment.items.map((line, index) => <li key={`${line.productId}-${index}`}>{line.quantity} × {line.productName}<span>{money(line.lineTotalMinor)}</span></li>)}</ul>}
+      </div>}
+      {!waiter && <p className="ops-message">Sipariş eklemek için önce garson seçin.</p>}
+      {assignedToOtherWaiter && <p className="ops-message">Bu masa {selectedTable.assignment?.waiterName ?? "başka bir garsona"} tarafından yönetiliyor. Sipariş eklemek için o garsonu seçin.</p>}
+      {!loading && products.length === 0 && !error && <p className="ops-message">Satışa açık ürün bulunamadı. Yönetim panelinde ürünleri POS kanalına yayınlayın.</p>}
+      {waiter && !assignedToOtherWaiter && <><h3 className="waiter-products-title">Ürün ekle</h3><section className="ops-product-grid" aria-label="Ürünler">{products.map((product) => <article className="ops-product" key={product.id}>
+        <div><strong>{product.name}</strong><span>{money(product.price.amountMinor)}</span></div>
+        <div className="ops-quantity"><button aria-label={`${product.name} azalt`} onClick={() => add(product.id, -1)}>−</button><b>{cart[product.id] ?? 0}</b><button aria-label={`${product.name} ekle`} onClick={() => add(product.id, 1)}>+</button></div>
+      </article>)}</section>
+      <section className="ops-cart"><div><span>Yeni sipariş</span><strong>{money(total)}</strong></div>
+        {cartRows.length ? <ul>{cartRows.map((item) => <li key={item.id}>{item.quantity} × {item.name}<span>{money(item.quantity * item.price.amountMinor)}</span></li>)}</ul> : <p>Ürün ekleyerek bu masaya sipariş oluşturun.</p>}
+        <button className="ops-primary" disabled={!waiter || !cartRows.length || saving} onClick={() => void sendOrder()}>{saving ? "Gönderiliyor…" : "Siparişi mutfağa gönder"}</button>
+        {notice && <p className="ops-success" role="status">{notice}{lastOrderId && <small> Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}
+      </section></>}
+    </section>}
+    {!selectedTable && <p className="waiter-hint">Siparişe başlamak için bir masa seçin.</p>}
+    <footer className="ops-footer">{lastUpdated ? `Son güncelleme ${lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}.` : "Masa bilgileri sunucudan alınır."}</footer>
   </main>;
 }
 

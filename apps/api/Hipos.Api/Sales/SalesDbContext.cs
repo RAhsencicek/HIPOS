@@ -67,6 +67,17 @@ public sealed class SalesCheckAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class SalesCheckSplitRow
+{
+    public Guid RequestId { get; set; }
+    public Guid SourceCheckId { get; set; }
+    public Guid TargetCheckId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class PaymentAttemptAuditRow
 {
     public long Id { get; set; }
@@ -111,6 +122,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
 {
     public DbSet<SalesCheckRow> Checks => Set<SalesCheckRow>();
     public DbSet<SalesCheckAuditRow> CheckAudit => Set<SalesCheckAuditRow>();
+    public DbSet<SalesCheckSplitRow> CheckSplits => Set<SalesCheckSplitRow>();
     public DbSet<SalesOrderRow> Orders => Set<SalesOrderRow>();
     public DbSet<SalesOrderLineRow> Lines => Set<SalesOrderLineRow>();
     public DbSet<SalesOrderAuditRow> Audit => Set<SalesOrderAuditRow>();
@@ -249,6 +261,21 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CheckId, row.Id });
+        });
+        modelBuilder.Entity<SalesCheckSplitRow>(entity =>
+        {
+            entity.ToTable("check_splits");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.SourceCheckId).HasColumnName("source_check_id");
+            entity.Property(row => row.TargetCheckId).HasColumnName("target_check_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.SourceCheckId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.TargetCheckId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.SourceCheckId });
         });
         modelBuilder.Entity<PaymentAttemptAuditRow>(entity =>
         {

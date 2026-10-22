@@ -9,7 +9,7 @@
 
 Şu anki HIPOS sisteminde [`sales.checks`](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) tablosunda bir adisyon açılabilmekte ve içerisine sipariş eklenebilmektedir. Ancak:
 * Adisyon kapatma (`closed`) iş akışı kodlanmamıştır. Masadaki hesap ödendikten sonra masa boşaltılamamaktadır.
-* Masa taşıma ve ödeme girişimi olmayan açık adisyonları birleştirme API'leri uygulanmıştır. Adisyon bölme endpoint'i bulunmamaktadır.
+* Masa taşıma, ödeme girişimi olmayan açık adisyonları birleştirme ve açık adisyonu kalem/miktar bazında bölme API'leri uygulanmıştır.
 * Masaya yanlışlıkla girilen bir ürünün **iptali**, **müşteriye ikram edilmesi** veya **masaya indirim yapılması** mekanizması yoktur.
 * Sipariş kalemlerinde "Az pişmiş", "Buzsuz", "Acı soslu" gibi **ürün seçenekleri ve servis notları (modifiers)** saklanamamaktadır.
 
@@ -81,9 +81,11 @@ CREATE TABLE sales.check_voids (
 2. **Masa Birleştirme (`POST /.../service/tables/{targetTableId}/merge`) — API uygulandı:**
    * Gövde: `{ sourceTableIds: [uuid, uuid] }`.
    * Kaynak masalardaki siparişler hedef masanın adisyonuna transfer edilir, kaynak masalar kapatılıp boşaltılır.
-3. **Adisyon Bölme (`POST /.../sales/checks/{checkId}/split`):**
-   * Gövde: `{ itemIds: [uuid, uuid] }`.
-   * Seçilen ürünler yeni bir `check` oluşturularak oraya aktarılır.
+3. **Adisyon Bölme (`POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/split`) — API uygulandı:**
+   * Gövde: `{ requestId, expectedVersion, items: [{ orderLineId, quantity }] }`. `orderLineId`, sipariş kaleminin sayısal kimliğidir; tüm miktar seçilirse kalemin tamamı, daha azı seçilirse yalnız seçilen miktar taşınır.
+   * Seçilen miktarlar aynı masa, garson ve müşteri bağlamıyla yeni bir açık adisyon ve sipariş oluşturur. Kaynak adisyonda en az bir kalem kalmalıdır. Ödeme girişimi bulunan adisyon bölünmez.
+   * İstek kimliği tekrar denemeyi güvenli kılar; farklı içerikle aynı kimlik kullanılırsa çakışma döner. Adisyon sürümü eskiyse işlem reddedilir.
+   * Serbest tutarlı kısmi ödemeler bölme işlemi değildir: aynı adisyonda birden fazla ödeme girişimi olarak kaydedilir.
 
 ### Adım 2: İptal, İkram ve İskonto Mekanizması
 * `POST /api/v1/.../sales/checks/{checkId}/discount`: Masaya yüzde veya sabit TL indirim uygular. Müdür PIN'i zorunludur.

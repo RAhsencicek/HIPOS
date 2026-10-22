@@ -312,6 +312,54 @@ namespace Hipos.Api.Sales.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckSplitRow", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<Guid>("SourceCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_check_id");
+
+                    b.Property<Guid>("TargetCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_check_id");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("SourceCheckId");
+
+                    b.HasIndex("TargetCheckId");
+
+                    b.HasIndex("FirmId", "BranchId", "SourceCheckId");
+
+                    b.ToTable("check_splits", "sales");
+                });
+
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderAuditRow", b =>
                 {
                     b.Property<long>("Id")
@@ -530,6 +578,21 @@ namespace Hipos.Api.Sales.Migrations
                         .WithMany()
                         .HasForeignKey("MergedIntoCheckId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckSplitRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("SourceCheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("TargetCheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderLineRow", b =>

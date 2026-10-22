@@ -13,7 +13,7 @@ public sealed record CreatePosOrder(Guid OrderId, IReadOnlyList<PosOrderItem> It
 public sealed record CreateWaiterOrder(Guid OrderId, string WaiterId, IReadOnlyList<PosOrderItem> Items);
 public sealed record PosOrderItem(Guid ProductId, int Quantity);
 public sealed record SalesOrderLine(
-    string ProductId, string ProductName, string Sku, int Quantity,
+    long Id, string ProductId, string ProductName, string Sku, int Quantity,
     long UnitPriceMinor, long LineTotalMinor, string Currency);
 public sealed record SalesOrderDetail(
     string Id, string FirmId, string BranchId, string Source, string Status,
@@ -379,6 +379,6 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             row.TotalMinor - row.PaymentAttempts.Where(attempt => attempt.Status == "succeeded").Sum(attempt => attempt.AmountMinor),
             row.Currency, row.CreatedAt, row.Version,
             row.Lines.OrderBy(line => line.ProductId).Select(line =>
-                new SalesOrderLine(line.ProductId.ToString(), line.ProductName, line.Sku,
+                new SalesOrderLine(line.Id, line.ProductId.ToString(), line.ProductName, line.Sku,
                     line.Quantity, line.UnitPriceMinor, line.LineTotalMinor, line.Currency)).ToArray());
 }
