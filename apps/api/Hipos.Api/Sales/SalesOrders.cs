@@ -28,6 +28,79 @@ public sealed record SalesOrderResult(SalesOrderDetail? Order, FeatureFailure? F
 public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, FeatureNewWorkGate gate,
     FeatureRuntimeCapabilities runtime)
 {
+    public async Task<FeatureFailure?> MergeChecksAsync(DbConnection connection, DbTransaction transaction,
+        string firmId, string branchId, Guid targetCheckId, string targetTableId,
+        IReadOnlyList<(Guid CheckId, string TableId)> sources, string actor, DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        foreach (var checkId in sources.Select(source => source.CheckId).Append(targetCheckId).Distinct().OrderBy(id => id))
+            await LockRowsAsync(connection, transaction,
+                "SELECT id FROM sales.checks WHERE id=@check AND firm_id=@firm AND branch_id=@branch FOR UPDATE",
+                cancellationToken, ("check", checkId), ("firm", firmId), ("branch", branchId));
+        foreach (var checkId in sources.Select(source => source.CheckId).Append(targetCheckId).Distinct().OrderBy(id => id))
+            await LockRowsAsync(connection, transaction,
+                "SELECT id FROM sales.orders WHERE check_id=@check AND firm_id=@firm AND branch_id=@branch ORDER BY id FOR UPDATE",
+                cancellationToken, ("check", checkId), ("firm", firmId), ("branch", branchId));
+
+        if (!await ExistsAsync(connection, transaction,
+            "SELECT EXISTS (SELECT 1 FROM sales.checks WHERE id=@check AND firm_id=@firm AND branch_id=@branch AND status='open' AND table_id=@table)",
+            cancellationToken, ("check", targetCheckId), ("firm", firmId), ("branch", branchId), ("table", targetTableId)))
+            return new FeatureFailure("TARGET_CHECK_NOT_OPEN", 409, "Hedef masanın açık adisyonu bulunamadı.");
+
+        var checkIds = sources.Select(source => source.CheckId).Append(targetCheckId).ToArray();
+        foreach (var checkId in checkIds)
+        {
+            if (await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM sales.payment_attempts WHERE check_id=@check AND firm_id=@firm AND branch_id=@branch)",
+                cancellationToken, ("check", checkId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("CHECK_HAS_PAYMENTS", 409, "Ödeme girişimi olan adisyon birleştirilemez.");
+        }
+
+        foreach (var source in sources)
+        {
+            if (!await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM sales.checks WHERE id=@check AND firm_id=@firm AND branch_id=@branch AND status='open' AND table_id=@table)",
+                cancellationToken, ("check", source.CheckId), ("firm", firmId), ("branch", branchId), ("table", source.TableId)))
+                return new FeatureFailure("SOURCE_CHECK_NOT_OPEN", 409, "Kaynak masanın açık adisyonu bulunamadı.");
+
+            await ExecuteAsync(connection, transaction, """
+                WITH moved AS (
+                    UPDATE sales.orders SET check_id=@target, version=version+1
+                    WHERE check_id=@source AND firm_id=@firm AND branch_id=@branch
+                    RETURNING id,firm_id,branch_id,version
+                )
+                INSERT INTO sales.order_audit (order_id,firm_id,branch_id,actor,action,version,occurred_at)
+                SELECT id,firm_id,branch_id,@actor,'check_merged',version,@at FROM moved
+                """, cancellationToken, ("target", targetCheckId), ("source", source.CheckId),
+                ("firm", firmId), ("branch", branchId), ("actor", actor), ("at", now));
+
+            await ExecuteAsync(connection, transaction, """
+                UPDATE sales.checks SET status='merged', table_id=NULL, waiter_id=NULL,
+                    merged_into_check_id=@target, version=version+1
+                WHERE id=@source AND firm_id=@firm AND branch_id=@branch AND status='open'
+                """, cancellationToken, ("target", targetCheckId), ("source", source.CheckId),
+                ("firm", firmId), ("branch", branchId));
+            await ExecuteAsync(connection, transaction, """
+                INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+                SELECT id,firm_id,branch_id,@actor,'merged_into',version,@at FROM sales.checks
+                WHERE id=@source AND firm_id=@firm AND branch_id=@branch
+                """, cancellationToken, ("source", source.CheckId), ("firm", firmId),
+                ("branch", branchId), ("actor", actor), ("at", now));
+        }
+
+        await ExecuteAsync(connection, transaction, """
+            UPDATE sales.checks SET version=version+1
+            WHERE id=@target AND firm_id=@firm AND branch_id=@branch AND status='open'
+            """, cancellationToken, ("target", targetCheckId), ("firm", firmId), ("branch", branchId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+            SELECT id,firm_id,branch_id,@actor,'merge_received',version,@at FROM sales.checks
+            WHERE id=@target AND firm_id=@firm AND branch_id=@branch
+            """, cancellationToken, ("target", targetCheckId), ("firm", firmId),
+            ("branch", branchId), ("actor", actor), ("at", now));
+        return null;
+    }
+
     public async Task<SalesOrderResult> CreateAsync(
         string firmId, string branchId, CreatePosOrder command, string actor,
         CancellationToken cancellationToken, Guid? requestedCheckId = null,
@@ -278,6 +351,17 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         command.CommandText = sql;
         foreach (var (name, value) in parameters) AddParameter(command, name, value);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task LockRowsAsync(DbConnection connection, DbTransaction transaction, string sql,
+        CancellationToken cancellationToken, params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters) AddParameter(command, name, value);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) { }
     }
 
     private static void AddParameter(DbCommand command, string name, object? value)

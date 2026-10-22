@@ -1,7 +1,7 @@
 # Ortak Adisyon Çekirdeği
 
 > **Durum:** Uygulanmış Çekirdek Sözleşme
-> **Son Güncelleme:** 21 Ekim 2026
+> **Son Güncelleme:** 22 Ekim 2026
 > **Sorumlu:** Satış & Servis Mimarisi
 
 > **Dokümantasyon Hiyerarşisi:**
@@ -14,21 +14,21 @@
 
 > [!IMPORTANT]
 > ### ⚠️ Adisyon Yaşam Döngüsü Gerçeklik Durumu
-> `sales.checks` veri modeli ve sipariş bağları şu an kodda uygulanmış durumdadır; ancak pratikte adisyonlar **ağırlıklı olarak `open` (açık)** durumunda kalmaktadır. **`open` dışındaki durumlar henüz çalışmamaktadır.**
+> `sales.checks` veri modeli ve sipariş bağları uygulanmıştır. Adisyonlar ağırlıklı olarak `open` kalır; `merged` yalnız birleştirme kaynak adisyonlarının tarihçesini belirtir. Ödeme sonrası `paid`/`closed` akışı henüz çalışmamaktadır.
 >
 > * **Adisyon oluşturma:** uygulanmış
 > * **Birden fazla sipariş bağlama:** uygulanmış
 > * **Masa/garson/müşteri ilişkileri:** kısmen uygulanmış
+> * **Masa taşıma ve adisyon birleştirme:** uygulanmış (açık ve ödeme girişimi olmayan adisyonlarla sınırlı)
 > * **Adisyon kapatma:** uygulanmamış
 > * **İptal/iade:** uygulanmamış
-> * **Masa taşıma/birleştirme:** uygulanmamış
 > * **Gerçek ödeme:** uygulanmamış
 
 Durum: `sales.checks` veri modeli ve listelenen API dilimleri uygulanmış durumdadır; bu sözleşme tam restoran POS'u, üretim güvenliği veya sağlayıcı entegrasyonu anlamına gelmez. Güncel ürün hedefi [Kasa/POS operasyon sözleşmesinde](KASA_POS_VE_OPERASYON_SOZLESMESI.md), mevcut kod sınırı [durum belgesinde](../00-devir-rehberi/DURUM_VE_YOL_HARITASI.md) tutulur. API `X-Demo-Actor` başlığıyla çalışır; bu başlık taklit edilebilir ve gerçek oturum/rol doğrulaması değildir.
 
 ## Kapsam
 
-`sales.checks` her satışın ortak adisyon kaydıdır. Bir adisyon bir veya daha fazla `sales.orders` siparişi taşır. Ürün kalemleri siparişe bağlı kalır; `sales.payment_attempts` ödeme girişimleri siparişin kaynak bağlantısını korurken adisyona da bağlanır. Firma ve şube kapsamı her okumada ve yazmada doğrulanır.
+`sales.checks` her satışın ortak adisyon kaydıdır. Bir adisyon bir veya daha fazla `sales.orders` siparişi taşır. Ürün kalemleri siparişe bağlı kalır; `sales.payment_attempts` ödeme girişimleri siparişin kaynak bağlantısını korurken adisyona da bağlanır. Birleştirilen kaynak adisyon `status='merged'` ve `merged_into_check_id` ile korunur; siparişleri hedef adisyona taşınır. Firma ve şube kapsamı her okumada ve yazmada doğrulanır.
 
 Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis için üçü de boş olabilir. İlk sürümde adisyon, sipariş ve ödeme simülasyonu kasa, cari veya muhasebe hareketi üretmez.
 
@@ -39,6 +39,7 @@ Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis i�
 - `cari.management`, `customer_id` doğrulamasının sahibidir. Kimlik yalnız aynı firma/şubedeki aktif `customer` tipli cari kaydıysa kabul edilir. Müşteri alanı boşken bu capability gerekmez.
 - `staff.records`, personel kartı ve servis personeli bölüm bilgisinin sahibidir. `service.waiters`, personeli adisyona garson olarak atamanın sahibidir. `waiter_id` verilirse iki capability de açık olmalı; personel aynı şubede aktif ve `service` bölümünde olmalıdır.
 - `branches.tables`, masa kartı ve masa atamasının sahibidir. Bu kapı kapalıyken `table_id` içeren yeni işlem reddedilir; null masa ile self servis çalışır.
+- Masa taşıma ve birleştirme servis endpoint'leri `branches.tables` ile `sales.checks` yeteneklerini birlikte gerektirir. Birleştirme, ödeme girişimi olmayan açık adisyonlarla sınırlıdır.
 - `payments.simulator`, yeni simüle ödeme girişimini yönetir. Check uçlarında ödeme başlatmak için ayrıca `sales.checks` açık olmalıdır. Başlamış bekleyen/belirsiz girişim mevcut sonuçlandırma kurallarıyla tamamlanabilir.
 
 ## Masa bağının anlamı
@@ -53,6 +54,8 @@ Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis i�
 - `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}`: adisyon, sipariş/kalemler, toplanmış TRY tutarları ve ödeme girişimlerini döndürür.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts`: gövdedeki `orderId` adisyana bağlı olmalı; ödeme girişimi mevcut simülatör durum makinesini kullanır.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts/{attemptId}/resolve`: adisyana ait bekleyen/belirsiz girişimi mevcut simülatör kurallarıyla sonuçlandırır.
+- `POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{sourceTableId}/transfer`: `requestId`, `targetTableId` ve `expectedVersion` ile mevcut açık adisyonu boş hedef masaya taşır.
+- `POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{targetTableId}/merge`: `requestId`, `sourceTableIds` ve kaynak/hedef assignment sürümlerini içeren `expectedVersions` ile kaynak siparişleri hedef masanın mevcut açık adisyonına taşır. Kaynak adisyonlar `merged` durumunda, hedef adisyon kimliğiyle geçmişte tutulur. Herhangi bir kaynak veya hedef adisyonda ödeme girişimi varsa işlem reddedilir.
 
 Yeni yazılarda istek kimliği idempotenttir. Aynı kimlik ve aynı içerik mevcut kaydı döndürür; başka içerikle tekrar kullanım `409` ile reddedilir. Sipariş ve ödeme kimlikleri de kendi mevcut idempotency kurallarını korur.
 
@@ -75,5 +78,7 @@ Mevcut satırlar veya kapsam eşleşmeleri eksikse migration hata vererek durmal
 - Farklı firma/şube müşterisi, masası, garsonu veya adisyonu ile yazmayı reddetme.
 - Açık assignment ve `checks.table_id` eşleşmesini doğrulama; assignment kapanınca geçerli masa bağının temizlenmesini, geçmiş atamanın korunmasını doğrulama.
 - Aynı adisyana birden fazla sipariş ekleyip toplam ve ödeme özetini doğrulama.
+- Açık adisyonu boş masaya taşıma; dolu hedefi ve eski sürümü reddetme; aynı `requestId` tekrarını idempotent yanıtlama.
+- Ödemesiz kaynak adisyonları hedef açık adisyona birleştirme; kaynak adisyonun `merged_into_check_id` bağını, sipariş geçmişini ve assignment/audit kayıtlarını koruma; ödeme denemesi olan birleştirmeyi reddetme.
 - Backfill sonrası sipariş, ödeme, audit ve assignment satırlarının kimlik ve sayılarının korunduğunu doğrulama.
 - Simüle ödemenin yalnız sales verisi üretmesi; kasa, cari veya muhasebe hareketi üretmemesi.

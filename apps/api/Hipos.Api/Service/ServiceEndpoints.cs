@@ -12,6 +12,9 @@ public sealed record CreateServiceEmployee(Guid RequestId, string Name, string D
 public sealed record UpdateServiceEmployee(int ExpectedVersion, string Name, string Department, string JobTitle, string? Phone, bool IsActive);
 public sealed record AssignServiceOrder(Guid RequestId, string TableId, Guid OrderId, string? WaiterId);
 public sealed record CloseServiceAssignment(int ExpectedVersion);
+public sealed record TransferServiceTable(Guid RequestId, string TargetTableId, int ExpectedVersion);
+public sealed record MergeServiceTables(Guid RequestId, IReadOnlyList<string> SourceTableIds,
+    IReadOnlyDictionary<string, int> ExpectedVersions);
 public sealed record ServiceLineView(string ProductId, string ProductName, int Quantity, long UnitPriceMinor, long LineTotalMinor);
 public sealed record ServiceAssignmentView(string Id, string OrderId, string? WaiterId, string? WaiterName,
     DateTimeOffset OpenedAt, DateTimeOffset OrderCreatedAt, string OrderStatus, string PaymentStatus,
@@ -45,16 +48,208 @@ public static class ServiceEndpoints
             var waiterIds = assignments.Where(row => row.WaiterId is not null).Select(row => row.WaiterId!).Distinct().ToArray();
             var waiters = await db.Waiters.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && waiterIds.Contains(row.Id))
                 .ToDictionaryAsync(row => row.Id, context.RequestAborted);
-            var orderIds = assignments.Select(row => row.OrderId).ToArray();
+            var checkIds = assignments.Select(row => row.CheckId).Distinct().ToArray();
             var orders = await sales.Orders.AsNoTracking().Include(row => row.Lines)
-                .Where(row => row.FirmId == firmId && row.BranchId == branchId && orderIds.Contains(row.Id))
-                .ToDictionaryAsync(row => row.Id, context.RequestAborted);
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.CheckId))
+                .ToListAsync(context.RequestAborted);
+            var ordersByCheck = orders.GroupBy(row => row.CheckId)
+                .ToDictionary(group => group.Key, group => group.ToArray());
             var byTable = assignments.ToDictionary(row => row.TableId);
             var items = tables.Select(table => new ServiceTableView(table.Id, table.Number, table.Name, table.IsActive,
-                byTable.TryGetValue(table.Id, out var assignment) && orders.TryGetValue(assignment.OrderId, out var order)
-                    ? ToView(assignment, order, assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
+                byTable.TryGetValue(table.Id, out var assignment) && ordersByCheck.TryGetValue(assignment.CheckId, out var checkOrders)
+                    ? ToView(assignment, checkOrders, assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
                     : null)).ToArray();
             return Results.Ok(new { source = "postgres", tablesEnabled, waitersEnabled, items });
+        });
+
+        group.MapPost("/tables/{sourceTableId}/transfer", async (string firmId, string branchId,
+            string sourceTableId, TransferServiceTable command, HttpContext context,
+            ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.RequestId == Guid.Empty || command.ExpectedVersion < 1 ||
+                string.IsNullOrWhiteSpace(sourceTableId) || sourceTableId.Length > 80 ||
+                string.IsNullOrWhiteSpace(command.TargetTableId) || command.TargetTableId.Length > 80 ||
+                sourceTableId == command.TargetTableId)
+                return Fail(context, "INVALID_TABLE_TRANSFER", 400, "İstek kimliği, masalar veya sürüm geçersiz.");
+
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "sales.checks", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var prior = await db.TableTransfers.AsNoTracking().Where(row => row.FirmId == firmId &&
+                row.BranchId == branchId && row.RequestId == command.RequestId).ToListAsync(context.RequestAborted);
+            if (prior.Count != 0)
+            {
+                if (prior.Count != 1 || prior[0].TransferType != "move" ||
+                    prior[0].FromTableId != sourceTableId || prior[0].ToTableId != command.TargetTableId)
+                    return Fail(context, "TABLE_TRANSFER_REQUEST_CONFLICT", 409, "İstek kimliği farklı masa işlemi için kullanılmış.");
+                await transaction.CommitAsync(context.RequestAborted);
+                return Results.Ok(new { requestId = command.RequestId, checkId = prior[0].CheckId,
+                    sourceTableId, targetTableId = command.TargetTableId, repeated = true });
+            }
+
+            var lockedTables = await LockTablesAsync(db, firmId, branchId,
+                [sourceTableId, command.TargetTableId], context.RequestAborted);
+            if (lockedTables is null || !lockedTables[sourceTableId].IsActive || !lockedTables[command.TargetTableId].IsActive)
+                return Fail(context, "TABLE_NOT_FOUND", 404, "Kaynak veya hedef masa bu şubede aktif değil.");
+            if (await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                row.TableId == command.TargetTableId && row.ClosedAt == null, context.RequestAborted))
+                return Fail(context, "TABLE_ALREADY_OCCUPIED", 409, "Hedef masada açık adisyon var.");
+
+            var assignment = await db.Assignments.FromSqlInterpolated($"""
+                SELECT * FROM service.assignments WHERE firm_id = {firmId} AND branch_id = {branchId}
+                    AND table_id = {sourceTableId} AND closed_at IS NULL FOR UPDATE
+                """).SingleOrDefaultAsync(context.RequestAborted);
+            if (assignment is null)
+                return Fail(context, "OPEN_ASSIGNMENT_NOT_FOUND", 409, "Kaynak masada taşınabilecek açık adisyon yok.");
+            if (assignment.Version != command.ExpectedVersion)
+                return Fail(context, "VERSION_CONFLICT", 409, "Masa-adisyon bağı güncel değil; masaları yenileyin.");
+
+            var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE sales.checks SET table_id = {command.TargetTableId}, version = version + 1
+                WHERE id = {assignment.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
+                    AND status = 'open' AND table_id = {sourceTableId}
+                """, context.RequestAborted);
+            if (changed != 1)
+                return Fail(context, "CHECK_NOT_OPEN", 409, "Adisyon açık değil veya kaynak masaya bağlı değil.");
+
+            assignment.TableId = command.TargetTableId;
+            assignment.Version++;
+            db.TableTransfers.Add(new ServiceTableTransferRow
+            {
+                Id = Guid.NewGuid(), RequestId = command.RequestId, FirmId = firmId, BranchId = branchId,
+                FromTableId = sourceTableId, ToTableId = command.TargetTableId, CheckId = assignment.CheckId,
+                TransferType = "move", Actor = actor, CreatedAt = now,
+            });
+            AddAudit(db, firmId, branchId, assignment.Id.ToString(), "table_transferred", actor, now);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO sales.check_audit (check_id,firm_id,branch_id,actor,action,version,occurred_at)
+                SELECT id,firm_id,branch_id,{actor},'table_transferred',version,{now}
+                FROM sales.checks WHERE id = {assignment.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
+                """, context.RequestAborted);
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "TABLE_TRANSFER_CONFLICT", 409, "Masa taşıma başka bir işlemle çakıştı; masaları yenileyin.");
+            }
+            return Results.Ok(new { requestId = command.RequestId, checkId = assignment.CheckId,
+                sourceTableId, targetTableId = command.TargetTableId, version = assignment.Version });
+        });
+
+        group.MapPost("/tables/{targetTableId}/merge", async (string firmId, string branchId,
+            string targetTableId, MergeServiceTables command, HttpContext context,
+            ServiceDbContext db, SalesDbContext salesDb, SalesOrders sales, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            var sourceIds = command.SourceTableIds?.ToArray() ?? [];
+            if (command.RequestId == Guid.Empty || string.IsNullOrWhiteSpace(targetTableId) || targetTableId.Length > 80 ||
+                sourceIds.Length is < 1 or > 20 || sourceIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 80) ||
+                sourceIds.Contains(targetTableId, StringComparer.Ordinal) || sourceIds.Distinct(StringComparer.Ordinal).Count() != sourceIds.Length ||
+                command.ExpectedVersions is null)
+                return Fail(context, "INVALID_TABLE_MERGE", 400, "İstek kimliği, hedef masa, kaynak masalar veya sürümler geçersiz.");
+            var expectedIds = sourceIds.Append(targetTableId).ToHashSet(StringComparer.Ordinal);
+            if (command.ExpectedVersions.Count != expectedIds.Count || command.ExpectedVersions.Any(pair =>
+                !expectedIds.Contains(pair.Key) || pair.Value < 1))
+                return Fail(context, "INVALID_TABLE_MERGE", 400, "Her kaynak ve hedef masa için güncel atama sürümü gereklidir.");
+
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "sales.checks", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var prior = await db.TableTransfers.AsNoTracking().Where(row => row.FirmId == firmId &&
+                row.BranchId == branchId && row.RequestId == command.RequestId).ToListAsync(context.RequestAborted);
+            if (prior.Count != 0)
+            {
+                var sameSources = prior.Count == sourceIds.Length && prior.All(row => row.TransferType == "merge" &&
+                    row.ToTableId == targetTableId) && prior.Select(row => row.FromTableId).ToHashSet(StringComparer.Ordinal)
+                    .SetEquals(sourceIds);
+                if (!sameSources)
+                    return Fail(context, "TABLE_MERGE_REQUEST_CONFLICT", 409, "İstek kimliği farklı masa birleştirmesi için kullanılmış.");
+                var targetCheckId = await salesDb.Checks.AsNoTracking()
+                    .Where(row => row.FirmId == firmId && row.BranchId == branchId &&
+                        row.Id == prior[0].CheckId && row.Status == "merged")
+                    .Select(row => row.MergedIntoCheckId)
+                    .SingleOrDefaultAsync(context.RequestAborted);
+                if (targetCheckId is null)
+                    return Fail(context, "TABLE_MERGE_HISTORY_INCOMPLETE", 409, "Birleştirme geçmişinde hedef adisyon bulunamadı.");
+                await transaction.CommitAsync(context.RequestAborted);
+                return Results.Ok(new { requestId = command.RequestId, targetTableId,
+                    checkId = targetCheckId, mergedTableIds = sourceIds, repeated = true });
+            }
+
+            var lockedTables = await LockTablesAsync(db, firmId, branchId,
+                sourceIds.Append(targetTableId).ToArray(), context.RequestAborted);
+            if (lockedTables is null || lockedTables.Values.Any(table => !table.IsActive))
+                return Fail(context, "TABLE_NOT_FOUND", 404, "Birleştirilecek masalardan biri bu şubede aktif değil.");
+
+            var assignments = new Dictionary<string, ServiceAssignmentRow>(StringComparer.Ordinal);
+            foreach (var tableId in expectedIds.OrderBy(id => id, StringComparer.Ordinal))
+            {
+                var assignment = await db.Assignments.FromSqlInterpolated($"""
+                    SELECT * FROM service.assignments WHERE firm_id = {firmId} AND branch_id = {branchId}
+                        AND table_id = {tableId} AND closed_at IS NULL FOR UPDATE
+                    """).SingleOrDefaultAsync(context.RequestAborted);
+                if (assignment is null)
+                    return Fail(context, "OPEN_ASSIGNMENT_NOT_FOUND", 409, "Hedef ve kaynak masaların her birinde açık adisyon olmalı.");
+                if (assignment.Version != command.ExpectedVersions[tableId])
+                    return Fail(context, "VERSION_CONFLICT", 409, "Masa-adisyon bağlarından biri güncel değil; masaları yenileyin.");
+                assignments.Add(tableId, assignment);
+            }
+
+            var targetAssignment = assignments[targetTableId];
+            var sourceCheckIds = sourceIds.Select(id => assignments[id].CheckId).ToArray();
+            if (sourceCheckIds.Contains(targetAssignment.CheckId) || sourceCheckIds.Distinct().Count() != sourceCheckIds.Length)
+                return Fail(context, "CHECK_ASSIGNMENT_CONFLICT", 409, "Masaların açık adisyon bağları birleştirmeye uygun değil.");
+            var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var mergeFailure = await sales.MergeChecksAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, targetAssignment.CheckId, targetTableId,
+                sourceIds.Select(id => (assignments[id].CheckId, id)).ToArray(), actor, now, context.RequestAborted);
+            if (mergeFailure is not null)
+                return Fail(context, mergeFailure.Code, mergeFailure.Status, mergeFailure.Message);
+
+            foreach (var sourceId in sourceIds)
+            {
+                var assignment = assignments[sourceId];
+                assignment.ClosedAt = now;
+                assignment.ClosedBy = actor;
+                assignment.Version++;
+                db.TableTransfers.Add(new ServiceTableTransferRow
+                {
+                    Id = Guid.NewGuid(), RequestId = command.RequestId, FirmId = firmId, BranchId = branchId,
+                    FromTableId = sourceId, ToTableId = targetTableId, CheckId = assignment.CheckId,
+                    TransferType = "merge", Actor = actor, CreatedAt = now,
+                });
+                AddAudit(db, firmId, branchId, assignment.Id.ToString(), "assignment_merged", actor, now);
+            }
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "TABLE_MERGE_CONFLICT", 409, "Masa birleştirme başka bir işlemle çakıştı; masaları yenileyin.");
+            }
+            return Results.Ok(new { requestId = command.RequestId, targetTableId,
+                checkId = targetAssignment.CheckId, mergedTableIds = sourceIds });
         });
 
         group.MapGet("/waiters", async (string firmId, string branchId, HttpContext context, ServiceDbContext db) =>
@@ -377,11 +572,32 @@ public static class ServiceEndpoints
         });
     }
 
-    private static ServiceAssignmentView ToView(ServiceAssignmentRow assignment, SalesOrderRow order, string? waiterName) =>
-        new(assignment.Id.ToString(), order.Id.ToString(), assignment.WaiterId, waiterName,
-            assignment.OpenedAt, order.CreatedAt, order.Status, order.PaymentStatus, order.TotalMinor, assignment.Version,
-            order.Lines.OrderBy(line => line.Id).Select(line => new ServiceLineView(line.ProductId.ToString(),
-                line.ProductName, line.Quantity, line.UnitPriceMinor, line.LineTotalMinor)).ToArray());
+    private static ServiceAssignmentView ToView(ServiceAssignmentRow assignment, IReadOnlyList<SalesOrderRow> orders, string? waiterName)
+    {
+        var primaryOrder = orders.FirstOrDefault(order => order.Id == assignment.OrderId) ?? orders[0];
+        return new ServiceAssignmentView(assignment.Id.ToString(), assignment.OrderId.ToString(), assignment.WaiterId, waiterName,
+            assignment.OpenedAt, primaryOrder.CreatedAt, primaryOrder.Status, primaryOrder.PaymentStatus,
+            orders.Sum(order => order.TotalMinor), assignment.Version,
+            orders.SelectMany(order => order.Lines).OrderBy(line => line.Id)
+                .Select(line => new ServiceLineView(line.ProductId.ToString(), line.ProductName, line.Quantity,
+                    line.UnitPriceMinor, line.LineTotalMinor)).ToArray());
+    }
+
+    private static async Task<Dictionary<string, ServiceTableRow>?> LockTablesAsync(ServiceDbContext db,
+        string firmId, string branchId, IReadOnlyCollection<string> tableIds, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, ServiceTableRow>(StringComparer.Ordinal);
+        foreach (var tableId in tableIds.Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal))
+        {
+            var table = await db.Tables.FromSqlInterpolated($"""
+                SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId}
+                    AND branch_id = {branchId} FOR UPDATE
+                """).SingleOrDefaultAsync(cancellationToken);
+            if (table is null) return null;
+            result.Add(tableId, table);
+        }
+        return result;
+    }
 
     private static ServiceEmployeeView ToView(ServiceWaiterRow employee) => new(employee.Id, employee.Name, employee.Department,
         employee.JobTitle, employee.Phone, employee.IsActive, employee.Version, employee.CreatedAt, employee.UpdatedAt);

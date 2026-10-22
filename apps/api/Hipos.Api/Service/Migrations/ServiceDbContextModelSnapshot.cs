@@ -239,6 +239,77 @@ namespace Hipos.Api.Service.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Service.ServiceTableTransferRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("actor");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<string>("FromTableId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("from_table_id");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("ToTableId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("to_table_id");
+
+                    b.Property<string>("TransferType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("transfer_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckId");
+
+                    b.HasIndex("FromTableId");
+
+                    b.HasIndex("ToTableId");
+
+                    b.HasIndex("FirmId", "BranchId", "CreatedAt");
+
+                    b.HasIndex("FirmId", "BranchId", "RequestId", "FromTableId")
+                        .IsUnique();
+
+                    b.ToTable("table_transfers", "service");
+                });
+
             modelBuilder.Entity("Hipos.Api.Service.ServiceWaiterRow", b =>
                 {
                     b.Property<string>("Id")
@@ -332,6 +403,27 @@ namespace Hipos.Api.Service.Migrations
                         .WithMany()
                         .HasForeignKey("WaiterId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Service.ServiceTableTransferRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Service.ServiceSalesCheckRef", null)
+                        .WithMany()
+                        .HasForeignKey("CheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Service.ServiceTableRow", null)
+                        .WithMany()
+                        .HasForeignKey("FromTableId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Service.ServiceTableRow", null)
+                        .WithMany()
+                        .HasForeignKey("ToTableId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

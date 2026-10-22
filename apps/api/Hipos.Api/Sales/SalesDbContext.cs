@@ -49,6 +49,7 @@ public sealed class SalesCheckRow
     public string? CustomerId { get; set; }
     public string? TableId { get; set; }
     public string? WaiterId { get; set; }
+    public Guid? MergedIntoCheckId { get; set; }
     public string Currency { get; set; } = "TRY";
     public DateTimeOffset CreatedAt { get; set; }
     public int Version { get; set; } = 1;
@@ -124,7 +125,8 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.ToTable("checks", table =>
             {
                 table.HasCheckConstraint("ck_check_version_positive", "version > 0");
-                table.HasCheckConstraint("ck_check_status", "status IN ('open')");
+                table.HasCheckConstraint("ck_check_status", "status IN ('open', 'merged')");
+                table.HasCheckConstraint("ck_check_merged_target", "(status = 'merged' AND merged_into_check_id IS NOT NULL) OR (status = 'open' AND merged_into_check_id IS NULL)");
                 table.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
             });
             entity.HasKey(row => row.Id);
@@ -135,11 +137,13 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.CustomerId).HasColumnName("customer_id").HasMaxLength(80);
             entity.Property(row => row.TableId).HasColumnName("table_id").HasMaxLength(80);
             entity.Property(row => row.WaiterId).HasColumnName("waiter_id").HasMaxLength(80);
+            entity.Property(row => row.MergedIntoCheckId).HasColumnName("merged_into_check_id");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CreatedAt });
             entity.HasAlternateKey(row => new { row.Id, row.FirmId, row.BranchId });
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.MergedIntoCheckId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<SalesOrderRow>(entity =>
         {

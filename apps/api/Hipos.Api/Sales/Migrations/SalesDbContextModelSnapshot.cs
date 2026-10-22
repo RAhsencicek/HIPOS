@@ -267,6 +267,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("firm_id");
 
+                    b.Property<Guid?>("MergedIntoCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("merged_into_check_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -292,13 +296,17 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.HasAlternateKey("Id", "FirmId", "BranchId");
 
+                    b.HasIndex("MergedIntoCheckId");
+
                     b.HasIndex("FirmId", "BranchId", "CreatedAt");
 
                     b.ToTable("checks", "sales", t =>
                         {
                             t.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
 
-                            t.HasCheckConstraint("ck_check_status", "status IN ('open')");
+                            t.HasCheckConstraint("ck_check_merged_target", "(status = 'merged' AND merged_into_check_id IS NOT NULL) OR (status = 'open' AND merged_into_check_id IS NULL)");
+
+                            t.HasCheckConstraint("ck_check_status", "status IN ('open', 'merged')");
 
                             t.HasCheckConstraint("ck_check_version_positive", "version > 0");
                         });
@@ -514,6 +522,14 @@ namespace Hipos.Api.Sales.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("MergedIntoCheckId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderLineRow", b =>

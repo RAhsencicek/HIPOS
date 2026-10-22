@@ -13,7 +13,7 @@ public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long Amount
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
     string Method, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId, string Status,
-    string? CustomerId, string? TableId, string? WaiterId, string Currency, long TotalMinor,
+    string? CustomerId, string? TableId, string? WaiterId, string? MergedIntoCheckId, string Currency, long TotalMinor,
     long PaidMinor, long RemainingMinor, string PaymentStatus, DateTimeOffset CreatedAt, int Version,
     IReadOnlyList<SalesOrderDetail> Orders, IReadOnlyList<CheckPaymentView> Payments);
 
@@ -151,7 +151,7 @@ public static class SalesCheckEndpoints
             attempts.Any(row => row.Status == "pending") ? "pending" :
             paid >= total && total > 0 ? "paid" : paid > 0 ? "partially_paid" : "unpaid";
         return new SalesCheckDetail(check.Id.ToString(), check.FirmId, check.BranchId, check.Status, check.CustomerId,
-            check.TableId, check.WaiterId, check.Currency, total, paid, Math.Max(0, total - paid), paymentStatus,
+            check.TableId, check.WaiterId, check.MergedIntoCheckId?.ToString(), check.Currency, total, paid, Math.Max(0, total - paid), paymentStatus,
             check.CreatedAt, check.Version, orders.Select(SalesOrders.ToDetail).ToArray(),
             attempts.Select(row => new CheckPaymentView(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor,
                 row.Currency, row.Method, row.Status, row.Version, row.CreatedAt, row.UpdatedAt)).ToArray());

@@ -71,11 +71,11 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - Garson ekranından (`/waiter`) masaya sipariş girildiğinde ortak adisyon oluşturulmakta ve kalemler API'ye yazılmaktadır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
   - Adisyon kapatma (`closed`) akışı yoktur; ödeme yapıldığında masa boşalmamaktadır.
-  - Masa taşıma (`Masa 4 -> Masa 9`) ve masa birleştirme (`Masa 1 + Masa 2`) yoktur.
+  - Masa taşıma ve birleştirme API'leri var; arayüz akışı henüz yoktur. Birleştirme açık ve ödeme girişimi olmayan adisyonlarla sınırlıdır.
   - Kalem iptali, ikram, indirim ve müdür onay şifresi (`check_voids`) yoktur.
   - Ürün seçenekleri ve varyasyonları (modifiers) sipariş kalemine eklenememektedir.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
-  1. Masa taşıma ve birleştirme endpoint'lerinin ve UI akışının yazılması.
+  1. Masa taşıma/birleştirme UI akışı ve API kabul testlerinin tamamlanması.
   2. Adisyon bölme (hesabı ikiye bölme) yeteneği.
   3. Adisyon ödendiği anda masanın durumunun otomatik `empty` (yeşil) durumuna geçmesi.
 

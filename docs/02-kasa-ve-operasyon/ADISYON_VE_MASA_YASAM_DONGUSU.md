@@ -9,7 +9,7 @@
 
 Şu anki HIPOS sisteminde [`sales.checks`](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) tablosunda bir adisyon açılabilmekte ve içerisine sipariş eklenebilmektedir. Ancak:
 * Adisyon kapatma (`closed`) iş akışı kodlanmamıştır. Masadaki hesap ödendikten sonra masa boşaltılamamaktadır.
-* **Masa Taşıma, Birleştirme ve Adisyon Bölme** endpoint'leri bulunmamaktadır.
+* Masa taşıma ve ödeme girişimi olmayan açık adisyonları birleştirme API'leri uygulanmıştır. Adisyon bölme endpoint'i bulunmamaktadır.
 * Masaya yanlışlıkla girilen bir ürünün **iptali**, **müşteriye ikram edilmesi** veya **masaya indirim yapılması** mekanizması yoktur.
 * Sipariş kalemlerinde "Az pişmiş", "Buzsuz", "Acı soslu" gibi **ürün seçenekleri ve servis notları (modifiers)** saklanamamaktadır.
 
@@ -74,11 +74,11 @@ CREATE TABLE sales.check_voids (
 ## 4. Adım Adım Uygulama Yol Haritası
 
 ### Adım 1: Masa Operasyonları API'lerinin Yazılması (`apps/api/Hipos.Api/Service`)
-1. **Masa Taşıma (`POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{sourceTableId}/transfer`):**
+1. **Masa Taşıma (`POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{sourceTableId}/transfer`) — API uygulandı:**
    * Kaynak masadaki aktif `check_id` hedef masaya bağlanır.
    * Hedef masada açık hesap varsa çakışma hatası (`409 TABLE_ALREADY_OCCUPIED`) döner.
    * `service.tables` üzerinde kaynak masa `idle`, hedef masa `occupied` yapılır.
-2. **Masa Birleştirme (`POST /.../service/tables/{targetTableId}/merge`):**
+2. **Masa Birleştirme (`POST /.../service/tables/{targetTableId}/merge`) — API uygulandı:**
    * Gövde: `{ sourceTableIds: [uuid, uuid] }`.
    * Kaynak masalardaki siparişler hedef masanın adisyonuna transfer edilir, kaynak masalar kapatılıp boşaltılır.
 3. **Adisyon Bölme (`POST /.../sales/checks/{checkId}/split`):**

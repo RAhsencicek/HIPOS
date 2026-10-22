@@ -68,6 +68,20 @@ public sealed class ServiceAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class ServiceTableTransferRow
+{
+    public Guid Id { get; set; }
+    public Guid RequestId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string FromTableId { get; set; } = "";
+    public string ToTableId { get; set; } = "";
+    public Guid CheckId { get; set; }
+    public string TransferType { get; set; } = "move";
+    public string Actor { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options) : DbContext(options)
 {
     public DbSet<ServiceTableRow> Tables => Set<ServiceTableRow>();
@@ -75,6 +89,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
     public DbSet<ServiceWaiterRow> Waiters => Set<ServiceWaiterRow>(); // Geriye dönük servis API'si uyumluluğu.
     public DbSet<ServiceAssignmentRow> Assignments => Set<ServiceAssignmentRow>();
     public DbSet<ServiceAuditRow> Audit => Set<ServiceAuditRow>();
+    public DbSet<ServiceTableTransferRow> TableTransfers => Set<ServiceTableTransferRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -158,6 +173,26 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(80);
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.EntityId, row.OccurredAt });
+        });
+        modelBuilder.Entity<ServiceTableTransferRow>(entity =>
+        {
+            entity.ToTable("table_transfers");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.FromTableId).HasColumnName("from_table_id").HasMaxLength(80);
+            entity.Property(row => row.ToTableId).HasColumnName("to_table_id").HasMaxLength(80);
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
+            entity.Property(row => row.TransferType).HasColumnName("transfer_type").HasMaxLength(20);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(80);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<ServiceTableRow>().WithMany().HasForeignKey(row => row.FromTableId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ServiceTableRow>().WithMany().HasForeignKey(row => row.ToTableId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ServiceSalesCheckRef>().WithMany().HasForeignKey(row => row.CheckId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.RequestId, row.FromTableId }).IsUnique();
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CreatedAt });
         });
     }
 }

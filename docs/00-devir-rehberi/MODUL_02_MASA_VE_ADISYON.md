@@ -24,7 +24,7 @@
   - Garson ekranından (`/waiter`) masaya sipariş girilmesi ve ortak adisyon açılması
   - Adisyona birden fazla sipariş eklenmesi ve API'ye kaydedilmesi
 * **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
-  - Masa taşıma (`Masa 4 -> Masa 9`) ve birleştirme (`Masa 1 + Masa 2`)
+  - Masa planı arayüzünde taşıma ve birleştirme modalı (API tamamlandı)
   - Adisyon bölme (aynı masada iki ayrı adisyon fişi açma)
   - Kalem iptali, ikram, indirim ve yetki kodu kontrolü (`check_voids`)
   - Kasa hesabı kapattığında masanın renginin otomatik boşa (yeşile) dönmesi
@@ -121,6 +121,7 @@ graph TD
 1. **1. Adım: Masa Taşıma ve Birleştirme Endpoint'leri:**
    * `POST /api/v1/firms/{f}/branches/{b}/service/tables/{id}/transfer`
    * `POST /api/v1/firms/{f}/branches/{b}/service/tables/{id}/merge`
+   * Transfer açık adisyonu ve siparişlerini hedef boş masaya bağlar. Birleştirme kaynak siparişleri hedef masanın mevcut açık adisyonına ekler; ödeme girişimi bulunmayan kaynak adisyonları `merged` durumunda hedef adisyon kimliğiyle saklar. Her iki işlem de idempotent `requestId`, sürüm kontrolü, transaction ve audit kullanır.
 2. **2. Adım: Adisyon Bölme Altyapısı:**
    * Bir adisyondaki kalemlerin yeni bir `check_id`'ye transfer edilmesi.
 3. **3. Adım: Kalem İptali ve İndirim (`sales.check_voids`):**
