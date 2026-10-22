@@ -4809,8 +4809,22 @@ td.strong {
   }
 
   .topbar {
-    padding: 0 14px;
+    height: auto;
+    min-height: 65px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
     gap: 8px;
+  }
+
+  .topbar-scope-selector {
+    flex: 1 1 calc(100% - 42px);
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .topbar-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
   }
 
   .context-line {

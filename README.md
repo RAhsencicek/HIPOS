@@ -1,201 +1,106 @@
 # HIPOS — Restoran Yönetim ve Operasyon Platformu
 
-HIPOS; yönetim paneli, operasyon API'si, test POS/garson/mutfak yüzleri ve modül iş alanlarını aynı monorepoda barındırır. `apps/pos` içindeki sipariş/garson/mutfak akışları ve ödeme simülatörü bugün hâlâ geliştirme amaçlıdır; gerçek tahsilat, auth, tam adisyon yaşam döngüsü ve üretim cihaz bağlantısı tamamlanmamıştır. Gerçek restoran hedefi ve teslim farkı [Devir Rehberi](DEVIR_REHBERI.md) içindedir.
+> **Durum:** Geliştirme Prototipi (MVP) · **Son Güncelleme:** 21 Ekim 2026
+> **Ana Devir Merkezi:** [docs/00-devir-rehberi/DEVIR_REHBERI.md](docs/00-devir-rehberi/DEVIR_REHBERI.md)
+> **Dokümantasyon Dizin Haritası:** [docs/README.md](docs/README.md)
 
-## Çalıştırma
+---
 
-### macOS'ta çift tıklayarak başlatma
+> [!IMPORTANT]
+> ### ⚠️ BUGÜNKÜ GERÇEK DURUM (Gerçeklik Beyanı)
+> **Bu repo henüz üretime hazır tam bir restoran ERP/POS sistemi DEĞİLDİR.**
+>
+> * **Mevcut Çalışan Kalıcı Dilimler:** Katalog ve Menü (`catalog`), Cari Hesaplar (`cari`), Stok/Envanter/Reçete (`inventory`), Manuel Kasa Vardiyası ve Defteri (`cash`), Giderler (`finance`), Ortak Adisyon Çekirdeği (`sales` / `service`), Geliştirme Test POS'u (`apps/pos`) ve Simüle Ödeme.
+> * **Eksik Olan Üretim Bileşenleri:** Gerçek kimlik doğrulama / Auth (şu an sahte `X-Demo-Actor` var), gerçek banka POS entegrasyonu, Beko/Token ÖKC donanım sertifikasyonu, internet koptuğunda çift taraflı çalışan yerel LAN senkronizasyonu, satışın kasaya otomatik çift deftersiz akışı ve operasyonel kabul testleri.
 
-Repo klasöründeki [`HIPOS-Baslat.command`](HIPOS-Baslat.command) dosyasına çift tıklayın. Script Docker Desktop'ı gerekirse açar; yerel PostgreSQL'i başlatır, **sekiz** veritabanı migration context'ini uygular, demo seed'lerini (eksik kayıtları ekleyecek şekilde) çalıştırır ve PostgreSQL API'si, yönetim paneli ve geliştirme operasyon ekranlarını açar. Yönetim paneli otomatik tarayıcıda açılır. Durdurmak için başlatma Terminal penceresinde `Ctrl+C` kullanabilir veya [`HIPOS-Durdur.command`](HIPOS-Durdur.command) dosyasına çift tıklayabilirsiniz. Durdurma scripti HIPOS süreçlerini doğrulayarak kapatır ve varsayılan olarak yalnız HIPOS PostgreSQL konteynerini de durdurur; **veritabanı volume'unu silmez**. Önce neyi kapatacağını görmek için `./HIPOS-Durdur.command --dry-run`; veritabanı açık kalsın istiyorsanız `./HIPOS-Durdur.command --keep-db` çalıştırın.
+---
 
-Gereksinimler: Docker Desktop, Node.js 22+, .NET 10 SDK ve `psql`. İlk çalıştırmada `node_modules` yoksa script `npm install` yapar. Seed komutları yalnız `127.0.0.1:5433/hipos_features` yerel geliştirme veritabanını kabul eder; kayıtları silmez veya mevcut demo kayıtlarını güncellemez. İlk açılış biraz zaman alabilir. Portlardan biri kullanımda ise script ikinci bir kopya açmak yerine durur; açık HIPOS süreçlerini kapatıp tekrar deneyin. Ayrıntılı elle çalıştırma adımları aşağıda duruyor.
+## 1. Proje Nedir?
 
-Panel ve seed'ler Mahalle Fırını/Kadıköy adlı kurgusal örnek işletme kullanır; bunlar müşteri verisi değildir. İlk üç uygulama dilimi [tarihsel plan](ILK_UC_ASAMA.md) olarak korunur. Demo verisinin ürün, cari, reçete ve stok bağlantıları [ortak dosyada](contracts/demo-single-branch.v1.json) tanımlıdır.
+HIPOS; bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waiter) ve kasa (POS) operasyonlarını tek bir işletme omurgası üzerinde birleştirmeyi hedefleyen **yeni nesil bir restoran işletim platformudur**.
 
-Backend teknolojileri, bağımlılık grafiği, şema sahipliği, modül kapatma davranışı ve gerçek/örnek/planlı sınırları için [Backend Mimarisi ve Modül Bağımlılıkları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) ana referanstır. Diğer belgeler belirli bir dilimin test rehberi veya tarihsel ürün/UI kararıdır.
+Proje monorepo mimarisindedir:
+* `apps/admin`: Yönetim paneli (React 19 + TypeScript + Vite + Tailwind CSS).
+* `apps/pos`: Kasa, Test POS, garson el terminali (`/waiter`) ve mutfak (`/kitchen`) geliştirme ekranları.
+* `apps/api`: ASP.NET Core (.NET 10) ve PostgreSQL (EF Core 10) tabanlı modüler REST API.
 
-Gerçek restoran ürünü hedefi, iki mühendise iş devri ve ilk kabul ölçütleri için [Mühendis Devir Rehberi](DEVIR_REHBERI.md) başlangıç noktasıdır. Yeni kasa/satış/masa/mutfak kapsamı [Kasa, Satış ve Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md); internet kesintisinde restoran LAN'ında çalışma ve merkezi eşitleme gereksinimi [Çevrimdışı Çalışma ve Senkronizasyon Sözleşmesi](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md) içindedir. Bu belgeler hedefi tanımlar; gerçekleşen kod durumu için backend mimarisi ve yol haritasına bakın.
+---
 
-Token/Beko ÖKC entegrasyonu için mevcut kod envanteri, sağlayıcı süreci ve 12 Ekim başvurusuyla güncel LAN hedefi arasındaki teyit maddeleri [Entegrasyon Envanteri ve Token Süreci](ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md) içindedir. Bu belgede gerçek cihaz bağlantısı veya sertifikasyon tamamlandı iddiası yoktur.
+## 2. Hızlı Başlatma (Quickstart)
 
-Alan girişlerinde **Alt ekranlar** bugün görülebilen örnekleri ve ilk aşamalarda etkinleşecek işleri, **Gelecekte neler olacak?** sonraki ürün planını gösterir. Her alt ekranın durumu [ekran durum eşlemesinden](apps/admin/src/data/featurePresentation.ts) gelir. Sol menüdeki yapı korunur; henüz etkin olmayan ve gelecek bağlantıların metni kırmızıdır. Reçete kalemleri ve stok/sayım ekranı `VITE_INVENTORY_PROVIDER=http` ile PostgreSQL API'sinden okunup yazılır; varsayılan mock sağlayıcı açıkça örnek veridir. Cari ekranı varsayılan olarak demo veridir; `VITE_CARI_PROVIDER=http` ile yerel PostgreSQL API'sine bağlanır.
-
-Demo sözleşmesini doğrulamak için `npm run demo:check` kullanın. Mevcut katalog migration'ları uygulanmış **yerel geliştirme** veritabanına örnek kategori, ürün, fiyat sürümü ve POS yayınlarını yüklemek için:
-
+### macOS Kolay Başlatma (Önerilen)
+Repo kök dizinindeki script'e çift tıklayın veya terminalden çalıştırın:
 ```bash
-HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed
+./HIPOS-Baslat.command
+```
+Bu script Docker Desktop'ı kontrol eder, PostgreSQL'i ayağa kaldırır, 8 EF Core migration context'ine (`FeatureDbContext`, `CatalogDbContext`, `SalesDbContext`, `CariDbContext`, `ServiceDbContext`, `InventoryDbContext`, `CashDbContext`, `ExpenseDbContext`) ait veritabanı migration'larını sırayla uygular, demo seed veri setlerini (`features`, `menus`, `cari`, `service`, `inventory`, `cash`, `expenses`) yükler ve Admin (`5173`), POS (`5176`), API (`5180`) servislerini başlatarak tarayıcıyı açar. `npm run dev` ile manuel başlatma da Admin için `5173` portunu kullanır.
+
+Durdurmak için:
+```bash
+./HIPOS-Durdur.command
 ```
 
-Bu komut tekrar çalıştırıldığında aynı kimliklerle ikinci kayıt oluşturmaz; var olan kayıtları değiştirmez. Cari için **ayrı migration ve seed** gerekir:
+### Manuel Başlatma (Adım Adım)
+1. **Yerel Veritabanını Başlatın:**
+   ```bash
+   docker compose up -d db
+   ```
+2. **Backend API'yi Başlatın:**
+   ```bash
+   dotnet run --project apps/api/Hipos.Api/Hipos.Api.csproj --urls http://127.0.0.1:5180
+   ```
+3. **Yönetim Panelini Başlatın:**
+   ```bash
+   npm run dev
+   # Panel: http://localhost:5173/admin
+   ```
+4. **Test POS / Terminal Ekranlarını Başlatın:**
+   ```bash
+   npm run dev:pos
+   # POS: http://localhost:5176
+   ```
+
+---
+
+## 3. Ana Test Komutları
+
+Geliştirilen her özellik aşağıdaki test kapılarından geçmelidir:
 
 ```bash
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CariDbContext
-HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:cari
-```
+# Dokümantasyon format ve git diff denetimi
+npm run docs:check
 
-Seed sekiz kurgusal cari kartı ve on beş örnek hareket ekler; tekrar çalıştırıldığında var olan kayıtları değiştirmez. Demo; müşteri alacağı, kısmi tahsilat, tedarikçi borcu ve kısmi ödeme örneklerini içerir. Yeni migration eski hareketleri `legacy_manual` olarak korur ve tarihlerini İstanbul gününe göre doldurur. Başka bilgisayarda veya Docker veritabanında bu komutları ayrıca çalıştırın. `HIPOS_DEMO_DATABASE_URL` yoksa seed durur. Cari migration'ını API çalışırken uyguladıysanız API'yi yeniden başlatın.
-
-Masa servisi için **SalesDbContext ve ServiceDbContext migration'ları** gerekir. Katalog seed'inden sonra ayrı servis seed'i 24 masa, 3 kurgusal garson kişi kartı, 8 adisyon (7 masalı, 1 self-servis) ve 7 açık masa-adisyon bağı yükler:
-
-```bash
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context ServiceDbContext
-HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:service
-```
-
-Servis seed'i tekrar çalıştırıldığında aynı kayıtları çoğaltmaz; çelişkili aynı kimlikli siparişte durur. API migration'dan sonra yeniden başlatılmalıdır. Paneli gerçek masa servisine bağlamak için `VITE_SERVICE_PROVIDER=http` kullanın. [Masa servisi test rehberi](MASA_SERVISI_TEST.md) ekran kontrolünü anlatır.
-
-Seed yalnız `HIPOS_DEMO_DATABASE_URL` ile gösterilen **bu bilgisayardaki** yerel `hipos_features` veritabanına yazılır. Değişken verilmezse komut durur. Başka bilgisayarda veya ayrı Docker ortamında aynı veriyi görmek için komutu orada da çalıştırın. Seed öncesinde katalog migration'ları uygulanmış olmalıdır. Yalnız seed çalıştırdıktan sonra API'yi yeniden başlatmak gerekmez; API ürünleri her istekte veritabanından okur. Migration'ları API çalışırken yeni uyguladıysanız API'yi yeniden başlatın; tablo hazırlığını açılışta denetler.
-
-Docker Compose veritabanında bu firmanın kayıtlarını kontrol etmek için (container adı değişebileceğinden servis adını kullanın):
-
-```bash
-docker compose exec -T db psql -U hipos -d hipos_features -c "SELECT 'products' AS alan, count(*) FROM catalog.products WHERE firm_id = '11111111-1111-4111-8111-111111111111' UNION ALL SELECT 'price_versions', count(*) FROM catalog.price_versions WHERE firm_id = '11111111-1111-4111-8111-111111111111' UNION ALL SELECT 'publications', count(*) FROM catalog.publications WHERE firm_id = '11111111-1111-4111-8111-111111111111';"
-```
-
-Boş geliştirme veritabanına ilk yüklemeden sonra her satırda `6` beklenir; aynı firmaya daha sonra eklenen ürünler toplamı artırabilir.
-
-Gereksinim: Node.js 22.12 veya üzeri ve npm (eklenen Vitest 5 testleri için).
-
-```bash
-npm install
-npm run dev
-```
-
-Panel: [http://localhost:5173/admin](http://localhost:5173/admin). Eski `/` adresi buraya yönlenir.
-
-Derleme ve tip denetimi:
-
-```bash
-npm run build
-npm run typecheck
+# Frontend birim ve entegrasyon testleri
 npm test
-npm run test:e2e
-```
 
-## Yerel .NET modül prototipi
-
-Gereksinim: [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). İki terminal kullanın:
-
-Telefonlarla yerel ağ demosu, garson ekranı ve mutfak sipariş kuyruğu için [HIPOS yerel restoran demo kılavuzuna](YARIN_DEMO_KILAVUZU.md) bakın. Garson ve mutfak ekranları `apps/pos` web uygulamasında `/waiter` ve `/kitchen` yollarındadır; gerçek Beko bağlantısı ve otomatik termal yazıcı servisi değildir.
-
-```bash
-ASPNETCORE_ENVIRONMENT=Development dotnet run --project apps/api/Hipos.Api/Hipos.Api.csproj --urls http://127.0.0.1:5180
-```
-
-```bash
-VITE_FEATURE_PROVIDER=http npm run dev
-```
-
-`/admin/settings/modules` sayfası yerel API'den okur. `VITE_FEATURE_PROVIDER` verilmezse mevcut frontend mock'u kullanılır. Yukarıdaki komut varsayılan **bellek modudur**; sunucu yeniden başlayınca tercihler sıfırlanır.
-
-### PostgreSQL ile kalıcı prototip
-
-Docker çalışıyorsa yerel veritabanını başlatın:
-
-```bash
-docker compose up -d db
-dotnet tool restore
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context FeatureDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CatalogDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context SalesDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CariDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context ServiceDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context InventoryDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CashDbContext
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context ExpenseDbContext
-```
-
-Ardından API'yi PostgreSQL modunda açın:
-
-```bash
-ASPNETCORE_ENVIRONMENT=Development HIPOS_FEATURE_STORAGE=postgres HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet run --project apps/api/Hipos.Api/Hipos.Api.csproj --urls http://127.0.0.1:5180
-```
-
-Diğer terminalde `VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_SALES_PROVIDER=http npm run dev` çalışır. Şube seçip **Ayarlar → Modüller ve Özellikler** içinde **Ürün taslakları**, **Fiyat Taslakları**, **POS'a Ürün Yayını**, **Test POS Siparişleri** ve **Test Ödeme Simülatörü** özelliklerini ilgili şubede açın. **Ürünler ve Menü → Ürünler** alanında taslak oluşturun; ürün ayrıntısında fiyat sürümünü kaydedip POS'a yayınlayın. Menü ise ayrı akışta şube kapsamında yayına alınır; bu özellik ürünün POS kanalına aktarılması anlamına gelmez. Ayrı terminalde `npm run dev:pos` test POS'u [http://localhost:5176](http://localhost:5176) adresinde açar. Yayınlanmış üründen sipariş ve ardından simüle ödeme sonucu gerçek PostgreSQL kayıtları oluşturur; yönetim paneli **Satışlar** ekranında bunları salt okunur görür. **Gerçek tahsilat yapılmaz.**
-
-Masa ve personel görünümü için aynı panel komutuna `VITE_SERVICE_PROVIDER=http` ekleyin. **Şubeler → Masa Planı** gerçek `service.tables` ve açık bağları okur; masaya tıklayınca sipariş, zaman, toplam ve varsa sorumlu servis personeli görülür. Personel kartları **Mutfak ve Servis → Personel** alanında bölüm ve görev ızgaralarıyla yönetilir. `staff.records`, masa/garson atama özelliklerinden bağımsızdır; `branches.tables` kapanınca servis ataması kapanır ama personel kartları, satış adisyonları ve self-servis siparişler etkilenmez. Geçmiş servis kayıtları okunabilir. Bordro, vardiya/puantaj, personel giriş yetkileri ve üretim kimlik doğrulaması bu önizlemenin dışındadır.
-
-## Kalıcı menü yönetimi
-
-Menü genel bakışı ve düzenleme artık `/admin/catalog/menus` adresindedir; Ürünler ve Menü giriş sayfası da bu özeti gösterir. `CatalogDbContext` migration'larından sonra `HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:menus` iki kalıcı örnek menü ekler. Panel `VITE_CATALOG_PROVIDER=http` ve `VITE_FEATURE_PROVIDER=http` kullanmalı; yazma için seçili şubede **Menü Yönetimi** açılmalıdır. Özel bölüm başlıkları, ikonlu/kategori filtreli mevcut ürün seçimi, sıralama, etkileşimsiz önizleme, sürüm kontrollü kaydetme ve şubede tek yayındaki menü seçimi vardır. QR ve web yayını sonraki fazdır. Sözleşme ve kabul akışı: [Menü Yönetimi MVP](MENU_YONETIMI_MVP.md).
-
-## Kalıcı stok, reçete ve sayım dilimi
-
-Önce katalog migration'ı, ardından `InventoryDbContext` migration'ı uygulanmış olmalı. Seed, reçete ürünlerinin katalogda bulunmasını gerektirir:
-
-```bash
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context InventoryDbContext
-HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:inventory
-```
-
-Komut yalnız açıkça belirtilen yerel `hipos_features` veritabanına yazar; sabit kimlikli **Kadıköy Ana Depo**, 21 hammadde kartı, 4 reçete, 39 stok hareketi ve 21 kalemli taslak sayımı ekler. Sayımda kritik stoklar ve farklı miktarlardaki fiziksel uyuşmazlıklar örneklenir. Tekrar çalıştırma mevcut kartları, hareketleri veya sayım satırlarını değiştirmez. API'yi migration sonrasında yeniden başlatın. Paneli `VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_INVENTORY_PROVIDER=http npm run dev` ile açıp **Ayarlar → Modüller ve Özellikler** bölümünde önce **Stok Takibi**, ardından **Reçete** ve **Stok Sayımı** özelliklerini seçili şubede etkinleştirin. İlk demo tek şube/tek depodur; veri modeli depoya bağlıdır. Reçete satışta otomatik tüketim yapmaz, gerçek kimlik doğrulaması yoktur.
-
-Önemli kontroller: stok yalnız değiştirilemez hareket kayıtlarının toplamından hesaplanır; negatif bakiye reddedilir. Kritik kuralı `onHand < criticalBelow`; eşik hammaddede düzenlenebilir ve stok miktarı değildir. Açık sayım yeni hareketleri kilitler. Sayımın başındaki sistem miktarı sabitlenir, fiziksel sayı girilmeden onaylanmaz. Dışarıdan stok değişmişse onay `COUNT_STOCK_CHANGED` ile reddedilir; düzeltme yazılmaz. Onay, farkı her hammadde için en çok bir kez `count_adjustment` hareketi olarak kaydeder. Modül açık sayım sırasında kapatılamaz (`INVENTORY_COUNT_OPEN`); taslak iptal edilebilir. Reçete düzenleme yeni sürüm ekler, eski sürümü değiştirmez. Teorik üretim fire, bozulma, diğer tüketim ve birim dönüşümünü içermez.
-
-Yönetici ekranını deneyip doğrulamak için [Stok, Reçete ve Sayım elle test rehberini](STOK_REÇETE_SAYIM_MANUEL_TEST.md) izleyin.
-
-Cari ekranını PostgreSQL'e bağlamak için panel komutuna `VITE_CARI_PROVIDER=http` ekleyin ve cari migration/seed adımlarını uygulayın. **Ayarlar → Modüller ve Özellikler** içindeki tek `Cari Hesap Yönetimi` seçeneği yönetici tarafından manuel kart/hareket yazımını açar veya kapatır. Kart türü Müşteri, Tedarikçi veya ikisi birden seçilebilir; türler ayrı capability değildir. Modül kapalıyken mevcut kartlar, hareketler, ekstre ve hareketlerden hesaplanan bakiyeler okunur kalır. Hareket kaynağı modeli manuel, entegrasyon, satış, satın alma, açılış bakiyesi ve düzeltme değerlerini ayırt eder; bu sürümde yalnız manuel hareket oluşturulur. Tahsilat/ödeme banka/POS hareketi veya fatura değildir; vadeli belge, ödeme dağıtımı, satın alma-stok bağlantısı ve gerçek oturum/yetki sonraki aşamalardır. Elle arayüz testi için [Cari test rehberi](CARI_MANUEL_TEST.md) ve [Cari Hesaplar MVP sözleşmesi](CARI_HESAPLAR_MVP.md) kullanın.
-
-## Kalıcı kasa vardiyası ve nakit defteri
-
-Kasa ilk sürümde tek şubeli işletmede POS olmadan elle işletilir. Önce migration ve kurgusal geçmişi seed edin:
-
-```bash
-HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_features;Username=hipos;Password=hipos-dev-only' dotnet tool run dotnet-ef database update --project apps/api/Hipos.Api/Hipos.Api.csproj --context CashDbContext
-HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features' npm run demo:seed:cash
-```
-
-API'yi yeniden başlatın. `HIPOS-Baslat.command` artık `VITE_CASH_PROVIDER=http` ile paneli kasa API'sine bağlar; elle panel başlatıyorsanız `VITE_CASH_PROVIDER=http VITE_FEATURE_PROVIDER=http npm run dev` kullanın. **Kasalar → Kasa Özeti** vardiya açma ve nakit akışını; **Kasa Hareketleri** değiştirilemez defteri; **Kasa Vardiyaları / Açılış-Kapanış** sayım ve farkı gösterir. Modüller içinde `Kasa Vardiyası ve Nakit Defteri` capability'si yönetilir. Kapanış farkında açıklama zorunludur. Modül kapalıyken geçmiş okunur ve açık vardiya güvenle kapatılabilir; yeni vardiya/hareket/düzeltme başlatılamaz. Hatalı manuel hareket için hareketler ekranında gerekçeli, aynı tutarlı `reversal` oluşturulur; orijinal satır değişmez.
-
-İki kapanmış geçmiş vardiya ve altı hareket kurgusal örnek veridir; yeni işlemler kalıcı PostgreSQL kayıtlarıdır. Önceden oluşturulmuş firma/şubede `PUT /api/v1/firms/{firmId}/branches/{branchId}/cash/registers/default`, idempotent biçimde `MAIN / Ana Kasa / manual` oluşturur ve `cash.management` seçeneğini kendiliğinden açmaz. Başka aktif kasa varsa `409 EXISTING_REGISTER`, uyumsuz MAIN varsa `409 DEFAULT_REGISTER_CONFLICT` verir; kayıtları sessizce değiştirmez. Firma/şube oluşturma/onboarding orkestrasyonu henüz yoktur. Test ödeme simülatörü kasa veya cari hareketi üretmez; kart/yemek kartı tahsilatı, adisyon kapama ve muhasebe bu ilk dilimin kapsamında değildir. Şema sağlayıcı ve harici POS olay kimliğini tanıyacak alanlara sahiptir; dış entegrasyon endpoint'i henüz etkin değildir. [Kasa MVP sözleşmesi](KASA_MVP_SOZLESMESI.md), [elle test rehberi](KASA_MANUEL_TEST.md) ve [gelecek onboarding/satış–kasa olay sözleşmesi taslağı](KASA_ONBOARDING_VE_SATIS_OLAY_SOZLESMESI.md).
-
-## Manuel gider kaydı
-
-Gider API'si için `ExpenseDbContext` migration'ı ve `npm run demo:seed:expenses` seed'i gerekir. Paneli `VITE_EXPENSE_PROVIDER=http VITE_FEATURE_PROVIDER=http` ile açıp `finance.expenses` capability'sini etkinleştirin. Giderler `finance` şemasında TRY ve `manual` kaynakla kalıcıdır; mevcut kapsam kasa/cari/muhasebe fişine otomatik yansıtmaz. Endpoint, idempotency ve sınırlar [Gider Yönetimi MVP sözleşmesinde](GIDER_YONETIMI_MVP.md).
-
-Migration **ayrı komutla** uygulanır; modül düğmesi migration veya tablo silme işlemi yapmaz. [compose.yaml](compose.yaml) yalnız yerel geliştirme içindir; örnek parolası üretimde kullanılmaz. API `Production` ortamında da başlatılabilir, fakat `X-Demo-Actor` taklit edilebilir ve gerçek kimlik doğrulaması değildir; API'yi müşteri trafiğine açmayın. Her alanın migration'ı eksikse ilgili API `503` dönebilir. `VITE_SALES_PROVIDER` verilmezse yönetimdeki satış görünümü mock/örnektir.
-
-Sunucu sözleşmesi ve HTTP testleri:
-
-```bash
-dotnet build apps/api/Hipos.Api/Hipos.Api.csproj
-node --test apps/api/Hipos.Api.Tests/http.test.mjs
+# Panel ve API E2E entegrasyon testleri
 npm run test:api-ui
+
+# İzole geçici veritabanında uçtan uca PostgreSQL kabul testleri
 npm run test:db
+
+# Tip denetimi ve derleme doğrulaması
+npm run typecheck
+npm run build
 ```
 
-`test:api-ui` panel–API bağlantısını tarayıcıda doğrular. `test:db` bu Mac'teki PostgreSQL 18 araçlarıyla geçici, izole bir veritabanı açar; yönetim panelinden taslak → fiyat → ilk POS yayını, ayrı Test POS'tan sipariş → simüle ödeme → yönetimde salt okunur izleme zincirini doğrular. Kısmi/belirsiz ödeme, tekrar isteği, yeniden başlatma, şube izolasyonu ve denetim kaydı da sınanır. Test kendi geçici verisini temizler; Docker gerektirmez.
+---
 
-## Bu sürümde
+## 4. Dokümantasyon ve Belge Hiyerarşisi
 
-- Tek şubeli ve çok şubeli örnek işletme seçimi
-- Tüm ana yönetim alanları ve alt ekranların gezilebilir menüsü
-- Genel bakış, ürün listesi/ayrıntısı, şube durumu, adisyon izleme, stok özeti, raporlar ve entegrasyon görünümü
-- Şube kapsamına göre PostgreSQL'den veya örnek veriden okunan salt okunur kategori özeti
-- Şube bazlı modül kataloğu ve bağımlılık gösteren açma/kapama önizlemesi
-- Kapalı modülde geçmiş okuması, yeni iş önizlemesini kapatma ve gerçek işlem olmadığına dair açık etiketler
+Projenin tüm mimari kararları, iş alanı sözleşmeleri ve modül şartnameleri [`docs/`](docs/) altında kategorize edilmiştir:
 
-Varsayılan panel verileri örnektir. Modül seçimleri tarayıcı oturumunda, .NET bellek modunda sunucu belleğinde veya PostgreSQL modunda veritabanında tutulur. HTTP/PostgreSQL dilimleri katalog, satış/adisyon, cari, masa servisi, stok/reçete/sayım, manuel kasa vardiyası ve manuel gideri kapsar; sınırlar için [backend belgesine](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) bakın. Ortak `sales.checks` API'si vardır, ancak tam adisyon kapama ve gerçek tahsilat yoktur; gerçek dış sağlayıcı bağlantısı da yoktur.
+> **Dokümantasyon Hiyerarşisi:**
+> * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
+> * **Güncel teslim ve yol haritası için:** [docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md](docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md)
+> * **Devir ve onboarding için:** [docs/00-devir-rehberi/DEVIR_REHBERI.md](docs/00-devir-rehberi/DEVIR_REHBERI.md)
+> * **Tarihsel kararlar için:** [docs/05-gecmis-ve-arsiv/](docs/05-gecmis-ve-arsiv/)
 
-Bu sürüm geliştirme prototipidir. **Ürünler ve Menü**, **Cari**, **Satışlar/Adisyonlar**, **Masa Planı**, **Stok/Reçete/Sayım**, **Kasa defteri** ve **Giderler** ilgili HTTP sağlayıcıları açıldığında PostgreSQL kullanabilir; sağlayıcı kapalıysa ekran mock/örnek olabilir. Gerçek kullanıcı girişi, tam işletme operasyonları, gerçek ödeme ve LAN sunucusundan merkezi eşitleme henüz yoktur. Katalogdaki `catalogState` sorgu parametresi yalnız mock durum önizlemesi içindir.
+| Belge | Amacı ve Rolü |
+|---|---|
+| **[docs/README.md](docs/README.md)** | **Belgeleri Nerede Bulurum?** Tüm dokümanların kategorize dizin haritası. |
+| **[DEVIR_REHBERI.md](docs/00-devir-rehberi/DEVIR_REHBERI.md)** | **Proje Bugün Ne Durumda ve Nasıl Devralınır?** Yeni mühendisler için ana devir merkezi. |
+| **[BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)** | **Kodun Gerçek Teknik Kaynağı:** 8 PostgreSQL şeması ve modül sınırları. |
+| **[DURUM_VE_YOL_HARITASI.md](docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md)** | **Güncel Teslim ve Backlog:** Modül modül eksikler ve geliştirme sıralaması. |
 
-## Ürün ve mimari belgeleri
-
-- [Backend mimarisi, bağımlılıklar ve modül sınırları](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) — bugünkü uygulamanın teknik kaynak belgesi
-- [Ana ürün tanımı](URUN_TANIMI.md)
-- [Görsel tasarım yönü](TASARIM_YONU.md)
-- [Teknik mimari](TEKNIK_MIMARI.md)
-- [API ve mock veri sözleşmesi](API_VE_MOCK_SOZLESMESI.md)
-- [UI sözleşmesi ve uygulama sırası](UI_UYGULAMA_PLANI.md)
-- [Kimlik ve hesap akışı kararı](KIMLIK_VE_HESAP_AKISI.md)
-- [Modüler backend planı](MODULER_BACKEND_PLANI.md)
-- [Yönetim paneli özellik envanteri](OZELLIK_ENVANTERI.md)
-- [Ürünler ve Menü backend sözleşmesi](KATALOG_BACKEND_SOZLESMESI.md)
-- [Test POS ve ilk sipariş sözleşmesi](TEST_POS_VE_SIPARIS_SOZLESMESI.md)
-- [Test ödeme çekirdeği sözleşmesi](ODEME_SIMULATORU_SOZLESMESI.md)
-- [Ortak adisyon sözleşmesi](ORTAK_ADISYON_SOZLESMESI.md)
-- [Gider Yönetimi MVP](GIDER_YONETIMI_MVP.md)
-- [Mühendis devir rehberi](DEVIR_REHBERI.md)
-- [Çevrimdışı çalışma ve senkronizasyon](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md)
-- [Entegrasyon envanteri ve Token/Beko süreci](ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md)
-- [Bugünkü durum ve yol haritası](DURUM_VE_YOL_HARITASI.md)
+A'dan Z'ye modül bazlı devir şartnameleri için [docs/00-devir-rehberi/](docs/00-devir-rehberi/) dizinindeki `MODUL_01` — `MODUL_07` belgelerini inceleyin.

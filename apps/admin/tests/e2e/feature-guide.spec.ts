@@ -1,4 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function openFutureAccordion(page: Page) {
+  const toggle = page.getByRole("button", { name: /Gelecekte/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
 
 test("cari alt ekranları ve gelecek işleri ayrı gösterir; demo hareketleri görünür", async ({ page }) => {
   await page.goto("/admin/customers");
@@ -6,7 +12,11 @@ test("cari alt ekranları ve gelecek işleri ayrı gösterir; demo hareketleri g
   const future = page.getByRole("region", { name: "Gelecekte neler olacak?" });
   await expect(current.getByRole("link", { name: /Cari Hesaplar/ })).toBeVisible();
   await expect(future.getByRole("link", { name: /Sadakat Puanları/ })).toBeVisible();
-  await expect(page.locator('.nav-children a[href="/admin/customers/loyalty"]')).toHaveCSS("color", "rgb(180, 35, 50)");
+  await openFutureAccordion(page);
+  const futureNavLink = page.locator('.nav-future-children a[href="/admin/customers/loyalty"]');
+  await expect(futureNavLink).toBeVisible();
+  await expect(futureNavLink).not.toHaveClass("active");
+  await expect(futureNavLink).toHaveCSS("color", "rgb(161, 94, 97)");
 
   await current.getByRole("link", { name: /Cari Hesaplar/ }).click();
   await expect(page.getByRole("heading", { name: "Cari hesaplar", exact: true, level: 1 })).toBeVisible();
@@ -49,6 +59,10 @@ test("ürün ayrıntısında demo reçetenin hammadde miktarları okunur", async
 test("planlanan alt ekran açık durum ve kırmızı menü bağlantısı taşır", async ({ page }) => {
   await page.goto("/admin/settings/users");
   await expect(page.getByRole("heading", { name: "Kullanıcılar ve Yetkiler", exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByText("Gelecek planı").first()).toBeVisible();
-  await expect(page.locator('.nav-children a[href="/admin/settings/users"]')).toHaveCSS("color", "rgb(180, 35, 50)");
+  await expect(page.getByText("Çok yakında").first()).toBeVisible();
+  await openFutureAccordion(page);
+  const futureNavLink = page.locator('.nav-future-children a[href="/admin/settings/users"]');
+  await expect(futureNavLink).toBeVisible();
+  await expect(futureNavLink).toHaveClass("active");
+  await expect(futureNavLink).toHaveCSS("color", "rgb(148, 77, 82)");
 });

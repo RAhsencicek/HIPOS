@@ -1,0 +1,112 @@
+# HIPOS — Modüler backend uygulama planı
+
+> **Durum:** Arşiv / Tarihsel Karar (Referans Amaçlıdır)
+> **Son Güncelleme:** 21 Ekim 2026
+> **Kural:** Güncel çalışma kararı için yalnız [DEVIR_REHBERI.md](../00-devir-rehberi/DEVIR_REHBERI.md), [BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) ve [DURUM_VE_YOL_HARITASI.md](../00-devir-rehberi/DURUM_VE_YOL_HARITASI.md) esas alınır.
+
+---
+
+Durum: Tarihsel modüler backend planı. 19 Ekim 2026 ürün kararıyla sonraki sprint önceliği gerçek auth ile kasa/POS ve LAN/offline akışlarını da kapsar; aşağıdaki eski uygulama sırası canlı plan değildir. Güncel devir [Mühendis Devir Rehberi](../00-devir-rehberi/DEVIR_REHBERI.md), gerçekleşen durum [Backend Mimarisi](BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) içindedir.
+
+## 1. Ne demek istiyoruz?
+
+“Modüler” iki şartı birlikte sağlamalı:
+
+1. **Kod sınırı:** Katalog, satış, stok, mutfak, finans gibi alanların kendi verisi ve iş kuralları vardır. Bir modül diğerinin tablosunu gizlice değiştirmez; sözleşme/olay üzerinden konuşur. Başlangıçta tek ASP.NET Core uygulaması ve tek PostgreSQL kullanılabilir.
+2. **İşletme tercihi:** Firma/şube bir yeteneği açıp kapatabilir. Bu tercih, yeni iş kabulünü etkiler; geçmiş kayıtları silmez ve migration çalıştırmaz. Bağımlılık, kurulum eksiği, sağlayıcı bekleme ve devam eden iş ayrı durumlar olarak kalır.
+
+Bugünkü `.NET` prototipi ikinci şartın **durum ve tercih** kısmını doğruladı. `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, geliştirme amaçlı `sales.pos_orders` ve `payments.simulator` kalıcı komutlara modül kapısıyla bağlandı; diğer prototip/planlı özelliklerde `effectiveForNewWork=false` kalır. Simüle ödeme gerçek tahsilat veya tamamlanmış kasa modülü anlamına gelmez.
+
+## 2. İlk teknik boşluklar
+
+- Capability kataloğu şu an 26 tanım içeriyor; paneldeki her alt işi bire bir temsil etmez. Katalog değiştiğinde `catalogVersion`, açıklamalar ve bağımlılıklar güncel tutulmalıdır.
+- Modül tanımları paylaşılan katalogdan okunuyor; sonraki iş API sözleşmesi/tip üretimiyle ekran–backend davranışını da eşleştirmek.
+- Ürün taslağı, fiyat sürümü, ilk POS yayını, test POS siparişi ve **simüle ödeme girişimi/sonucu** kalıcı komutlara bağlandı. Gerçek tahsilat, stok tüketimi, yeniden fiyatlandırma ve yeniden yayın komutları henüz yok.
+- `setup_required`, `provider_pending` ve `draining` örnek durumlar. Gerçek kurulum/sağlayıcı/iş tamamlama sinyalleri ilgili modüller tarafından üretilmeli.
+- Tekrarlanan katalog/satış/simüle ödeme komutları sınandı; modüller arası olay, geri alma ve rapor projeksiyonu henüz işletme verisi üzerinde doğrulanmadı.
+
+## 3. Her capability için aynı sözleşme
+
+Her yeni özelliği kodlamadan önce şu kayıt hazırlanır:
+
+```text
+Kalıcı anahtar ve sahibi olan modül
+Yönetim ekranı ve yönetici/operasyon sınırı
+Firma/marka/şube kapsamı
+Okuma API'leri ve yeni iş komutları
+Bağımlı capability'ler
+Gerekli işletme kurulumu ve dış sağlayıcılar
+Açılma, kapanma ve devam eden iş davranışı
+Geçmiş veri/rapor erişimi
+Yetki ve denetim kaydı
+İşlem/olay sınırı, tekrarlanan istek kuralı
+Boş/hata/kapalı/kurulum/sağlayıcı durumları
+Otomatik kabul testleri
+```
+
+Bu sözleşme “bir kart ve toggle yaptık” ile “modül gerçekten çalışıyor” arasındaki farkı görünür kılar. Ana menü görünür kalabilir; alt yeteneğin gerçek işlemi yalnız backend etkinliği doğrulanınca açılır.
+
+## 4. Modül sahipliği ve bağımlılık haritası
+
+| Alan/modül | Sahip olduğu temel veri veya karar | Öncelikli ilişki | Bugünkü durum |
+| --- | --- | --- | --- |
+| Firma, marka, şube ve erişim | İşletme yapısı, kullanıcı üyeliği, kapsam | Bütün modüller | Demo kapsamı var; gerçek hesap/üyelik yok. |
+| Modül yönetimi | Tanım, şube tercihi, yaşam döngüsü, denetim | Bütün yeni iş komutları | Tercih PostgreSQL'de doğrulandı; taslak komutuyla ilk atomik bağlantı kuruldu. |
+| Ürün, menü ve fiyat | Ürün, kategori, seçenek, alerjen, kanal/şube görünürlüğü, fiyat sürümü, yayın | Satış, kampanya, reçete, merkez yayın | PostgreSQL okuması, panelde taslak/fiyat/ilk POS yayını, kategori API'si ve geçmiş okuması var; kategori panel yazması, tekrar yayın ve diğer işler planlı. |
+| Şube ve masa servisi | Masa ve garson kartı, açık masa-adisyon bağı | Satış adisyonunu okur; satışın varlık şartı değildir | `service` PostgreSQL şeması, kapılı API, demo seed ve yönetsel masa ayrıntısı var; gerçek servis POS akışı yok. |
+| Satış ve adisyon | Ortak check, sipariş, kalem/fiyat snapshot'ı ve simüle ödeme denemesi | Menü, mutfak, ödeme, stok, rapor | Check açma/listeme/detay ve sipariş ekleme API'si var; taşıma/birleştirme/kapama ve gerçek ödeme yok. Operasyonel kasa `sales.cashier` planned capability'sidir. |
+| Mutfak/KDS | İstasyon, iş sırası, hazırlık durumu | Satış, servis, rapor | Yönetimde izleme örneği; gerçek KDS işi yok. |
+| Stok ve reçete | Depo, hammadde/eşik, immutable hareket, reçete sürümü, snapshot/fiziksel/onaylı sayım | Menü, satış, satın alma, rapor | `inventory` migration/API/seed/panel + API ve PostgreSQL tarayıcı kabul akışı tamamlandı. İlk örnek tek depodur. Satıştan otomatik tüketim, satın alma belgesi, maliyet ve depo transferi planlıdır. |
+| Satın alma | Talep, onay, sipariş, mal kabul, tedarikçi | Stok, gider/borç | Planlı yönetsel akış. |
+| Kasa ve ödeme | Manuel kasa vardiyası, nakit hareket defteri ve kapanış sayımı; POS/ödeme entegrasyonu ayrı sonraki dilim | Satışla ileride olay bağlantısı; ilk kasa MVP'si bağımsız | `cash.management` migration/API/seed/panel ve PostgreSQL kabul testiyle yerel önizlemede çalışır. Gerçek POS/kart tahsilatı, iade, mali belge ve üretim kimlik doğrulaması yok. [Kasa sözleşmesi](../02-kasa-ve-operasyon/KASA_MVP_SOZLESMESI.md). |
+| Finans | Gider, borç/alacak, mali özet | Satın alma, kasa, rapor | Manuel TRY gider dilimi `finance` şemasında; muhasebe/banka/vergi bağlantısı yok. Cari ayrı `cari` şemasındadır. |
+| Müşteri ve pazarlama | Müşteri, segment, izin, sadakat, kampanya | Satış, menü, rapor | Planlı. |
+| Raporlama | Tanımlı satış/ödeme/stok projeksiyonları | Kaynak modüllerin olayları | Görsel prototip. |
+| Entegrasyonlar | Bağlantı, sağlayıcı durumu, eşleme, hata | Satış, ödeme, menü, mali belge | Katalogda görünür; gerçek bağlantı yok. |
+| Merkezi yönetim | Merkez tanımı, şubeye yayın, istisna, geri alma | Menü/fiyat/kampanya/şube | Görsel prototip. |
+
+Bu liste uygulama sırasında alt capability'lere bölünecek. Örneğin “Stok ve Satın Alma” tek aç/kapa bayrağı değil; stok, reçete, sayım, transfer, satın alma ve mal kabulün ayrı kuralları olabilir. Kesin ayrım kullanıcı iş akışlarıyla kararlaştırılır.
+
+## 5. Modüller nasıl birlikte çalışacak?
+
+Örnek akışlar ve sahiplik sınırları:
+
+- **Menü → satış:** Yayınlanan ürün ve fiyatın satış anındaki sürümü sipariş kalemine kaydedilir. Daha sonra fiyat değişmesi geçmiş satışın tutarını değiştirmez.
+- **Satış → mutfak:** Kabul edilen sipariş, uygun istasyonda iş doğurur. Satış modülü KDS tablosunu doğrudan yazmaz; açık bir sözleşme/olay kullanır.
+- **Satış → stok:** Stok tüketiminin hangi anda ve hangi reçete sürümüyle hesaplanacağı ayrıca ürün kararıdır. Bu karar verilmeden sahte stok düşümü yapılmaz.
+- **Satış → ödeme → kapanış:** Belirsiz ödeme sonucu başarı sayılmaz; gerçekten doğrulanmış tahsilat olmadan adisyon kapanmaz. Tekrarlanan ödeme isteği çift tahsilat yaratmaz.
+- **Kaynak modüller → rapor:** Raporlar satış, ödeme ve stok için kendi kafasına göre başka formül üretmez; tanımlı kaynak kayıt/olaylardan projeksiyon kurar.
+- **Modül kapatma:** Yeni komut backend'de reddedilir. Devam eden işin güvenli bitişi ilgili modülün sorumluluğudur; geçmiş kayıt ve rapor okunabilir kalır.
+- **Masa servisi → satış:** Satış adisyonu masa kimliğine bağımlı değildir. Masa/garson bağı ayrı `service.assignments` kaydıdır. `branches.tables` kapanınca `service.waiters` otomatik kapanır; yeni masa ve bağ oluşturulamaz, mevcut bağ okunabilir ve güvenle kapatılabilir. `sales.pos_orders` açık kalır; self-servis sipariş açılabilir. Masa bağını kapatmak adisyonu veya ödeme durumunu değiştirmez.
+- **Personel → servis:** Personel kartı (`staff.records`) masa/garson özelliğinden bağımsızdır. `service.assignments.waiter_id`, firma ve şube kapsamındaki `service.employees.id` değerine bağlanır. Yönetim ve personel ekranında iş unvanı bulunur; POS yetkisi, vardiya veya bordro anlamına gelmez. Eski personel kayıtları migration ile korunur.
+
+Aynı işlemde kesin tutarlılık gereken adımlar tek veritabanı işlemiyle korunur. Sonradan/ayrı süreçte yapılabilecek yayılım için olay ve gerekirse outbox tasarlanır; olay, kaynak işlem kaydedilmeden “başarılı” ilan edilmez. İlk günden gereksiz mesaj altyapısı kurulmaz.
+
+## 6. Uygulama sırası
+
+### A. Ortak modül omurgası
+
+1. Panel alt işleri ile backend capability'lerini eşleyen [ilk envanteri](../03-is-alanlari-ve-yonetim/OZELLIK_ENVANTERI.md) katalogdan başlayarak ayrıntılandır; prototip/planlı/gerçek etiketlerini doğrula.
+2. Başlatılan ortak tanım kaynağını (`contracts/feature-catalog.v1.json`) ve API sözleşmesini sürümlendir; frontend/backend farklı anahtar veya bağımlılık kullanırsa test başarısız olsun.
+3. Her gerçek komut için tek sunucu politikası belirle: kullanıcı/kapsam, modül etkinliği, kurulum, sürüm, idempotency ve denetim. Okuma ile yeni iş iznini ayrı tut.
+4. PostgreSQL çok şubeli ve iki API örnekli yarış testlerini genişlet. Migration'ı deployment adımı olarak koru.
+
+### B. İlk gerçek iş dilimi: Ürünler ve Menü
+
+[Katalog backend dilimi](../03-is-alanlari-ve-yonetim/KATALOG_BACKEND_SOZLESMESI.md) ürün listesi/detayı, şube görünürlüğü, mevcut şube fiyatı ve yönetsel ürün taslağı oluşturma/güncellemeyi doğruladı. Firma kategorisi okuması ve sürümlü, denetimli oluşturma/ad değiştirme API'si hazır. Fiyat sürümü ve ilk POS yayını ayrı `catalog.price_drafts`/`catalog.publishing` anahtarlarıyla aç/kapa, şube, sürüm ve denetim kaydına bağlıdır; panel formları ve geçmiş görünümü çalışır. Sırada kategori panel yazması, şube/kanal görünürlüğü, yeniden fiyatlandırma ve yayın vardır. Bunlar tamamlanmadan bütün katalog “tamamlandı” sayılmaz.
+
+### C. Bağımlı alanları sırayla bağlama
+
+Servis dilimi: `branches.tables` ve `service.waiters` capability'leri masa ve adisyon bağını yönetir. Personel dizini artık ayrı `staff.records` capability'sidir; `service.waiters` tablosu çalışanları taşıyan `service.employees` tablosuna veri kaybetmeden dönüştürüldü. Bölüm/görev kartı, idempotent oluşturma, optimistic concurrency ile düzenleme, pasife alma/aktifleştirme, denetim, servis atamalarını koruma ve firma/şube izolasyonu API'de uygulanmıştır. Panelde yönetim, şefler, mutfak ekibi, servis, kasa ve destek için ayrı ızgaralar bulunur. API sözleşmesi ve manuel test [personel MVP rehberinde](../03-is-alanlari-ve-yonetim/PERSONEL_YONETIMI_MVP.md); masa/adisyon akışı [masa servisi rehberinde](../04-test-ve-rehberler/MASA_SERVISI_TEST.md). Üretim oturumu/yetkisi, gerçek vardiya/puantaj, bordro, POS erişimi ve çok şubeli personel ataması eksiktir.
+
+Şube ve merkezi yayın; stok/reçete ve satın alma; satış/adisyon ile mutfak izleme; ödeme/kasa/finans; müşteri/kampanya; raporlama ve entegrasyonlar. Sıra iş kuralı ve bağımlılık netleştikçe gözden geçirilir. Yönetim paneli ilk kullanıcı yüzü olmaya devam eder; gelecekteki operasyon yüzlerinin backend sözleşmesi düşünülür ama ekranları bu aşamada yapılmaz.
+
+### D. Pilot güvenlik kapısı
+
+Pilot işletme ve ilk sahibi HIPOS ekibi kontrollü açacak; halka açık firma kaydı yok. Gerçek kullanıcı/üyelik ve güvenli oturum üretime çıkmadan zorunludur. Bu çalışma modül omurgasını tasarlamayı durdurmaz; fakat `X-Demo-Actor` ile gerçek kullanıcıya hizmet verilmez. Google/Gmail girişi sonraya bırakılır.
+
+## 7. “Tamamlandı” ölçütü
+
+Bir modüle **gerçek** demek için: veri PostgreSQL'de sürümlü şemayla saklanmalı; firma/şube ve gerçek kullanıcı yetkisi sunucuda doğrulanmalı; okuma ve varsa yazma API'si çalışmalı; yeni iş modu kapalı/kurulumsuz/sağlayıcısızken engellenmeli; devam eden ve geçmiş iş davranışı tanımlanmalı; tekrar/çakışma güvenle ele alınmalı; denetim kaydı ve diğer modüllerle etkileşim test edilmeli; panel sahte başarı göstermemeli. Bunlardan biri yoksa etiket `prototip` veya `planlandı` kalır.
+
+Bu kabul listesi bütün alanlar tamamlanana kadar tekrarlanır. “Hepsi birbiriyle uyumlu” iddiası, tek bir demo akışından değil modüller arası testlerden doğacaktır.
