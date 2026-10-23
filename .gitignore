@@ -7,5 +7,7 @@ dist/
 !.env.example
 playwright-report/
 test-results/
+.playwright-browsers/
+.playwright-temp/
 **/bin/
 **/obj/

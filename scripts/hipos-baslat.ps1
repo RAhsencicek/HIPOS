@@ -8,10 +8,8 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $rootDir = (Resolve-Path "$PSScriptRoot\..").Path
 $logDir = Join-Path $env:TEMP "hipos-dev"
 $pidFile = Join-Path $logDir "pids"
-$tempBin = Join-Path $logDir "bin"
 
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-if (-not (Test-Path $tempBin)) { New-Item -ItemType Directory -Path $tempBin -Force | Out-Null }
 
 function Fail([string]$message) {
     Write-Host "`nHATA: $message" -ForegroundColor Red
@@ -101,13 +99,6 @@ for ($i = 1; $i -le 30; $i++) {
 }
 if (-not $databaseReady) {
     Fail "PostgreSQL hazir olmadi. 'docker compose ps' ile durumu kontrol edin."
-}
-
-# Host ortaminda psql yoksa Docker container uzerinden calistiracak shim olustur
-if (-not (Get-Command "psql" -ErrorAction SilentlyContinue)) {
-    $shimContent = "@echo off`r`ndocker compose -f `"$rootDir\compose.yaml`" exec -T db psql -U hipos -d hipos_features %*`r`n"
-    [System.IO.File]::WriteAllText((Join-Path $tempBin "psql.cmd"), $shimContent)
-    $env:PATH = "$tempBin;$env:PATH"
 }
 
 # Paket yukleme kontrolleri

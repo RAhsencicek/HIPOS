@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { runLocalPostgresSql } from "./postgres-sql.mjs";
 
 const demo = JSON.parse(await readFile(new URL("../contracts/demo-single-branch.v1.json", import.meta.url), "utf8"));
 
@@ -266,21 +266,7 @@ for (const product of demo.products) {
 }
 }
 statements.push("COMMIT;");
-const child = spawn("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], {
-  shell: process.platform === "win32",
-  env: {
-    ...process.env,
-    PGHOST: parsed.hostname,
-    PGPORT: parsed.port || "5432",
-    PGUSER: decodeURIComponent(parsed.username),
-    PGPASSWORD: decodeURIComponent(parsed.password),
-    PGDATABASE: parsed.pathname.slice(1),
-  },
-  stdio: ["pipe", "inherit", "inherit"],
-});
-child.stdin.end(statements.join("\n"));
-const code = await new Promise((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
-if (code !== 0) process.exit(code);
+await runLocalPostgresSql(databaseUrl, statements.join("\n"));
 console.log(cariOnly
   ? `Demo cari seed'i ${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.slice(1)} veritabanında tamamlandı: ${demo.parties.length} kart, ${demo.partyMovements.length} hareket. Tekrar çalıştırmak mevcut kayıtları değiştirmez.`
   : serviceOnly

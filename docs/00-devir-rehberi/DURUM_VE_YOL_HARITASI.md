@@ -85,21 +85,28 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 
 | Kriter | Detay |
 |---|---|
-| **Veritabanı Şeması** | `sales` ve `service` şemaları |
-| **İlgili EF Core Context** | [SalesDbContext.cs:L6-L56](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs#L6-L56) |
+| **Veritabanı Şeması** | `kitchen` görev/audit/istasyon şeması; kaynak sipariş için `sales`, masa ve garson bağı için `service` |
+| **İlgili EF Core Context** | [KitchenDbContext.cs](../../apps/api/Hipos.Api/Kitchen/KitchenDbContext.cs) · [SalesDbContext.cs](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) |
 | **Ön Yüz Ekranı** | [OperationalApps.tsx:L38-L120](../../apps/pos/src/OperationalApps.tsx#L38-L120) (`/kitchen`) |
 | **Kılavuz Doküman** | 👉 [Modül 3 Şartnamesi](MODUL_03_MUTFAK_VE_KDS.md) · [Mutfak Ekranı (KDS) ve Yazıcı Kılavuzu](../02-kasa-ve-operasyon/MUTFAK_KDS_VE_YAZICI.md) |
 
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
-  - Mutfak ekranı (`/kitchen`) 3 saniyede bir sipariş API'sini yoklayarak (polling) siparişleri listeleyen salt-okunur prototiptir.
+  - Garson siparişindeki her kalem transaction içinde kalıcı `kitchen.tasks` görevine dönüşür; aynı adisyona sonradan eklenen sipariş yeni görev üretir.
+  - `/kitchen` ekranı görevleri 3 saniyede bir yeniler; dokunmatik durum geçişleri, gecikme görünümü, servise hazır ve son servis edilen bölümleri çalışır.
+  - İlk kategori-istasyon yönlendirmesi ve Fırın/Sıcak Mutfak/Bar/Soğuk Mutfak/Atanmamış filtreleri çalışır.
+  - Tekil istek, sürüm kontrolü ve audit kaydı uygulanmıştır; iptal verisi ve ekran görünümü hazırdır.
+  <!-- 23 Ekim 2026: Modülün salt-okunur prototip olduğu yönündeki eksik durum bilgisi, yapılan KDS işleriyle güncellendi. -->
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
-  - Durum makinesi yoktur (`Hazırlanıyor`, `Hazır`, `Teslim Edildi` butonları çalışmamaktadır).
-  - İstasyon ayrımı (Sıcak Mutfak, Fırın, Bar) yoktur; tüm ürünler tek listede toplanmaktadır.
+  - `Hazır` durumunun garson ekranına anlık bildirimi ve teslim alma akışı yoktur.
+  - Satış/adisyon kalem iptali ve müdür PIN onayı mutfak görevine bağlı değildir.
+  - İstasyon/kategori eşleştirmelerini yönetecek panel yoktur; yalnız başlangıç eşleştirmeleri vardır.
+  - Gerçek kullanıcı/PIN yetkilendirmesi ve offline/sync kuyruğu yoktur.
   - Sipariş onaylandığında mutfaktaki termal bilet yazıcısından (ESC/POS 9100) otomatik fiş basılmamaktadır.
+  <!-- 23 Ekim 2026: Çalışan durum makinesi ve ilk istasyon ayrımı eksik listesinden çıkarıldı; devam eden sorunlar silinmeden ayrıntılandırıldı. -->
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
-  1. Mutfak sipariş kalem durum güncelleme API'si (`POST /kitchen/orders/{id}/status`).
-  2. Dokunmatik KDS butonları ve gecikme sayaçları (10 dk yeşil, 20 dk sarı, 30+ dk kırmızı alarm).
-  3. Yerel ağdaki termal yazıcıya TCP 9100 üzerinden otomatik mutfak fişi basım servisi.
+  1. Garsona hazır bildirimi ve satış/adisyon iptal entegrasyonu.
+  2. Gerçek PIN/rol yetkisi, yönetilebilir istasyonlar ve offline işlem kuyruğu.
+  3. Yerel ağdaki termal yazıcıya TCP 9100 üzerinden otomatik mutfak fişi basım servisi ve yazıcı kuyruğu.
 
 ---
 
@@ -198,7 +205,8 @@ Tüm iş modüllerinin arkasındaki mimari omurganın durumu şöyledir:
 
 1. **`X-Demo-Actor` Bir Güvenlik Mekanizması Değildir:** Geliştirme kolaylığı için konulmuştur; API internete açıldığı an taklit edilebilir.
 2. **Kasa Defteri Henüz Otomatik Değildir:** Adisyon satışları kasaya otomatik akmadığı için kasa bakiyesi şu an sadece elle girilen avansları ve nakit hareketleri tutar.
-3. **Mutfak Ekranı Canlı State Machine Değildir:** Yalnızca periyodik API okumasıdır; sipariş hazırlık butonları ve yazıcı çıktıları koda bağlanmalıdır.
+3. **Mutfak Çekirdeğinin Üretim Bağları Eksiktir:** Kalıcı durum makinesi ve hazırlık butonları çalışır; garson bildirimi, satış iptali, gerçek auth, offline kuyruk ve yazıcı çıktıları henüz bağlı değildir.
+<!-- 23 Ekim 2026: Eski salt-okunur uyarısındaki eksik bilgi eklendi; devam eden üretim riskleri korunmuştur. -->
 4. **Offline Sync Henüz Canlı Değildir:** Bugün çalışan LAN demosu, aynı Wi-Fi ağındaki cihazların aynı yerel IP'ye bağlanmasından ibarettir; gerçek çift taraflı Outbox senkronizasyonu değildir.
 
 ---
@@ -206,7 +214,8 @@ Tüm iş modüllerinin arkasındaki mimari omurganın durumu şöyledir:
 ## 5. Güncel Sıralı Geliştirme Yol Haritası (8 Öncelikli Adım)
 
 > [!NOTE]
-> **Tarihsel Not:** Eski dokümantasyonda yer alan `Kasa → Masa → Auth → KDS → Katalog → Stok...` sırası tarihsel plan olarak kalmıştır ve artık güncel öncelik değildir. Katalog, Cari, Inventory, Manuel Kasa, Gider ve Ortak Adisyon Çekirdeği mevcut kalıcı MVP dilimleridir. Gerçek POS ve ödeme, Auth, operasyonel KDS/yazıcı ve Offline LAN/senkronizasyon henüz uygulanmamıştır. Bu bölüm belgedeki tek güncel teslim sırasıdır.
+> **Tarihsel Not:** Eski dokümantasyonda yer alan `Kasa → Masa → Auth → KDS → Katalog → Stok...` sırası tarihsel plan olarak kalmıştır ve artık güncel öncelik değildir. Katalog, Cari, Inventory, Manuel Kasa, Gider, Ortak Adisyon ve kalıcı KDS çekirdeği mevcut MVP dilimleridir. Gerçek POS ve ödeme, Auth, KDS’nin garson/iptal/yazıcı üretim bağları ve Offline LAN/senkronizasyon henüz uygulanmamıştır. Bu bölüm belgedeki tek güncel teslim sırasıdır.
+<!-- 23 Ekim 2026: Yol haritası özetine tamamlanan KDS çekirdeği eklendi; eksik üretim entegrasyonları korunmuştur. -->
 >
 > Bu sekiz adım ana teslim sırasını belirtir; modül şartnamelerinde yer alan tüm gelecek özelliklerin yerine geçmez. Ayrıntılı hedef ekranlar, alt akışlar ve kabul ölçütleri kendi modül belgelerinde korunur.
 

@@ -171,7 +171,10 @@ export function KitchenApp() {
   const visibleTasks = tasks.filter((task) => stationFilter === "all" || task.stationCode === stationFilter);
   const activeTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
   const readyTasks = visibleTasks.filter((task) => task.status === "ready");
-  const servedTasks = visibleTasks.filter((task) => task.status === "served").slice(-6).reverse();
+  const servedTasks = visibleTasks
+    .filter((task) => task.status === "served")
+    .sort((left, right) => new Date(right.servedAt!).getTime() - new Date(left.servedAt!).getTime())
+    .slice(0, 6);
   const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
 
   function ticket(task: KitchenTask, ready = false) {

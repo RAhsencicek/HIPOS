@@ -8,10 +8,13 @@
 ## 1. Problem Tanımı ve Mevcut Kod Durumu
 
 Şu anki HIPOS mutfak arayüzü ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx)):
-* `GET /sales/orders` endpoint'ini 3 saniyede bir çağıran **tamamen pasif ve salt-okunur** bir listedir.
-* Mutfak personeli siparişin hazırlandığını veya piştiğini işaretleyemez (`Hazırlanıyor`, `Hazır`, `Servis Edildi` butonları yoktur).
-* **İstasyon Ayrımı Yoktur:** Sıcak mutfak yemeği, meze, taş fırın pidesi ve bar içecekleri tek bir karmaşık listeye düşer.
+* `GET /kitchen/tasks` endpoint'ini 3 saniyede bir çağırır ve PostgreSQL'deki kalıcı mutfak görevlerini gösterir.
+* Mutfak personeli `Hazırlanıyor`, `Hazır` ve `Servis Edildi` geçişlerini dokunmatik butonlarla kaydedebilir.
+* **İlk İstasyon Ayrımı Vardır:** Fırın, Sıcak Mutfak, Bar ve Soğuk Mutfak kategori eşleştirmeleri ile `Atanmamış` güvenli kuyruğu çalışır; yönetim ekranı henüz yoktur.
+* **Garson ve İptal Bağları Eksiktir:** Hazır bildirimi garson ekranına gitmez; satış/adisyon kalem iptali ve müdür PIN onayı mutfağa bağlı değildir.
+* **Gerçek Auth ve Offline Kuyruk Eksiktir:** Demo aktör kullanılır; cihaz bağlantısı kesildiğinde işlemleri saklayıp tekrar gönderen kuyruk yoktur.
 * **Yazıcı Altyapısı Yoktur:** Garson sipariş girdiğinde mutfaktaki termal bilet yazıcısından (ESC/POS) otomatik kağıt fiş basılamaz.
+<!-- 23 Ekim 2026: Problem tanımındaki eksik mevcut-kod bilgisi eklendi; çözülmemiş bildirim, iptal, auth, offline ve yazıcı sorunları korundu. -->
 
 ---
 
@@ -85,10 +88,10 @@ CREATE TABLE kitchen.tasks (
 ## 4. Adım Adım Uygulama Yol Haritası
 
 ### Adım 1: KDS API Endpoint'lerinin Yazılması
-* `GET /api/v1/.../kitchen/stations/{stationId}/tasks?status=active`: O istasyonun hazırlayacağı aktif siparişleri döner.
-* `POST /api/v1/.../kitchen/tasks/{taskId}/status`: Aşçının dokunmatik ekrandan bastığı durum güncellemesi:
-  * Gövde: `{ nextStatus: "preparing" | "ready" | "served" }`.
+* **Uygulandı:** `GET /api/v1/firms/{firmId}/branches/{branchId}/kitchen/tasks?status=all` görevleri döner; istemci istasyon filtresini uygular.
+* **Uygulandı:** `POST /api/v1/firms/{firmId}/branches/{branchId}/kitchen/tasks/{taskId}/status`, `{ requestId, nextStatus, expectedVersion }` gövdesiyle sürüm kontrollü geçiş yapar.
 * Sipariş `ready` olduğunda SignalR veya SSE (Server-Sent Events) ile garson ekranına anlık uyarı düşer (`"Masa 5'in Pizzası Hazır!"`).
+<!-- 23 Ekim 2026: Uygulanmış endpointlerin gerçek adresi ve gövdesi eklendi; garson bildiriminin eksik olduğu madde korundu. -->
 
 ### Adım 2: Termal Fiş Yazıcı Servisi (ESC/POS Network Printing)
 Restoranlarda standart olarak ağ üzerinden (Ethernet/Wi-Fi) haberleşen 80mm termal yazıcılar kullanılır:

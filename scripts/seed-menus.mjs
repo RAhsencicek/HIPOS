@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { runLocalPostgresSql } from "./postgres-sql.mjs";
 
 const demo = JSON.parse(await readFile(new URL("../contracts/demo-single-branch.v1.json", import.meta.url), "utf8"));
 const address = process.env.HIPOS_DEMO_DATABASE_URL;
@@ -31,10 +31,5 @@ for (const menu of menus) {
   statements.push(`DO $seed$ BEGIN IF EXISTS (SELECT 1 FROM catalog.menus WHERE id=${quote(menu.id)} AND (firm_id<>${firm} OR branch_id<>${branch})) THEN RAISE EXCEPTION 'Demo menü kimliği farklı kapsamda kullanılıyor.'; END IF; IF NOT EXISTS (SELECT 1 FROM catalog.menus WHERE id=${quote(menu.id)}) THEN ${inserts.join("\n")} END IF; END $seed$;`);
 }
 statements.push("COMMIT;");
-const child = spawn("psql", ["-X", "-q", "-v", "ON_ERROR_STOP=1"], { shell: process.platform === "win32", env: { ...process.env,
-  PGHOST: url.hostname, PGPORT: url.port || "5432", PGUSER: decodeURIComponent(url.username),
-  PGPASSWORD: decodeURIComponent(url.password), PGDATABASE: "hipos_features" }, stdio: ["pipe", "inherit", "inherit"] });
-child.stdin.end(statements.join("\n"));
-const code = await new Promise((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
-if (code !== 0) process.exit(code ?? 1);
+await runLocalPostgresSql(address, statements.join("\n"));
 console.log("Yerel PostgreSQL menü seed'i tamamlandı: Ana Menü ve İçecek Menüsü. Var olan menülerin içeriği ve aktiflik tercihi korunur.");
