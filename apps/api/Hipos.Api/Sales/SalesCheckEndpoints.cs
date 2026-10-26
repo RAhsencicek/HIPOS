@@ -165,7 +165,8 @@ public static class SalesCheckEndpoints
                         var quantity = quantities[line.Id];
                         var movedTotal = checked(quantity * line.UnitPriceMinor);
                         targetOrder.Lines.Add(new SalesOrderLineRow { ProductId = line.ProductId, ProductName = line.ProductName,
-                            Sku = line.Sku, Quantity = quantity, UnitPriceMinor = line.UnitPriceMinor,
+                            Sku = line.Sku, Quantity = quantity, BaseUnitPriceMinor = line.BaseUnitPriceMinor,
+                            UnitPriceMinor = line.UnitPriceMinor,
                             LineTotalMinor = movedTotal, Currency = line.Currency, Note = line.Note, OptionsJson = line.OptionsJson });
                         line.Quantity -= quantity;
                         line.LineTotalMinor -= movedTotal;
@@ -316,7 +317,7 @@ public static class SalesCheckEndpoints
                 orderForLine.KitchenItemsJson = System.Text.Json.JsonSerializer.Serialize(kitchenLines.Append(
                     new SalesKitchenLine(line.ProductId.ToString(), $"❌ İPTAL BİLDİRİMİ · {line.ProductName}",
                         command.Quantity, $"Mutfağa iptal bildirimi · Gerekçe: {command.Reason.Trim()}",
-                        System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [])));
+                        System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(line.OptionsJson) ?? [])));
                 orderForLine.Version++;
             }
             check.Version++;

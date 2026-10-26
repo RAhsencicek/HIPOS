@@ -134,6 +134,52 @@ public sealed class CatalogProductActivationAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class CatalogOptionGroupRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class CatalogOptionItemRow
+{
+    public Guid Id { get; set; }
+    public Guid GroupId { get; set; }
+    public string Name { get; set; } = "";
+    public long PriceDeltaMinor { get; set; }
+    public bool QuantityEnabled { get; set; }
+    public int MaxQuantity { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}
+
+public sealed class CatalogProductOptionGroupRow
+{
+    public Guid ProductId { get; set; }
+    public Guid OptionGroupId { get; set; }
+    public int MinSelections { get; set; }
+    public int? MaxSelections { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public sealed class CatalogOptionManagementAuditRow
+{
+    public Guid RequestId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string TargetType { get; set; } = "";
+    public Guid TargetId { get; set; }
+    public string Actor { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string SnapshotJson { get; set; } = "{}";
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
     public DbSet<CatalogProductRow> Products => Set<CatalogProductRow>();
@@ -149,6 +195,10 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogMenuSectionRow> MenuSections => Set<CatalogMenuSectionRow>();
     public DbSet<CatalogMenuItemRow> MenuItems => Set<CatalogMenuItemRow>();
     public DbSet<CatalogMenuAuditRow> MenuAudit => Set<CatalogMenuAuditRow>();
+    public DbSet<CatalogOptionGroupRow> OptionGroups => Set<CatalogOptionGroupRow>();
+    public DbSet<CatalogOptionItemRow> OptionItems => Set<CatalogOptionItemRow>();
+    public DbSet<CatalogProductOptionGroupRow> ProductOptionGroups => Set<CatalogProductOptionGroupRow>();
+    public DbSet<CatalogOptionManagementAuditRow> OptionManagementAudit => Set<CatalogOptionManagementAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -314,6 +364,78 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ProductId, row.OccurredAt });
+        });
+        modelBuilder.Entity<CatalogOptionGroupRow>(entity =>
+        {
+            entity.ToTable("option_groups", table => table.HasCheckConstraint("ck_option_group_version_positive", "version > 0"));
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(100);
+            entity.Property(row => row.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(row => row.SortOrder).HasColumnName("sort_order");
+            entity.Property(row => row.Version).HasColumnName("version").HasDefaultValue(1).IsConcurrencyToken();
+            entity.Property(row => row.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(row => new { row.FirmId, row.SortOrder });
+        });
+        modelBuilder.Entity<CatalogOptionItemRow>(entity =>
+        {
+            entity.ToTable("option_items", table =>
+            {
+                table.HasCheckConstraint("ck_option_item_max_quantity_positive", "max_quantity >= 1");
+                table.HasCheckConstraint("ck_option_item_quantity_disabled_max_one", "quantity_enabled OR max_quantity = 1");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.GroupId).HasColumnName("group_id");
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(100);
+            entity.Property(row => row.PriceDeltaMinor).HasColumnName("price_delta_minor");
+            entity.Property(row => row.QuantityEnabled).HasColumnName("quantity_enabled").HasDefaultValue(false);
+            entity.Property(row => row.MaxQuantity).HasColumnName("max_quantity").HasDefaultValue(1);
+            entity.Property(row => row.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(row => row.SortOrder).HasColumnName("sort_order");
+            entity.HasOne<CatalogOptionGroupRow>().WithMany().HasForeignKey(row => row.GroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(row => new { row.GroupId, row.SortOrder });
+        });
+        modelBuilder.Entity<CatalogProductOptionGroupRow>(entity =>
+        {
+            entity.ToTable("product_option_groups", table =>
+            {
+                table.HasCheckConstraint("ck_product_option_group_min_selections_nonnegative", "min_selections >= 0");
+                table.HasCheckConstraint("ck_product_option_group_max_selections_valid", "max_selections IS NULL OR max_selections >= min_selections");
+            });
+            entity.HasKey(row => new { row.ProductId, row.OptionGroupId });
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.OptionGroupId).HasColumnName("option_group_id");
+            entity.Property(row => row.MinSelections).HasColumnName("min_selections").HasDefaultValue(0);
+            entity.Property(row => row.MaxSelections).HasColumnName("max_selections");
+            entity.Property(row => row.SortOrder).HasColumnName("sort_order");
+            entity.HasOne<CatalogProductRow>().WithMany().HasForeignKey(row => row.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<CatalogOptionGroupRow>().WithMany().HasForeignKey(row => row.OptionGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(row => row.OptionGroupId);
+        });
+        modelBuilder.Entity<CatalogOptionManagementAuditRow>(entity =>
+        {
+            entity.ToTable("option_management_audit", table =>
+            {
+                table.HasCheckConstraint("ck_option_audit_target_type", "target_type IN ('group', 'product_groups')");
+                table.HasCheckConstraint("ck_option_audit_version_positive", "version > 0");
+            });
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.TargetType).HasColumnName("target_type").HasMaxLength(32);
+            entity.Property(row => row.TargetId).HasColumnName("target_id");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(32);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.SnapshotJson).HasColumnName("snapshot_json").HasColumnType("jsonb");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(row => new { row.FirmId, row.TargetType, row.TargetId, row.OccurredAt });
         });
     }
 }

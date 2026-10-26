@@ -452,6 +452,179 @@ namespace Hipos.Api.Catalog.Migrations
                     b.ToTable("menu_sections", "catalog");
                 });
 
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogOptionGroupRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FirmId", "SortOrder");
+
+                    b.ToTable("option_groups", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_option_group_version_positive", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogOptionItemRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<int>("MaxQuantity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1)
+                        .HasColumnName("max_quantity");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<long>("PriceDeltaMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("price_delta_minor");
+
+                    b.Property<bool>("QuantityEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("quantity_enabled");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId", "SortOrder");
+
+                    b.ToTable("option_items", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_option_item_max_quantity_positive", "max_quantity >= 1");
+
+                            t.HasCheckConstraint("ck_option_item_quantity_disabled_max_one", "quantity_enabled OR max_quantity = 1");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogOptionManagementAuditRow", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("snapshot_json");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_id");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("target_type");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("FirmId", "TargetType", "TargetId", "OccurredAt");
+
+                    b.ToTable("option_management_audit", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_option_audit_target_type", "target_type IN ('group', 'product_groups')");
+
+                            t.HasCheckConstraint("ck_option_audit_version_positive", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("Hipos.Api.Catalog.CatalogPriceVersionRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -570,6 +743,42 @@ namespace Hipos.Api.Catalog.Migrations
                     b.HasIndex("FirmId", "BranchId", "ProductId", "OccurredAt");
 
                     b.ToTable("product_activation_audit", "catalog");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogProductOptionGroupRow", b =>
+                {
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<Guid>("OptionGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("option_group_id");
+
+                    b.Property<int?>("MaxSelections")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_selections");
+
+                    b.Property<int>("MinSelections")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("min_selections");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("sort_order");
+
+                    b.HasKey("ProductId", "OptionGroupId");
+
+                    b.HasIndex("OptionGroupId");
+
+                    b.ToTable("product_option_groups", "catalog", t =>
+                        {
+                            t.HasCheckConstraint("ck_product_option_group_max_selections_valid", "max_selections IS NULL OR max_selections >= min_selections");
+
+                            t.HasCheckConstraint("ck_product_option_group_min_selections_nonnegative", "min_selections >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Hipos.Api.Catalog.CatalogProductRow", b =>
@@ -822,6 +1031,30 @@ namespace Hipos.Api.Catalog.Migrations
                     b.HasOne("Hipos.Api.Catalog.CatalogMenuRow", null)
                         .WithMany()
                         .HasForeignKey("MenuId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogOptionItemRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Catalog.CatalogOptionGroupRow", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogProductOptionGroupRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Catalog.CatalogOptionGroupRow", null)
+                        .WithMany()
+                        .HasForeignKey("OptionGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Catalog.CatalogProductRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

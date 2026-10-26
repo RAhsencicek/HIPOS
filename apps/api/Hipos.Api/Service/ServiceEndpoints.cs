@@ -21,8 +21,8 @@ public sealed record ServiceTableGroupView(Guid Id, string PrimaryTableId, strin
 public sealed record TransferServiceTable(Guid RequestId, string TargetTableId, int ExpectedVersion);
 public sealed record MergeServiceTables(Guid RequestId, IReadOnlyList<string> SourceTableIds,
     IReadOnlyDictionary<string, int> ExpectedVersions);
-public sealed record ServiceLineView(string ProductId, string ProductName, int Quantity, long UnitPriceMinor,
-    long LineTotalMinor, string? Note, IReadOnlyList<PosOrderItemOption> Options, long OrderLineId);
+public sealed record ServiceLineView(string ProductId, string ProductName, int Quantity, long BaseUnitPriceMinor, long UnitPriceMinor,
+    long LineTotalMinor, string? Note, IReadOnlyList<SalesOrderOptionSnapshot> Options, long OrderLineId);
 public sealed record ServiceAdjustmentView(string Action, long AmountMinor, string Reason, DateTimeOffset CreatedAt,
     long? OrderLineId, int Quantity);
 public sealed record ServiceAssignmentView(string Id, string OrderId, string? WaiterId, string? WaiterName,
@@ -855,8 +855,8 @@ public static class ServiceEndpoints
             Math.Max(0, gross - reduction), assignment.Version,
             orders.SelectMany(order => order.Lines).OrderBy(line => line.Id)
                 .Select(line => new ServiceLineView(line.ProductId.ToString(), line.ProductName, line.Quantity,
-                    line.UnitPriceMinor, line.LineTotalMinor, line.Note,
-                    System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [], line.Id)).ToArray(),
+                    line.BaseUnitPriceMinor, line.UnitPriceMinor, line.LineTotalMinor, line.Note,
+                    System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(line.OptionsJson) ?? [], line.Id)).ToArray(),
             orders.Select(order => order.Id.ToString()).ToArray(), gross, reduction,
             adjustments.Select(row => new ServiceAdjustmentView(row.Action, row.AmountMinor, row.Reason, row.CreatedAt,
                 row.OrderLineId, row.Quantity)).ToArray());

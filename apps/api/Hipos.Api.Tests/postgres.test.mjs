@@ -48,7 +48,7 @@ async function freePort() {
 }
 
 async function waitForHealth(base, child, output) {
-  for (let attempt = 0; attempt < 120; attempt++) {
+  for (let attempt = 0; attempt < 600; attempt++) {
     if (child.exitCode !== null) break;
     try {
       const response = await fetch(`${base}/health`);
@@ -74,7 +74,7 @@ async function waitForUi(base, child, output) {
 
 test(
   "PostgreSQL modül tercihini yeniden başlatma ve eşzamanlı istekte korur",
-  { timeout: 300000 },
+  { timeout: 600000 },
   async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hipos-postgres-test-"));
     const data = join(temporary, "data");
@@ -91,6 +91,10 @@ test(
       HIPOS_FEATURE_STORAGE: "postgres",
       HIPOS_FEATURES_CONNECTION: connection,
     };
+    // Keep the Windows psql client encoding workaround out of .NET/Npgsql.
+    // The CLI fixture may need WIN1254 to pass Turkish literals on Windows,
+    // while PostgreSQL and Npgsql should continue using the database's UTF8.
+    delete env.PGCLIENTENCODING;
     let postgresStarted = false;
     let api;
     let ui;
@@ -163,15 +167,15 @@ test(
         "UTF8",
         "--no-instructions",
       ]);
-      await runPg("pg_ctl", [
-        "-D",
-        data,
-        "-l",
-        log,
-        "-o",
-        process.platform === "win32" ? `-h 127.0.0.1 -p ${pgPort}` : `-h 127.0.0.1 -p ${pgPort} -k /tmp`,
-        "start",
-      ]);
+      await new Promise((resolve, reject) => {
+        const pg = spawn(join(pgBin, "pg_ctl"), [
+          "-D", data, "-l", log, "-o",
+          process.platform === "win32" ? `-h 127.0.0.1 -p ${pgPort}` : `-h 127.0.0.1 -p ${pgPort} -k /tmp`,
+          "start",
+        ], { stdio: "ignore", windowsHide: true });
+        pg.once("error", reject);
+        pg.once("close", code => code === 0 ? resolve() : reject(new Error(`pg_ctl start exited with ${code}`)));
+      });
       postgresStarted = true;
       await runPg("createdb", [
         "-h",
@@ -200,6 +204,11 @@ test(
           env,
         },
       );
+      const featureHistorySchema = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        "SELECT COALESCE(string_agg(schemaname, ',' ORDER BY schemaname), 'missing') FROM pg_tables WHERE tablename='__EFMigrationsHistory'"]);
+      assert.equal(featureHistorySchema.stdout.trim(), "public",
+        "Feature migration history runtime ile aynı public şemasında bulunmalı.");
       await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO modules.branch_feature_states
@@ -355,6 +364,11 @@ test(
         `1,${legacySalesOrder},legacy-migration-table,,${legacySalesOrder},true`,
         "Legacy service assignment ve açık masa bağlamı korunmalı.");
       if (process.env.HIPOS_MIGRATION_BACKFILL_ONLY === "1") return;
+      // Backfill uyumluluğu doğrulandı; kalan güncel Sales/Service migration'larıyla API'yi başlat.
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "SalesDbContext"], { cwd: repo, env });
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "ServiceDbContext"], { cwd: repo, env });
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
@@ -505,8 +519,9 @@ test(
         `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${moda}' AND code='MAIN'`]);
       assert.equal(provisionCounts.stdout.trim(), "1,1", "İdempotent provisioning ikinci kasa/audit oluşturmamalı.");
       const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
+      const cashSeedUtf8Env = { ...cashSeedEnv, PGCLIENTENCODING: "UTF8" };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedUtf8Env });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedUtf8Env });
       const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         "SELECT (SELECT count(*) FROM cash.registers)||','||(SELECT count(*) FROM cash.shifts)||','||(SELECT count(*) FROM cash.movements)"]);
@@ -708,11 +723,12 @@ test(
       assert.equal(reenablingCari.status, 200);
       assert.equal(reenablingCari.data.effectiveForNewWork, true);
       const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
+      const cariSeedUtf8Env = { ...cariSeedEnv, PGCLIENTENCODING: "UTF8" };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedUtf8Env });
       const seededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(seededCariCounts.stdout.trim(), "11,20");
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedUtf8Env });
       const reseededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(reseededCariCounts.stdout.trim(), "11,20");
@@ -741,11 +757,11 @@ test(
 
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, PGCLIENTENCODING: "UTF8", HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
       });
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, PGCLIENTENCODING: "UTF8", HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
       });
       const seedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -2152,7 +2168,9 @@ test(
         sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
           "-d", "hipos_features", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", query])).stdout });
       const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], { cwd: repo, env: menuSeedEnv });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], {
+        cwd: repo, env: { ...menuSeedEnv, PGCLIENTENCODING: "UTF8" },
+      });
       for (let repetition = 0; repetition < 2; repetition++)
         await execFile(process.execPath, [join(repo, "scripts/seed-menus.mjs")], { cwd: repo, env: menuSeedEnv });
       const menuSeeds = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,

@@ -42,6 +42,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogDraftCommands>();
     builder.Services.AddScoped<CatalogProductActivationCommands>();
     builder.Services.AddScoped<CatalogCategoryCommands>();
+    builder.Services.AddScoped<CatalogOptionGroupCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
     builder.Services.AddScoped<PaidCheckTableSettlement>();
@@ -124,6 +125,7 @@ if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
+if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));

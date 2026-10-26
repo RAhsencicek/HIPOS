@@ -531,6 +531,10 @@ namespace Hipos.Api.Sales.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long>("BaseUnitPriceMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("base_unit_price_minor");
+
                     b.Property<string>("Currency")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -587,7 +591,7 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.ToTable("order_lines", "sales", t =>
                         {
-                            t.HasCheckConstraint("ck_line_price_positive", "unit_price_minor > 0 AND line_total_minor > 0");
+                            t.HasCheckConstraint("ck_line_price_positive", "base_unit_price_minor > 0 AND unit_price_minor >= 0 AND line_total_minor >= 0");
 
                             t.HasCheckConstraint("ck_line_quantity_positive", "quantity > 0");
                         });
@@ -678,7 +682,7 @@ namespace Hipos.Api.Sales.Migrations
 
                             t.HasCheckConstraint("ck_order_status", "status IN ('open')");
 
-                            t.HasCheckConstraint("ck_order_total_positive", "total_minor > 0");
+                            t.HasCheckConstraint("ck_order_total_positive", "total_minor >= 0");
 
                             t.HasCheckConstraint("ck_order_version_positive", "version > 0");
                         });

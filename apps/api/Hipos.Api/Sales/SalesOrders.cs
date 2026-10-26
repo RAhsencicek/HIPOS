@@ -12,15 +12,17 @@ namespace Hipos.Api.Sales;
 public sealed record CreatePosOrder(Guid OrderId, IReadOnlyList<PosOrderItem> Items);
 public sealed record CreateWaiterOrder(Guid OrderId, string WaiterId, IReadOnlyList<PosOrderItem> Items);
 public sealed record PosOrderItem(Guid ProductId, int Quantity, string? Note = null,
-    IReadOnlyList<PosOrderItemOption>? Options = null);
-public sealed record PosOrderItemOption(string GroupName, string OptionName);
+    IReadOnlyList<PosOrderOptionSelection>? Options = null);
+public sealed record PosOrderOptionSelection(Guid GroupId, Guid OptionId, int Quantity = 1);
+public sealed record SalesOrderOptionSnapshot(Guid? GroupId, Guid? OptionId, string GroupName, string OptionName,
+    int Quantity = 1, long PriceDeltaMinor = 0);
 public sealed record SalesOrderLine(
     long Id, string ProductId, string ProductName, string Sku, int Quantity,
-    long UnitPriceMinor, long LineTotalMinor, string Currency, string? Note,
-    IReadOnlyList<PosOrderItemOption> Options);
+    long BaseUnitPriceMinor, long UnitPriceMinor, long LineTotalMinor, string Currency, string? Note,
+    IReadOnlyList<SalesOrderOptionSnapshot> Options);
 public sealed record SalesKitchenLine(
     string ProductId, string ProductName, int Quantity, string? Note,
-    IReadOnlyList<PosOrderItemOption> Options);
+    IReadOnlyList<SalesOrderOptionSnapshot> Options);
 public sealed record SalesOrderDetail(
     string Id, string FirmId, string BranchId, string Source, string Status,
     string PaymentStatus, long TotalMinor, long PaidMinor, long RemainingMinor, string Currency,
@@ -116,17 +118,20 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         if (command.OrderId == Guid.Empty || command.Items is null ||
             command.Items.Count is < 1 or > 20 ||
             command.Items.Any(item => item.ProductId == Guid.Empty || item.Quantity is < 1 or > 99 ||
-                item.Note?.Length > 500 || item.Options is { Count: > 10 } ||
-                item.Options?.Any(option => option is null || string.IsNullOrWhiteSpace(option.GroupName) || option.GroupName.Length > 80 ||
-                    string.IsNullOrWhiteSpace(option.OptionName) || option.OptionName.Length > 120) == true))
+                item.Note?.Length > 500 || item.Options is { Count: > 100 } ||
+                item.Options?.Any(option => option is null || option.GroupId == Guid.Empty || option.OptionId == Guid.Empty ||
+                    option.Quantity is < 1 or > 99) == true ||
+                item.Options?.Select(option => option.OptionId).Distinct().Count() != item.Options?.Count))
             return SalesOrderResult.Rejected("INVALID_ORDER", 400, "Sipariş kimliği veya kalemleri geçersiz.");
 
         var sorted = command.Items.OrderBy(item => item.ProductId).ThenBy(item => item.Note)
-            .ThenBy(item => System.Text.Json.JsonSerializer.Serialize(item.Options ?? [])).ToArray();
+            .ThenBy(item => System.Text.Json.JsonSerializer.Serialize((item.Options ?? []).OrderBy(option => option.GroupId)
+                .ThenBy(option => option.OptionId))).ToArray();
         if (source is not ("test_pos" or "waiter_web"))
             return SalesOrderResult.Rejected("INVALID_ORDER_SOURCE", 400, "Sipariş kaynağı geçersiz.");
         var itemFingerprint = string.Join("|", sorted.Select(item =>
-            $"{item.ProductId:N}:{item.Quantity}:{item.Note?.Trim()}:{System.Text.Json.JsonSerializer.Serialize(item.Options ?? [])}"));
+            $"{item.ProductId:N}:{item.Quantity}:{item.Note?.Trim()}:{System.Text.Json.JsonSerializer.Serialize((item.Options ?? [])
+                .OrderBy(option => option.GroupId).ThenBy(option => option.OptionId))}"));
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             source == "test_pos" ? itemFingerprint : $"{source}|{itemFingerprint}")));
         if (checkId == Guid.Empty || checkToCreate is not null && checkToCreate.Id != checkId)
@@ -191,10 +196,48 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 product.Price.Currency != "TRY")
                 return SalesOrderResult.Rejected(product is { IsActive: false } ? "PRODUCT_INACTIVE" : "PRODUCT_NOT_SELLABLE", 409,
                     "Ürün bu şubede POS satışına açık değil veya geçerli fiyatı yok.");
+            var productOptions = await catalog.GetProductOptionGroupsAsync(firmId, item.ProductId, cancellationToken);
+            var selected = item.Options ?? [];
+            var availableGroups = productOptions?.Items.ToDictionary(group => group.GroupId) ?? [];
+            var snapshots = new List<SalesOrderOptionSnapshot>();
+            long unitPrice = product.Price.AmountMinor;
+            foreach (var group in availableGroups.Values)
+            {
+                var groupSelections = selected.Where(selection => selection.GroupId == group.GroupId).ToArray();
+                if (groupSelections.Length < group.MinSelections ||
+                    group.MaxSelections is { } maxSelections && groupSelections.Length > maxSelections)
+                    return SalesOrderResult.Rejected("INVALID_PRODUCT_OPTIONS", 409,
+                        "Ürün seçenek grubu için seçim sayısı geçersiz.");
+            }
+            if (selected.Any(selection => !availableGroups.ContainsKey(selection.GroupId)))
+                return SalesOrderResult.Rejected("INVALID_PRODUCT_OPTIONS", 409,
+                    "Seçilen grup bu ürüne bağlı değil.");
+            try
+            {
+                foreach (var selection in selected.OrderBy(selection => selection.GroupId).ThenBy(selection => selection.OptionId))
+                {
+                    var group = availableGroups[selection.GroupId];
+                    var option = group.Items.SingleOrDefault(candidate => candidate.Id == selection.OptionId);
+                    if (option is null || (!option.QuantityEnabled && selection.Quantity != 1) ||
+                        selection.Quantity > option.MaxQuantity)
+                        return SalesOrderResult.Rejected("INVALID_PRODUCT_OPTIONS", 409,
+                            "Seçilen seçenek veya adedi geçerli katalogla eşleşmiyor.");
+                    unitPrice = checked(unitPrice + checked(option.PriceDeltaMinor * selection.Quantity));
+                    snapshots.Add(new SalesOrderOptionSnapshot(group.GroupId, option.Id, group.Name, option.Name,
+                        selection.Quantity, option.PriceDeltaMinor));
+                }
+                if (unitPrice < 0)
+                    return SalesOrderResult.Rejected("INVALID_ORDER_PRICE", 409,
+                        "Seçenekler sonrasında ürün birim fiyatı sıfırın altına düşemez.");
+            }
+            catch (OverflowException)
+            {
+                return SalesOrderResult.Rejected("INVALID_ORDER", 400, "Sipariş tutarı geçersiz.");
+            }
             long lineTotal;
             try
             {
-                lineTotal = checked(product.Price.AmountMinor * item.Quantity);
+                lineTotal = checked(unitPrice * item.Quantity);
                 total = checked(total + lineTotal);
             }
             catch (OverflowException)
@@ -205,10 +248,10 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             {
                 OrderId = command.OrderId, ProductId = item.ProductId,
                 ProductName = product.Name, Sku = product.Sku, Quantity = item.Quantity,
-                UnitPriceMinor = product.Price.AmountMinor,
+                BaseUnitPriceMinor = product.Price.AmountMinor, UnitPriceMinor = unitPrice,
                 LineTotalMinor = lineTotal, Currency = "TRY",
                 Note = string.IsNullOrWhiteSpace(item.Note) ? null : item.Note.Trim(),
-                OptionsJson = System.Text.Json.JsonSerializer.Serialize(item.Options ?? []),
+                OptionsJson = System.Text.Json.JsonSerializer.Serialize(snapshots),
             });
         }
 
@@ -223,7 +266,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             TotalMinor = total, Currency = "TRY", RequestFingerprint = fingerprint,
             KitchenItemsJson = System.Text.Json.JsonSerializer.Serialize(lines.Select(line => new SalesKitchenLine(
                 line.ProductId.ToString(), line.ProductName, line.Quantity, line.Note,
-                System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [])).ToArray()),
+                DeserializeOptions(line.OptionsJson))).ToArray()),
             CreatedAt = now, Version = 1, Lines = lines,
         };
         db.Orders.Add(order);
@@ -420,7 +463,20 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             row.Currency, row.CreatedAt, row.Version,
             row.Lines.OrderBy(line => line.ProductId).Select(line =>
                 new SalesOrderLine(line.Id, line.ProductId.ToString(), line.ProductName, line.Sku,
-                    line.Quantity, line.UnitPriceMinor, line.LineTotalMinor, line.Currency, line.Note,
-                    System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [])).ToArray(),
+                    line.Quantity, line.BaseUnitPriceMinor, line.UnitPriceMinor, line.LineTotalMinor, line.Currency, line.Note,
+                    DeserializeOptions(line.OptionsJson))).ToArray(),
             System.Text.Json.JsonSerializer.Deserialize<SalesKitchenLine[]>(row.KitchenItemsJson) ?? []);
+
+    private static SalesOrderOptionSnapshot[] DeserializeOptions(string json)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(json) ?? []; }
+        catch (System.Text.Json.JsonException)
+        {
+            var legacy = System.Text.Json.JsonSerializer.Deserialize<LegacyOrderOption[]>(json) ?? [];
+            return legacy.Select(option => new SalesOrderOptionSnapshot(null, null,
+                option.GroupName, option.OptionName)).ToArray();
+        }
+    }
+
+    private sealed record LegacyOrderOption(string GroupName, string OptionName);
 }

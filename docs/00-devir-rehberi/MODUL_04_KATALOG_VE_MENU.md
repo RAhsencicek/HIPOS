@@ -2,12 +2,12 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Ürün Kartları, Menü Editörü, Fiyat Sürümleri, Seçenek/Varyasyon Grupları (Modifiers) ve QR Menü
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Seçenek Grupları & QR Menü (Hedef / Sırada)
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Seçenek grubu ve sipariş backend'i (uygulandı; ekran entegrasyonu sırada) · QR Menü (hedef)
 > **PostgreSQL Şeması:** `catalog`
 > **Yönetim Paneli:** Var (`CatalogPages.tsx`, `MenusPage.tsx`)
 > **API:** Var (`CatalogDbContext.cs`)
 > **Test:** Var (`MenusPage.test.tsx`, `postgres.test.mjs`)
-> **Üretime Hazır mı?:** Hayır (Ürün seçenek grupları ve masaya özel QR menü yayını eksiktir)
+> **Üretime Hazır mı?:** Hayır (Seçenek yönetim/sipariş ekranı entegrasyonu ve masaya özel QR menü yayını eksiktir)
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
 > * **Güncel teslim ve yol haritası için:** [docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
@@ -25,7 +25,7 @@
   - Şube menü editörü, bölümler ve ürün sıralama
   - Şubede tek aktif menü seçimi ve POS kanalına ürün yayını
 * **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
-  - Ürün seçenekleri / ekstraları (Modifiers: "Büyük Boy +20 TL", "Duble Peynir")
+  - Seçenek grubu yönetim API'si, sipariş sırasında güncel katalogdan doğrulama/fiyatlama ve sipariş anı fiyat snapshot'ı eklendi; yönetim paneli ve sipariş ekranı entegrasyonu bekliyor.
   - Masalara özel karekodlu QR Menü dış yayını
 
 ---
@@ -79,17 +79,12 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
   * `2. Bölüm: Soğuk İçecekler` -> [Ürünleri Ekle ve Sırala]
 * **Tek Aktif Menü Anahtarı:** Bir şubede sadece tek bir menü *"Aktif"* olarak işaretlenebilir; POS ekranı bu aktif menüyü indirir.
 
-### ⚙️ EKRAN 3: Ürün Seçenek Grupları (Modifiers) (Hedef Özellik — Geliştirilecek)
-* Müşterinin ürünü özelleştirmesi için seçenek grupları tanımlanır:
-  * **Porsiyon Grubu (Tekli Seçim - Zorunlu):**
-    * Küçük Boy (+0 TL)
-    * Orta Boy (+30 TL)
-    * Büyük Boy (+60 TL)
-  * **Ekstra Malzemeler (Çoklu Seçim - İsteğe Bağlı):**
-    * Duble Peynir (+25 TL)
-    * Ekstra Mantar (+15 TL)
-    * Acı Sos (+10 TL)
-* Garson sipariş alırken ekranda bu seçenekler açılır ve seçilen ekstralar sipariş kalemine eklenir.
+### ⚙️ EKRAN 3: Ürün Seçenek Grupları (Modifiers) (Backend var; ekran entegrasyonu bekliyor)
+* Seçenek grupları firmada tanımlanır ve birden fazla üründe tekrar kullanılabilir. Bir ürüne birden fazla grup bağlanabilir; grubu olmayan ürün de geçerlidir. Örneğin “Boyut” grubu yalnızca boyut seçeneği sunulan ürünlere bağlanır.
+* Grup seçim sınırları ürün-grup bağlantısında tutulur. Böylece aynı grup bir üründe zorunlu, başka bir üründe isteğe bağlı olabilir. `min_selections` ve `max_selections` farklı seçilmiş seçenek sayısını sınırlar; bir seçeneğin adedi bu sayıya dahil değildir. `max_selections` boşsa gruptaki farklı seçeneklerin tümü seçilebilir.
+* Seçeneklerde işaretli `price_delta_minor` fiyat farkı bulunur. TRY için tutar kuruş cinsinden saklanır; negatif fark desteklenir. Seçenek bazında adet girişi açılabilir ve azami adet tanımlanabilir. Adet girişi kapalı seçenek bir kez seçilir.
+* Ürün pasifse yeni siparişe eklenemez. Pasif grup ve seçenekler ise yeni siparişte seçilebilir; bu alanların `is_active` değeri seçim doğrulamasını engellemez.
+* Sipariş sırasında seçenekler güncel katalogdan doğrulanır. Ürün başına fiyat, temel fiyat ile her seçeneğin birim fiyat farkının seçilen adetle çarpılmış toplamıdır. Sonuç sıfırın altındaysa sipariş reddedilir. Temel fiyat ve seçilen seçeneklerin adı, adedi ve birim fiyat farkı sipariş anındaki değerleriyle sipariş kaleminde saklanır.
 
 ### 📱 EKRAN 4: Masaya Özel QR Menü Yayını (Hedef Özellik — Geliştirilecek)
 * Masanın üzerine konulacak karekodun çıktısı:
@@ -107,45 +102,38 @@ graph TD
 ```
 
 1. **1. Adım: Seçenek Grupları (Modifiers) Veri Modeli:**
-   * `catalog.option_groups` ve `catalog.option_items` tablolarının eklenmesi.
+   * Tamamlandı: `catalog.option_groups`, `catalog.option_items`, `catalog.product_option_groups` tabloları ve firma kapsamlı okuma/yazma API'si. Grup tekrar kullanımı, seçim sınırları, seçenek adedi, sürümleme ve denetim desteklenir.
 2. **2. Adım: Sipariş Kalemine Seçeneklerin Bağlanması:**
-   * Garson pizzayı seçtiğinde boyut ve ekstra seçeneklerinin sepete işlenmesi.
+   * Sipariş API'sinin güncel katalogdan seçenek kimliği/adedi doğrulaması, fiyatı sunucuda hesaplaması ve sipariş anı görüntüsünü kalemde saklaması. Yönetim paneli, garson ekranı ve QR menü bu veri modeli/API adımının kapsamı değildir.
 3. **3. Adım: Masaya Özel QR Kod:**
    * Şube ve masa bazlı QR kod PDF çıktısı üretici.
 
 ---
 
-## 💾 6. Veritabanı ve Şema Modelleri
+## 💾 6. Veritabanı ve Şema Tasarımı (EF modeli ve migration mevcut)
 
-```sql
--- Ürün Seçenek Grupları (Modifiers)
-CREATE TABLE catalog.option_groups (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    firm_id UUID NOT NULL,
-    name VARCHAR(100) NOT NULL,          -- "Boyut Seçimi", "Ekstra Malzeme"
-    is_required BOOLEAN NOT NULL DEFAULT false,
-    min_selections INT NOT NULL DEFAULT 0,
-    max_selections INT NOT NULL DEFAULT 1,
-    is_active BOOLEAN NOT NULL DEFAULT true
-);
+Hedef model üç iş tablosu ve bir denetim tablosundan oluşur. EF modeli, `AddCatalogProductOptions` ve `AddCatalogOptionManagementAudit` migration'ları ile grup yönetim API'si eklendi; migration'lar yerel geliştirme PostgreSQL veritabanına uygulandı. Sipariş doğrulaması henüz bu tabloları kullanmaz:
 
--- Seçenek Kalemleri
-CREATE TABLE catalog.option_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    group_id UUID NOT NULL REFERENCES catalog.option_groups(id),
-    name VARCHAR(100) NOT NULL,          -- "Büyük Boy", "Duble Peynir"
-    price_delta_minor BIGINT NOT NULL DEFAULT 0, -- +3000 (30 TL)
-    is_active BOOLEAN NOT NULL DEFAULT true
-);
-```
+| Yapı | Sorumluluk ve alanlar |
+| --- | --- |
+| `catalog.option_groups` | Firma kapsamındaki tekrar kullanılabilir grup: kimlik, `firm_id`, ad, `is_active` ve sıralama. |
+| `catalog.option_items` | Gruba bağlı seçenek: kimlik, `group_id`, ad, işaretli `price_delta_minor BIGINT`, `quantity_enabled`, `max_quantity`, `is_active` ve sıralama. `max_quantity` en az 1 olmalı; adet girişi kapalıysa seçenek adedi 1'dir. |
+| `catalog.product_option_groups` | Ürün-grup bağlantısı: `product_id`, `option_group_id`, `min_selections`, boş bırakılabilen `max_selections` ve ürün üzerindeki sıralama. Aynı ürün-grup çifti tek kez bulunur. `min_selections >= 0`; üst sınır varsa alt sınırdan küçük olamaz. |
+| `catalog.option_management_audit` | Grup, seçenek ve ürün-grup komutlarının `request_id`, aktör, işlem, fingerprint, sürüm ve JSON anlık görüntüsünü tutar. |
+
+Seçim alt/üst sınırları bağlantıda tutulur; sayım farklı seçenek kimlikleri üzerinden yapılır. Seçenek adedi, grubun farklı seçenek sınırını değiştirmez. `max_selections` boşsa farklı seçenek adedi için ayrıca grup üst sınırı uygulanmaz. Grup veya seçenek pasif olsa da sipariş seçimi doğrulamasında kullanılabilir. Ürün pasifliği sipariş kuralı olarak ayrıca uygulanır.
+
+Ürünün mevcut `option_groups` metin dizisi bu normalize modelin kaynağı değildir. Bu yeni model için eski değerler taşınmayacaktır; alanın kaldırılması, eski kod tüketicileri yeni ilişkilere geçirildikten sonraki ileri migration'da yapılmalıdır.
 
 ---
 
 ## ✅ 7. Kabul Kriterleri (Devir Doğrulama Testi)
 
-1. Bir pizzaya "Büyük Boy (+40 TL)" seçeneği eklendiğinde sipariş toplamı otomatik 40 TL artmalıdır.
-2. Yönetici bir ürünün fiyatını değiştirdiğinde eski adisyonlar etkilenmemeli, yeni siparişler yeni fiyattan açılmalıdır.
-3. `npm test` ve `npm run test:api` testleri hatasız geçmelidir.
+1. Bir ürün birden fazla tekrar kullanılabilir gruba bağlanabilir; grup bağlanmamış ürün geçerlidir ve aynı grup birden fazla üründe kullanılabilir.
+2. Grubun seçim alt/üst sınırları farklı seçilmiş seçenek sayısına uygulanır; adetli seçenek miktarı bu sınırlara dahil edilmez.
+3. Adetli seçeneğin fiyat farkı seçenek adediyle çarpılır. Temel fiyat + seçenek farkları sıfırın altına inerse yeni sipariş reddedilir; sıfır fiyat kabul edilir.
+4. Sipariş kalemi temel fiyatı, seçenek adlarını, adetlerini ve sipariş anındaki birim fiyat farklarını saklar; katalogdaki sonraki değişiklikler geçmiş sipariş görüntüsünü değiştirmez.
+5. Pasif ürünle yeni sipariş reddedilir. Pasif grup veya seçenek, diğer ürün ve seçim kuralları sağlanıyorsa seçilebilir.
 
 ---
 

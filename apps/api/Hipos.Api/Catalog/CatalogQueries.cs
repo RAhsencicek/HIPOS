@@ -22,9 +22,64 @@ public sealed record CatalogProductDetail(
 public sealed record CatalogProductList(
     IReadOnlyList<CatalogProduct> Items, CatalogPageInfo PageInfo,
     CatalogScope Scope, IReadOnlyList<CatalogCategory> Categories);
+public sealed record CatalogOptionItemInfo(
+    Guid Id, string Name, long PriceDeltaMinor, bool QuantityEnabled,
+    int MaxQuantity, bool IsActive, int SortOrder);
+public sealed record CatalogOptionGroupInfo(
+    Guid Id, string Name, bool IsActive, int SortOrder, int Version,
+    DateTimeOffset UpdatedAt, IReadOnlyList<CatalogOptionItemInfo> Items);
+public sealed record CatalogProductOptionGroupInfo(
+    Guid GroupId, string Name, bool IsActive, int MinSelections, int? MaxSelections,
+    int SortOrder, int GroupVersion, IReadOnlyList<CatalogOptionItemInfo> Items);
+public sealed record CatalogProductOptionGroups(
+    Guid ProductId, int ProductVersion, IReadOnlyList<CatalogProductOptionGroupInfo> Items);
 
 public sealed class CatalogQueries(CatalogDbContext db)
 {
+    public async Task<IReadOnlyList<CatalogOptionGroupInfo>> ListOptionGroupsAsync(
+        string firmId, CancellationToken cancellationToken)
+    {
+        var groups = await db.OptionGroups.AsNoTracking().Where(row => row.FirmId == firmId)
+            .OrderBy(row => row.SortOrder).ThenBy(row => row.Name).ThenBy(row => row.Id)
+            .ToListAsync(cancellationToken);
+        var groupIds = groups.Select(row => row.Id).ToArray();
+        var options = await db.OptionItems.AsNoTracking().Where(row => groupIds.Contains(row.GroupId))
+            .OrderBy(row => row.SortOrder).ThenBy(row => row.Name).ThenBy(row => row.Id)
+            .ToListAsync(cancellationToken);
+        return groups.Select(group => ToOptionGroupInfo(group, options.Where(option => option.GroupId == group.Id))).ToArray();
+    }
+
+    public async Task<CatalogProductOptionGroups?> GetProductOptionGroupsAsync(
+        string firmId, Guid productId, CancellationToken cancellationToken)
+    {
+        var product = await db.Products.AsNoTracking()
+            .Where(row => row.Id == productId && row.FirmId == firmId)
+            .Select(row => new { row.Id, row.Version })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (product is null) return null;
+
+        var links = await db.ProductOptionGroups.AsNoTracking()
+            .Where(row => row.ProductId == productId)
+            .OrderBy(row => row.SortOrder).ThenBy(row => row.OptionGroupId)
+            .ToListAsync(cancellationToken);
+        var groupIds = links.Select(row => row.OptionGroupId).ToArray();
+        var groups = await db.OptionGroups.AsNoTracking()
+            .Where(row => row.FirmId == firmId && groupIds.Contains(row.Id))
+            .ToDictionaryAsync(row => row.Id, cancellationToken);
+        var options = await db.OptionItems.AsNoTracking().Where(row => groupIds.Contains(row.GroupId))
+            .OrderBy(row => row.SortOrder).ThenBy(row => row.Name).ThenBy(row => row.Id)
+            .ToListAsync(cancellationToken);
+        return new CatalogProductOptionGroups(product.Id, product.Version, links
+            .Where(link => groups.ContainsKey(link.OptionGroupId))
+            .Select(link =>
+            {
+                var group = groups[link.OptionGroupId];
+                return new CatalogProductOptionGroupInfo(group.Id, group.Name, group.IsActive,
+                    link.MinSelections, link.MaxSelections, link.SortOrder, group.Version,
+                    options.Where(option => option.GroupId == group.Id).Select(ToOptionItemInfo).ToArray());
+            }).ToArray());
+    }
+
     public async Task<CatalogCategoryList> ListCategoriesAsync(
         CatalogScope scope, CancellationToken cancellationToken)
     {
@@ -97,6 +152,15 @@ public sealed class CatalogQueries(CatalogDbContext db)
             new CatalogMoney(overridePrice?.AmountMinor ?? row.BasePriceMinor, row.Currency),
             overridePrice is null ? "central" : "branch_override", row.UpdatedAt, row.Version);
     }
+
+    internal static CatalogOptionGroupInfo ToOptionGroupInfo(
+        CatalogOptionGroupRow group, IEnumerable<CatalogOptionItemRow> options) =>
+        new(group.Id, group.Name, group.IsActive, group.SortOrder, group.Version, group.UpdatedAt,
+            options.Select(ToOptionItemInfo).ToArray());
+
+    internal static CatalogOptionItemInfo ToOptionItemInfo(CatalogOptionItemRow option) =>
+        new(option.Id, option.Name, option.PriceDeltaMinor, option.QuantityEnabled,
+            option.MaxQuantity, option.IsActive, option.SortOrder);
 
     private static string EscapeLike(string term) =>
         term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
