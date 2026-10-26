@@ -142,7 +142,7 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
         key is "catalog.drafts" or "catalog.price_drafts" or "catalog.publishing" or "catalog.menus";
 
     private static bool IsInventoryFeature(string key) =>
-        key is "inventory.items" or "inventory.recipes" or "inventory.counts";
+        key is "inventory.items" or "inventory.recipes" or "inventory.counts" or "procurement.requests";
 
     private static bool IsCariFeature(string key) => key == "cari.management";
 

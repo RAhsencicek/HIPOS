@@ -28,6 +28,7 @@ import { FutureFeaturePage } from "../shared/FutureFeaturePage";
 import { CarilerDemoPage, RecipesDemoPage, StockDemoPage } from "../features/demo/DemoBusinessPages";
 import { CarilerHttpPage } from "../features/demo/CarilerHttpPage";
 import { InventoryHttpPage } from "../features/inventory/InventoryHttpPage";
+import { ReceivingPage } from "../features/inventory/ReceivingPage";
 import { CashManagementPage } from "../features/cash/CashManagementPage";
 import { ExpenseManagementPage } from "../features/expenses/ExpenseManagementPage";
 
@@ -168,10 +169,12 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   const inventoryItemsState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "inventory.items") : undefined;
   const inventoryRecipesState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "inventory.recipes") : undefined;
   const inventoryCountsState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "inventory.counts") : undefined;
+  const procurementState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "procurement.requests") : undefined;
   const personnelState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "staff.records") : undefined;
   const canWriteInventoryItems = Boolean(scope && inventorySource === "http" && featureSource === "http" && inventoryItemsState?.effectiveForNewWork);
   const canWriteInventoryRecipes = Boolean(scope && inventorySource === "http" && featureSource === "http" && inventoryRecipesState?.effectiveForNewWork);
   const canWriteInventoryCounts = Boolean(scope && inventorySource === "http" && featureSource === "http" && inventoryCountsState?.effectiveForNewWork);
+  const canWriteProcurement = Boolean(scope && inventorySource === "http" && cariSource === "http" && featureSource === "http" && procurementState?.effectiveForNewWork);
   const canWritePersonnel = Boolean(scope && serviceSource === "http" && featureSource === "http" && personnelState?.effectiveForNewWork);
   const cashState = featureLoad.status === "success" ? featureLoad.states.find((entry) => entry.key === "cash.management") : undefined;
   const canWriteCash = Boolean(scope && cashSource === "http" && featureSource === "http" && cashState?.effectiveForNewWork);
@@ -244,6 +247,10 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     content = inventorySource === "http"
       ? <InventoryHttpPage ctx={ctx} view={item === "warehouse-stock" ? "warehouseStock" : item as "ingredients" | "critical" | "movements" | "counts"} canWriteItems={canWriteInventoryItems} canWriteRecipes={canWriteInventoryRecipes} canWriteCounts={canWriteInventoryCounts} />
       : <StockDemoPage ctx={ctx} view={item as "ingredients" | "critical" | "movements" | "counts"} />;
+  } else if (section === "inventory" && item === "receiving") {
+    content = inventorySource === "http" && cariSource === "http"
+      ? <ReceivingPage ctx={ctx} canWrite={canWriteProcurement} />
+      : <FutureFeaturePage section={sections.find(entry => entry.id === "inventory")!} title="Mal Kabul" slug="receiving" />;
   } else if ((section === "customers" && ["customers", "accounts", "history"].includes(item)) ||
     (section === "inventory" && item === "suppliers")) {
     const kind = section === "inventory" ? "supplier" : item === "customers" || item === "history" ? "customer" : "all";

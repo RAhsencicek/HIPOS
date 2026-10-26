@@ -806,6 +806,29 @@ test(
       assert.equal(inventoryRecipesEnabled.data.effectiveForNewWork, true);
       const inventoryCountsEnabled = await request(inventoryFeaturePath("inventory.counts"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
       assert.equal(inventoryCountsEnabled.data.effectiveForNewWork, true);
+      const procurementEnabled = await request(inventoryFeaturePath("procurement.requests"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
+      assert.equal(procurementEnabled.data.effectiveForNewWork, true);
+
+      const supplier = (await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items
+        .find((party) => party.types.includes("supplier"));
+      assert.ok(supplier, "Mal kabul testi için etkin tedarikçi bulunmalı.");
+      const purchaseId = "44444444-4444-4444-8444-444444444420";
+      const purchaseApprovalId = "44444444-4444-4444-8444-444444444421";
+      const purchasePath = `${singleInventory}/purchases`;
+      const purchaseDraft = await request(purchasePath, "POST", {
+        requestId: purchaseId, warehouseId: "warehouse-kadikoy-main", supplierCariId: supplier.id,
+        documentNumber: "TEST-MK-001", documentDate: "2026-10-26",
+        lines: [{ ingredientId: "flour", quantity: 10, unitPriceMinor: 3000, discountRateBps: 0, taxRateBps: 100 }],
+      }, "manager-single");
+      assert.equal(purchaseDraft.status, 201, JSON.stringify(purchaseDraft.data));
+      assert.equal(purchaseDraft.data.status, "draft");
+      assert.equal(purchaseDraft.data.totalMinor, 30300);
+      assert.equal((await request(purchasePath, "GET", undefined, "manager-single")).data.items
+        .find((purchase) => purchase.id === purchaseId).lines[0].ingredientName, "Un");
+      const blockedPurchaseApproval = await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single");
+      assert.equal(blockedPurchaseApproval.data.code, "COUNT_IN_PROGRESS");
 
       const recipeBody = { requestId: "44444444-4444-4444-8444-444444444405", expectedVersion: 1, portion: "1 büyük pizza",
         lines: [{ ingredientId: "flour", quantity: 260 }, { ingredientId: "tomato-sauce", quantity: 80 }, { ingredientId: "mozzarella", quantity: 120 }] };
@@ -837,6 +860,62 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM inventory.movements WHERE count_id='${demoCount.id}' AND ingredient_id='mozzarella' AND delta=-100 AND kind='count_adjustment'`]);
       assert.equal(adjustmentCount.stdout.trim(), "1");
+
+      const approvedPurchase = await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single");
+      assert.equal(approvedPurchase.status, 200, JSON.stringify(approvedPurchase.data));
+      assert.equal(approvedPurchase.data.status, "approved");
+      assert.equal((await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single")).status, 200);
+      const purchaseEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_id='${purchaseId}' AND kind='receiving')||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${purchaseApprovalId}' AND entry_type='supplier_debt' AND delta_minor=30300)`]);
+      assert.equal(purchaseEffects.stdout.trim(), "1,1", "Mal kabul onayı stok ve cari etkisini yalnız bir kez üretmeli.");
+      const purchaseLineId = approvedPurchase.data.lines[0].id;
+      const correctionId = "44444444-4444-4444-8444-444444444422";
+      const purchaseCorrectionPath = `${purchasePath}/${purchaseId}/corrections`;
+      const correctedPurchase = await request(purchaseCorrectionPath, "POST", {
+        requestId: correctionId, purchaseLineId, quantity: 2, reason: "Testte eksik teslim",
+      }, "manager-single");
+      assert.equal(correctedPurchase.status, 201, JSON.stringify(correctedPurchase.data));
+      assert.equal(correctedPurchase.data.totalMinor, 6060);
+      assert.equal((await request(purchaseCorrectionPath, "POST", {
+        requestId: correctionId, purchaseLineId, quantity: 2, reason: "Testte eksik teslim",
+      }, "manager-single")).status, 200);
+      assert.equal((await request(purchaseCorrectionPath, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444423", purchaseLineId, quantity: 9,
+        reason: "Kabul edilenden fazla düzeltme",
+      }, "manager-single")).data.code, "PURCHASE_CORRECTION_EXCEEDS_RECEIPT");
+      const correctionEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_correction_id='${correctionId}' AND kind='purchase_correction' AND delta=-2)||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${correctionId}' AND entry_type='adjustment_decrease' AND delta_minor=-6060)`]);
+      assert.equal(correctionEffects.stdout.trim(), "1,1", "Eksik teslim düzeltmesi stok ve cari etkisini yalnız bir kez üretmeli.");
+      const returnId = "44444444-4444-4444-8444-444444444424";
+      const purchaseReturnPath = `${purchasePath}/${purchaseId}/returns`;
+      const returnedPurchase = await request(purchaseReturnPath, "POST", {
+        requestId: returnId, purchaseLineId, documentNumber: "TEST-IADE-001", documentDate: "2026-10-26",
+        quantity: 3, reason: "Testte kalite iadesi",
+      }, "manager-single");
+      assert.equal(returnedPurchase.status, 201, JSON.stringify(returnedPurchase.data));
+      assert.equal(returnedPurchase.data.totalMinor, 9090);
+      assert.equal((await request(purchaseReturnPath, "POST", {
+        requestId: returnId, purchaseLineId, documentNumber: "TEST-IADE-001", documentDate: "2026-10-26",
+        quantity: 3, reason: "Testte kalite iadesi",
+      }, "manager-single")).status, 200);
+      assert.equal((await request(purchaseReturnPath, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444425", purchaseLineId,
+        documentNumber: "TEST-IADE-002", documentDate: "2026-10-26", quantity: 6,
+        reason: "Kabul edilenden fazla iade",
+      }, "manager-single")).data.code, "PURCHASE_RETURN_EXCEEDS_RECEIPT");
+      const returnEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_return_id='${returnId}' AND kind='supplier_return' AND delta=-3)||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${returnId}' AND entry_type='adjustment_decrease' AND delta_minor=-9090)`]);
+      assert.equal(returnEffects.stdout.trim(), "1,1", "Tedarikçi iadesi stok ve cari etkisini yalnız bir kez üretmeli.");
 
       const newIngredient = { requestId: "44444444-4444-4444-8444-444444444401", name: "Test Malzeme", unit: "g", criticalBelow: 10 };
       const createdIngredient = await request(`${singleInventory}/ingredients`, "POST", newIngredient, "manager-single");

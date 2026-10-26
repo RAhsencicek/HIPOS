@@ -58,6 +58,8 @@ export function featurePresentation(section: string, item: string, sources: Sour
   if (section === "inventory" && sources.inventorySource === "http" &&
     ["summary", "critical", "ingredients", "movements", "counts", "recipes"].includes(item))
     return { stage: "working", label: "Çalışıyor", description };
+  if (key === "inventory/receiving" && sources.inventorySource === "http" && sources.cariSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
   if (key === "branches/tables" && sources.serviceSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "kitchen/personnel" && sources.serviceSource === "http")

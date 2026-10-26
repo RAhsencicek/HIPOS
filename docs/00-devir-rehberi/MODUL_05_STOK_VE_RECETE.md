@@ -2,12 +2,12 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi, Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Otomatik Tüketim & Mal Kabul (Hedef / Sırada)
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Eksik Teslim ve Tedarikçi İadesi (Çalışıyor) · Otomatik Tüketim (Hedef / Sırada)
 > **PostgreSQL Şeması:** `inventory`
 > **Yönetim Paneli:** Var (`InventoryHttpPage.tsx`)
 > **API:** Var (`InventoryDbContext.cs`)
 > **Test:** Var (`STOK_REÇETE_SAYIM_MANUEL_TEST.md`, `postgres.test.mjs`)
-> **Üretime Hazır mı?:** Hayır (Otomatik reçeteli stok düşümü ve mal kabul irsaliyesi eksiktir)
+> **Üretime Hazır mı?:** Hayır (Otomatik reçeteli stok düşümü, gerçek kullanıcı/PIN yetkisi ve çevrimdışı eşitleme eksiktir)
 > **Ana Devir Rehberi:** [DEVIR_REHBERI.md](DEVIR_REHBERI.md) · **Yol Haritası:** [DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
 
 > **Dokümantasyon Hiyerarşisi:**
@@ -28,7 +28,7 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Yok** | Fatura/irsaliye ile toptancı girişi henüz kodlanmadı |
+| **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
 | **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
 | **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
 
@@ -70,7 +70,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * Depodaki mevcut hammaddeler: Adı, Birimi (kg, litre, adet), Sistem Miktarı, Kritik Eşik.
 * **Kritik Eşik Alarmları:**
   * Eğer Mozzarella 2 kg'ın altına düşmüşse kırmızı uyarı rozeti: `⚠️ Kritik Stok: Mozzarella (1.400 g kaldı)`.
-* Satın alma talebi açma, mal kabul ve tedarikçi belgesi bu ekranda henüz yoktur.
+* Satın alma talebi henüz yoktur; mal kabul, eksik teslim düzeltmesi ve tedarikçi iadesi ayrı mal kabul ekranında çalışır.
 
 ### 🍕 EKRAN 2: Reçeteli Otomatik Stok Düşümü (Satış Olayı Entegrasyonu) (Hedef Arka Plan Servisi — Geliştirilecek)
 * Sistemde tanımlı Margherita Pizza Reçetesi:

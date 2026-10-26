@@ -65,8 +65,92 @@ public sealed class InventoryMovementRow
     public string Kind { get; set; } = "";
     public string Description { get; set; } = "";
     public string? CountId { get; set; }
+    public string? PurchaseId { get; set; }
+    public string? PurchaseCorrectionId { get; set; }
+    public string? PurchaseReturnId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public string Actor { get; set; } = "";
+}
+
+public sealed class InventoryPurchaseRow
+{
+    public string Id { get; set; } = "";
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string WarehouseId { get; set; } = "";
+    public string SupplierCariId { get; set; } = "";
+    public string DocumentNumber { get; set; } = "";
+    public DateOnly DocumentDate { get; set; }
+    public string Status { get; set; } = "draft";
+    public string Currency { get; set; } = "TRY";
+    public long SubtotalMinor { get; set; }
+    public long DiscountMinor { get; set; }
+    public long TaxMinor { get; set; }
+    public long TotalMinor { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public string? ApprovedBy { get; set; }
+    public string? ApprovalRequestId { get; set; }
+    public List<InventoryPurchaseLineRow> Lines { get; set; } = [];
+    public List<InventoryPurchaseCorrectionRow> Corrections { get; set; } = [];
+    public List<InventoryPurchaseReturnRow> Returns { get; set; } = [];
+}
+
+public sealed class InventoryPurchaseLineRow
+{
+    public string Id { get; set; } = "";
+    public string PurchaseId { get; set; } = "";
+    public string IngredientId { get; set; } = "";
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "";
+    public long UnitPriceMinor { get; set; }
+    public int DiscountRateBps { get; set; }
+    public int TaxRateBps { get; set; }
+    public long SubtotalMinor { get; set; }
+    public long DiscountMinor { get; set; }
+    public long NetMinor { get; set; }
+    public long TaxMinor { get; set; }
+    public long TotalMinor { get; set; }
+}
+
+public sealed class InventoryPurchaseCorrectionRow
+{
+    public string Id { get; set; } = "";
+    public string PurchaseId { get; set; } = "";
+    public string PurchaseLineId { get; set; } = "";
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public long SubtotalMinor { get; set; }
+    public long DiscountMinor { get; set; }
+    public long NetMinor { get; set; }
+    public long TaxMinor { get; set; }
+    public long TotalMinor { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
+}
+
+public sealed class InventoryPurchaseReturnRow
+{
+    public string Id { get; set; } = "";
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string PurchaseId { get; set; } = "";
+    public string PurchaseLineId { get; set; } = "";
+    public string DocumentNumber { get; set; } = "";
+    public DateOnly DocumentDate { get; set; }
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public long SubtotalMinor { get; set; }
+    public long DiscountMinor { get; set; }
+    public long NetMinor { get; set; }
+    public long TaxMinor { get; set; }
+    public long TotalMinor { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
 }
 
 public sealed class InventoryCountRow
@@ -121,6 +205,10 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<InventoryMovementRow> Movements => Set<InventoryMovementRow>();
     public DbSet<InventoryCountRow> Counts => Set<InventoryCountRow>();
     public DbSet<InventoryCountLineRow> CountLines => Set<InventoryCountLineRow>();
+    public DbSet<InventoryPurchaseRow> Purchases => Set<InventoryPurchaseRow>();
+    public DbSet<InventoryPurchaseLineRow> PurchaseLines => Set<InventoryPurchaseLineRow>();
+    public DbSet<InventoryPurchaseCorrectionRow> PurchaseCorrections => Set<InventoryPurchaseCorrectionRow>();
+    public DbSet<InventoryPurchaseReturnRow> PurchaseReturns => Set<InventoryPurchaseReturnRow>();
     public DbSet<InventoryAuditRow> Audit => Set<InventoryAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -202,7 +290,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.ToTable("movements", table =>
             {
                 table.HasCheckConstraint("ck_inventory_movement_nonzero", "delta <> 0");
-                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment')");
+                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return')");
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
@@ -215,13 +303,136 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.Property(row => row.Kind).HasColumnName("kind").HasMaxLength(24);
             entity.Property(row => row.Description).HasColumnName("description").HasMaxLength(500);
             entity.Property(row => row.CountId).HasColumnName("count_id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseId).HasColumnName("purchase_id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseCorrectionId).HasColumnName("purchase_correction_id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseReturnId).HasColumnName("purchase_return_id").HasMaxLength(80);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(80);
             entity.HasOne<InventoryIngredientRow>().WithMany().HasForeignKey(row => row.IngredientId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<InventoryWarehouseRow>().WithMany().HasForeignKey(row => row.WarehouseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<InventoryCountRow>().WithMany().HasForeignKey(row => row.CountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryPurchaseRow>().WithMany().HasForeignKey(row => row.PurchaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryPurchaseCorrectionRow>().WithMany().HasForeignKey(row => row.PurchaseCorrectionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryPurchaseReturnRow>().WithMany().HasForeignKey(row => row.PurchaseReturnId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.WarehouseId, row.IngredientId, row.CreatedAt });
             entity.HasIndex(row => new { row.CountId, row.IngredientId }).IsUnique().HasFilter("count_id IS NOT NULL");
+            entity.HasIndex(row => new { row.PurchaseId, row.IngredientId }).IsUnique().HasFilter("purchase_id IS NOT NULL");
+            entity.HasIndex(row => row.PurchaseCorrectionId).IsUnique().HasFilter("purchase_correction_id IS NOT NULL");
+            entity.HasIndex(row => row.PurchaseReturnId).IsUnique().HasFilter("purchase_return_id IS NOT NULL");
+        });
+        modelBuilder.Entity<InventoryPurchaseRow>(entity =>
+        {
+            entity.ToTable("purchases", table =>
+            {
+                table.HasCheckConstraint("ck_purchase_status", "status IN ('draft', 'approved')");
+                table.HasCheckConstraint("ck_purchase_currency", "currency = 'TRY'");
+                table.HasCheckConstraint("ck_purchase_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+                table.HasCheckConstraint("ck_purchase_version", "version > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.WarehouseId).HasColumnName("warehouse_id").HasMaxLength(80);
+            entity.Property(row => row.SupplierCariId).HasColumnName("supplier_cari_id").HasMaxLength(80);
+            entity.Property(row => row.DocumentNumber).HasColumnName("document_number").HasMaxLength(100);
+            entity.Property(row => row.DocumentDate).HasColumnName("document_date").HasColumnType("date");
+            entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
+            entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(row => row.SubtotalMinor).HasColumnName("subtotal_minor");
+            entity.Property(row => row.DiscountMinor).HasColumnName("discount_minor");
+            entity.Property(row => row.TaxMinor).HasColumnName("tax_minor");
+            entity.Property(row => row.TotalMinor).HasColumnName("total_minor");
+            entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.CreatedBy).HasColumnName("created_by").HasMaxLength(80);
+            entity.Property(row => row.ApprovedAt).HasColumnName("approved_at");
+            entity.Property(row => row.ApprovedBy).HasColumnName("approved_by").HasMaxLength(80);
+            entity.Property(row => row.ApprovalRequestId).HasColumnName("approval_request_id").HasMaxLength(80);
+            entity.HasOne<InventoryWarehouseRow>().WithMany().HasForeignKey(row => row.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.DocumentNumber }).IsUnique();
+            entity.HasIndex(row => row.ApprovalRequestId).IsUnique().HasFilter("approval_request_id IS NOT NULL");
+        });
+        modelBuilder.Entity<InventoryPurchaseLineRow>(entity =>
+        {
+            entity.ToTable("purchase_lines", table =>
+            {
+                table.HasCheckConstraint("ck_purchase_line_quantity", "quantity > 0");
+                table.HasCheckConstraint("ck_purchase_line_price", "unit_price_minor > 0");
+                table.HasCheckConstraint("ck_purchase_line_rates", "discount_rate_bps BETWEEN 0 AND 10000 AND tax_rate_bps BETWEEN 0 AND 10000");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseId).HasColumnName("purchase_id").HasMaxLength(80);
+            entity.Property(row => row.IngredientId).HasColumnName("ingredient_id").HasMaxLength(80);
+            entity.Property(row => row.Quantity).HasColumnName("quantity").HasPrecision(18, 3);
+            entity.Property(row => row.Unit).HasColumnName("unit").HasMaxLength(12);
+            entity.Property(row => row.UnitPriceMinor).HasColumnName("unit_price_minor");
+            entity.Property(row => row.DiscountRateBps).HasColumnName("discount_rate_bps");
+            entity.Property(row => row.TaxRateBps).HasColumnName("tax_rate_bps");
+            entity.Property(row => row.SubtotalMinor).HasColumnName("subtotal_minor");
+            entity.Property(row => row.DiscountMinor).HasColumnName("discount_minor");
+            entity.Property(row => row.NetMinor).HasColumnName("net_minor");
+            entity.Property(row => row.TaxMinor).HasColumnName("tax_minor");
+            entity.Property(row => row.TotalMinor).HasColumnName("total_minor");
+            entity.HasOne<InventoryPurchaseRow>().WithMany(row => row.Lines).HasForeignKey(row => row.PurchaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryIngredientRow>().WithMany().HasForeignKey(row => row.IngredientId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.PurchaseId, row.IngredientId }).IsUnique();
+        });
+        modelBuilder.Entity<InventoryPurchaseCorrectionRow>(entity =>
+        {
+            entity.ToTable("purchase_corrections", table =>
+            {
+                table.HasCheckConstraint("ck_purchase_correction_quantity", "quantity > 0");
+                table.HasCheckConstraint("ck_purchase_correction_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseId).HasColumnName("purchase_id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseLineId).HasColumnName("purchase_line_id").HasMaxLength(80);
+            entity.Property(row => row.Quantity).HasColumnName("quantity").HasPrecision(18, 3);
+            entity.Property(row => row.Unit).HasColumnName("unit").HasMaxLength(12);
+            entity.Property(row => row.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(row => row.SubtotalMinor).HasColumnName("subtotal_minor");
+            entity.Property(row => row.DiscountMinor).HasColumnName("discount_minor");
+            entity.Property(row => row.NetMinor).HasColumnName("net_minor");
+            entity.Property(row => row.TaxMinor).HasColumnName("tax_minor");
+            entity.Property(row => row.TotalMinor).HasColumnName("total_minor");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.CreatedBy).HasColumnName("created_by").HasMaxLength(80);
+            entity.HasOne<InventoryPurchaseRow>().WithMany(row => row.Corrections).HasForeignKey(row => row.PurchaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryPurchaseLineRow>().WithMany().HasForeignKey(row => row.PurchaseLineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.PurchaseId, row.PurchaseLineId, row.CreatedAt });
+        });
+        modelBuilder.Entity<InventoryPurchaseReturnRow>(entity =>
+        {
+            entity.ToTable("purchase_returns", table =>
+            {
+                table.HasCheckConstraint("ck_purchase_return_quantity", "quantity > 0");
+                table.HasCheckConstraint("ck_purchase_return_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.PurchaseId).HasColumnName("purchase_id").HasMaxLength(80);
+            entity.Property(row => row.PurchaseLineId).HasColumnName("purchase_line_id").HasMaxLength(80);
+            entity.Property(row => row.DocumentNumber).HasColumnName("document_number").HasMaxLength(100);
+            entity.Property(row => row.DocumentDate).HasColumnName("document_date").HasColumnType("date");
+            entity.Property(row => row.Quantity).HasColumnName("quantity").HasPrecision(18, 3);
+            entity.Property(row => row.Unit).HasColumnName("unit").HasMaxLength(12);
+            entity.Property(row => row.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(row => row.SubtotalMinor).HasColumnName("subtotal_minor");
+            entity.Property(row => row.DiscountMinor).HasColumnName("discount_minor");
+            entity.Property(row => row.NetMinor).HasColumnName("net_minor");
+            entity.Property(row => row.TaxMinor).HasColumnName("tax_minor");
+            entity.Property(row => row.TotalMinor).HasColumnName("total_minor");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.CreatedBy).HasColumnName("created_by").HasMaxLength(80);
+            entity.HasOne<InventoryPurchaseRow>().WithMany(row => row.Returns).HasForeignKey(row => row.PurchaseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryPurchaseLineRow>().WithMany().HasForeignKey(row => row.PurchaseLineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.DocumentNumber }).IsUnique();
+            entity.HasIndex(row => new { row.PurchaseId, row.PurchaseLineId, row.CreatedAt });
         });
         modelBuilder.Entity<InventoryCountRow>(entity =>
         {

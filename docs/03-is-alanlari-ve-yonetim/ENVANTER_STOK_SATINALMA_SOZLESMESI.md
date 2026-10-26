@@ -16,7 +16,7 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Yok** | Fatura/irsaliye ile toptancı girişi henüz kodlanmadı |
+| **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
 | **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
 | **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
 
@@ -35,6 +35,11 @@ Durum: 8 Ekim 2026. Bu belge mevcut reçete/stok/sayım MVP'sinin üzerine gelec
 - Onay öncesi sistem miktarı ve hareket adedi aynı kalmalıdır. Net bakiye değişmese bile yeni/ters hareket varsa `409 COUNT_STOCK_CHANGED` döner ve düzeltme yazılmaz. Onay tüm fiziksel miktarlar girildiğinde, uygun `inventory.counts` ve `inventory.items` modülleri açıkken yapılır; fark başına tek `count_adjustment` hareketi oluşur. Onay isteğinin tekrarı aynı sonucu verir.
 - Taslak sayım modül kapatılmasına engeldir: `inventory.items` veya `inventory.counts` kapatma denemesi `409 INVENTORY_COUNT_OPEN` döndürür, açık sayım bitene kadar tercih etkin kalır. Taslağı iptal etme ayrı bir denetimli komuttur; snapshot ve audit korunur. Onaylı geçmişler her zaman okunabilir.
 - Modül tercihi migration çalıştırmaz ve geçmiş kaydı silmez.
+- Mal kabul taslağı stok veya cariyi değiştirmez. Onay, her satır için `receiving` stok hareketini ve belge toplamı kadar `supplier_debt` cari hareketini aynı veritabanı işlemi içinde oluşturur; tekrar edilen istek çift kayıt üretmez.
+- Onaylı mal kabul doğrudan değiştirilmez. Fiziksel eksik teslim, özgün satıra bağlı ayrı düzeltme fişiyle kaydedilir; miktar stoktan `purchase_correction` hareketiyle, satır fiyat/KDV/iskonto oranına düşen tutar tedarikçi borcundan `adjustment_decrease` hareketiyle aynı işlemde düşer.
+- Bir satırdaki düzeltmelerin toplamı kabul edilen miktarı aşamaz. Açık sayım veya yetersiz stok varsa düzeltme reddedilir. Düzeltme açıklaması, aktör ve özgün belge bağlantısı denetim izinde korunur.
+- Tedarikçiye iade, depoya gerçekten alınmış ürünün sonradan geri gönderilmesidir. Özgün mal kabul satırına bağlı ayrı iade irsaliye numarası, tarih, miktar ve neden taşır; `supplier_return` stok çıkışıyla `adjustment_decrease` cari hareketi aynı işlemde oluşur.
+- Eksik teslim ve iade miktarlarının toplamı özgün kabul miktarını aşamaz. İade irsaliye numarası şube içinde tektir; açık sayım veya yetersiz stok iadeyi engeller. Aynı istek kimliğinin tekrarı çift stok/cari hareketi üretmez.
 
 ## PostgreSQL sahipliği
 
@@ -83,4 +88,12 @@ Modül tercihleri bağımsız kalır: `inventory.items`, `inventory.recipes`, `i
 
 ## Bu dilimin dışında
 
-Satın alma siparişi/tedarikçi belgesi, cari borç oluşturma, mal kabulün tedarik siparişine bağlanması, depo transferi, barkod, birim dönüşüm tablosu, fire/bozulma kaydı, satıştan otomatik stok tüketimi ve üretim emri yoktur. `manual_in` yalnızca manuel envanter girişidir; satın alma veya ödeme belgesi değildir.
+Satın alma siparişi, mal kabulün tedarik siparişine bağlanması, depo transferi, barkod, birim dönüşüm tablosu, fire/bozulma kaydı, satıştan otomatik stok tüketimi ve üretim emri yoktur. `manual_in` yalnızca manuel envanter girişidir; aşağıdaki mal kabul akışı ayrı `receiving` hareketi üretir ve ödeme belgesi değildir.
+
+## Mal kabul ilk kalıcı dilimi (26 Ekim 2026)
+
+- Mal kabul belgesi önce `draft` durumunda oluşturulur; taslak stok ve cari bakiyeyi değiştirmez.
+- Satırlar miktar, hammadde birimi, KDV hariç birim fiyat, iskonto oranı ve KDV oranı snapshot'ını taşır. Parasal değerler kuruş, oranlar baz puan olarak saklanır; yuvarlama satır bazında yapılır.
+- Onay; `procurement.requests`, `inventory.items` ve `cari.management` açıkken, stok girişleriyle `supplier_debt` cari hareketini tek PostgreSQL transaction'ında oluşturur.
+- Açık depo sayımı varken onay `COUNT_IN_PROGRESS` ile reddedilir. Tekrarlanan aynı onay isteği yeni hareket üretmez.
+- Onaylanmış belge değiştirilemez. Eksik teslim düzeltmesi ve tedarikçiye iade, orijinal belgeye bağlı ayrı ters kayıtlar olarak uygulanır.

@@ -360,6 +360,21 @@ namespace Hipos.Api.Inventory.Migrations
                         .HasColumnType("character varying(24)")
                         .HasColumnName("kind");
 
+                    b.Property<string>("PurchaseCorrectionId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_correction_id");
+
+                    b.Property<string>("PurchaseId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<string>("PurchaseReturnId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_return_id");
+
                     b.Property<string>("Unit")
                         .IsRequired()
                         .HasMaxLength(12)
@@ -376,17 +391,29 @@ namespace Hipos.Api.Inventory.Migrations
 
                     b.HasIndex("IngredientId");
 
+                    b.HasIndex("PurchaseCorrectionId")
+                        .IsUnique()
+                        .HasFilter("purchase_correction_id IS NOT NULL");
+
+                    b.HasIndex("PurchaseReturnId")
+                        .IsUnique()
+                        .HasFilter("purchase_return_id IS NOT NULL");
+
                     b.HasIndex("WarehouseId");
 
                     b.HasIndex("CountId", "IngredientId")
                         .IsUnique()
                         .HasFilter("count_id IS NOT NULL");
 
+                    b.HasIndex("PurchaseId", "IngredientId")
+                        .IsUnique()
+                        .HasFilter("purchase_id IS NOT NULL");
+
                     b.HasIndex("FirmId", "BranchId", "WarehouseId", "IngredientId", "CreatedAt");
 
                     b.ToTable("movements", "inventory", t =>
                         {
-                            t.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment')");
+                            t.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return')");
 
                             t.HasCheckConstraint("ck_inventory_movement_nonzero", "delta <> 0");
                         });
@@ -404,6 +431,391 @@ namespace Hipos.Api.Inventory.Migrations
                     b.ToTable("products", "catalog", t =>
                         {
                             t.ExcludeFromMigrations();
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseCorrectionRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<long>("DiscountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_minor");
+
+                    b.Property<long>("NetMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("net_minor");
+
+                    b.Property<string>("PurchaseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<string>("PurchaseLineId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_line_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<long>("SubtotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subtotal_minor");
+
+                    b.Property<long>("TaxMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tax_minor");
+
+                    b.Property<long>("TotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_minor");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseLineId");
+
+                    b.HasIndex("PurchaseId", "PurchaseLineId", "CreatedAt");
+
+                    b.ToTable("purchase_corrections", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_correction_quantity", "quantity > 0");
+
+                            t.HasCheckConstraint("ck_purchase_correction_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseLineRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<long>("DiscountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_minor");
+
+                    b.Property<int>("DiscountRateBps")
+                        .HasColumnType("integer")
+                        .HasColumnName("discount_rate_bps");
+
+                    b.Property<string>("IngredientId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<long>("NetMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("net_minor");
+
+                    b.Property<string>("PurchaseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<long>("SubtotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subtotal_minor");
+
+                    b.Property<long>("TaxMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tax_minor");
+
+                    b.Property<int>("TaxRateBps")
+                        .HasColumnType("integer")
+                        .HasColumnName("tax_rate_bps");
+
+                    b.Property<long>("TotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_minor");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.Property<long>("UnitPriceMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("unit_price_minor");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngredientId");
+
+                    b.HasIndex("PurchaseId", "IngredientId")
+                        .IsUnique();
+
+                    b.ToTable("purchase_lines", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_line_price", "unit_price_minor > 0");
+
+                            t.HasCheckConstraint("ck_purchase_line_quantity", "quantity > 0");
+
+                            t.HasCheckConstraint("ck_purchase_line_rates", "discount_rate_bps BETWEEN 0 AND 10000 AND tax_rate_bps BETWEEN 0 AND 10000");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseReturnRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<long>("DiscountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_minor");
+
+                    b.Property<DateOnly>("DocumentDate")
+                        .HasColumnType("date")
+                        .HasColumnName("document_date");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("document_number");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<long>("NetMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("net_minor");
+
+                    b.Property<string>("PurchaseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<string>("PurchaseLineId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_line_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<long>("SubtotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subtotal_minor");
+
+                    b.Property<long>("TaxMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tax_minor");
+
+                    b.Property<long>("TotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_minor");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PurchaseLineId");
+
+                    b.HasIndex("FirmId", "BranchId", "DocumentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("PurchaseId", "PurchaseLineId", "CreatedAt");
+
+                    b.ToTable("purchase_returns", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_return_quantity", "quantity > 0");
+
+                            t.HasCheckConstraint("ck_purchase_return_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApprovalRequestId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("approval_request_id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<long>("DiscountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("discount_minor");
+
+                    b.Property<DateOnly>("DocumentDate")
+                        .HasColumnType("date")
+                        .HasColumnName("document_date");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("document_number");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<long>("SubtotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("subtotal_minor");
+
+                    b.Property<string>("SupplierCariId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("supplier_cari_id");
+
+                    b.Property<long>("TaxMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("tax_minor");
+
+                    b.Property<long>("TotalMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_minor");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<string>("WarehouseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovalRequestId")
+                        .IsUnique()
+                        .HasFilter("approval_request_id IS NOT NULL");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("FirmId", "BranchId", "DocumentNumber")
+                        .IsUnique();
+
+                    b.ToTable("purchases", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_currency", "currency = 'TRY'");
+
+                            t.HasCheckConstraint("ck_purchase_status", "status IN ('draft', 'approved')");
+
+                            t.HasCheckConstraint("ck_purchase_totals", "subtotal_minor >= 0 AND discount_minor >= 0 AND tax_minor >= 0 AND total_minor > 0");
+
+                            t.HasCheckConstraint("ck_purchase_version", "version > 0");
                         });
                 });
 
@@ -596,6 +1008,75 @@ namespace Hipos.Api.Inventory.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseCorrectionRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseCorrectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseReturnRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseReturnId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseCorrectionRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseRow", null)
+                        .WithMany("Corrections")
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseLineRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseLineRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseRow", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseReturnRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseRow", null)
+                        .WithMany("Returns")
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseLineRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseRow", b =>
+                {
                     b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -630,6 +1111,15 @@ namespace Hipos.Api.Inventory.Migrations
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryCountRow", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseRow", b =>
+                {
+                    b.Navigation("Corrections");
+
+                    b.Navigation("Lines");
+
+                    b.Navigation("Returns");
                 });
 
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeRow", b =>

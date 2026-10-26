@@ -170,8 +170,12 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
   }
 
   async function saveCountLine(line: CountLine) {
-    if (!scope || !openCount || physicalDrafts[line.ingredientId] === undefined) return;
-    const physicalQuantity = Number(physicalDrafts[line.ingredientId]);
+    if (!scope || !openCount) return;
+    const draftKey = `${openCount.id}:${line.ingredientId}`;
+    if (physicalDrafts[draftKey] === undefined || physicalDrafts[draftKey].trim() === "") {
+      setError(`${line.ingredientName} için fiziksel miktar girin.`); return;
+    }
+    const physicalQuantity = Number(physicalDrafts[draftKey]);
     if (!Number.isFinite(physicalQuantity) || physicalQuantity < 0) { setError("Fiziksel miktar sıfır veya daha büyük olmalı."); return; }
     await run(async () => {
       const updated = await api<Count>(`${scope}/counts/${encodeURIComponent(openCount.id)}/lines/${encodeURIComponent(line.ingredientId)}`, "PUT", {
@@ -179,6 +183,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
       });
       setSelectedCountId(updated.id);
       setCounts((current) => current.map((count) => count.id === updated.id ? updated : count));
+      setPhysicalDrafts((current) => { const next = { ...current }; delete next[draftKey]; return next; });
     }, "Fiziksel sayım miktarı kaydedildi.");
   }
 
@@ -281,7 +286,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
       <section className="card content-card"><div className="card-heading padded"><div><span className="card-kicker">SİSTEM ANLIK GÖRÜNTÜSÜ</span><h2>Sayım taslağı</h2></div><button className="primary-button" disabled={!canWriteCounts || busy || ingredients.length === 0 || hasOpenCount} onClick={() => void startCount()}><Plus size={15} /> Yeni sayım başlat</button></div>
         {counts.length > 0 && <label className="count-select">Sayım<select aria-label="Sayım seç" value={openCount?.id ?? ""} onChange={(event) => setSelectedCountId(event.target.value)}>{counts.map((count) => <option key={count.id} value={count.id}>{dateTime(count.createdAt)} · {count.status === "draft" ? "Taslak" : count.status === "approved" ? "Onaylandı" : "İptal edildi"}</option>)}</select></label>}
         {openCount && <><div className="table-scroll"><table><thead><tr><th>HAMMADDE</th><th>SİSTEM MİKTARI · SAYIM BAŞI</th><th>FİZİKSEL MİKTAR</th><th>FARK</th><th>UYUŞMAZLIK</th><th /></tr></thead><tbody>{openCount.lines.map((line) => <tr key={line.ingredientId}><td><strong>{line.ingredientName}</strong></td><td>{fmtQty(line.systemQuantity)} {line.unit}</td><td>{openCount.status === "draft" ? <input aria-label={`${line.ingredientName} fiziksel miktar`} className="count-quantity" type="number" min="0" step="0.001" value={physicalDrafts[`${openCount.id}:${line.ingredientId}`] ?? (line.physicalQuantity === null ? "" : String(line.physicalQuantity))} onChange={(event) => setPhysicalDrafts((current) => ({ ...current, [`${openCount.id}:${line.ingredientId}`]: event.target.value }))} /> : `${fmtQty(line.physicalQuantity ?? 0)} ${line.unit}`}</td><td>{line.difference === null ? "—" : `${line.difference > 0 ? "+" : ""}${fmtQty(line.difference)} ${line.unit}`}</td><td><StatusPill tone={line.reviewStatus === "review_required" ? "orange" : line.reviewStatus === "matched" ? "green" : "neutral"}>{line.reviewStatus === "review_required" ? "İnceleme gerekli" : line.reviewStatus === "matched" ? "Eşleşti" : "Sayım bekliyor"}</StatusPill></td><td>{openCount.status === "draft" && <button className="soft-button" disabled={!canWriteCounts || busy} onClick={() => void saveCountLine(line)}>Miktarı kaydet</button>}</td></tr>)}</tbody></table></div>
-          {openCount.status === "draft" ? <div className="count-approval"><p>Onay öncesi stok değişmez. Açık sayım boyunca yeni hareket kabul edilmez. Onay, fark başına tekil düzeltme hareketi üretir.</p><button className="primary-button" disabled={!canWriteCounts || busy || openCount.lines.some((line) => line.physicalQuantity === null)} onClick={() => void approveCount()}><ClipboardCheck size={15} /> Sayımı onayla ve düzeltmeleri kaydet</button><button className="soft-button" disabled={!canWriteCounts || busy} onClick={() => void cancelCount()}>Sayımı iptal et</button></div> : openCount.status === "approved" ? <div className="notice" role="status">Onaylayan: {openCount.approvedBy} · {openCount.approvedAt ? dateTime(openCount.approvedAt) : ""}. Düzeltme hareketleri deftere yazıldı.</div> : <div className="notice" role="status">Sayım iptal edildi. Stokta düzeltme yapılmadı.</div>}
+          {openCount.status === "draft" ? <div className="count-approval"><p>{openCount.lines.some((line) => line.physicalQuantity === null) ? `${openCount.lines.filter((line) => line.physicalQuantity === null).length} hammadde için fiziksel miktar kaydedilmeli. ` : ""}Onay öncesi stok değişmez. Açık sayım boyunca yeni hareket kabul edilmez. Onay, fark başına tekil düzeltme hareketi üretir.</p><button className="primary-button" disabled={!canWriteCounts || busy || openCount.lines.some((line) => line.physicalQuantity === null)} onClick={() => void approveCount()}><ClipboardCheck size={15} /> Sayımı onayla ve düzeltmeleri kaydet</button><button className="soft-button" disabled={!canWriteCounts || busy} onClick={() => void cancelCount()}>Sayımı iptal et</button></div> : openCount.status === "approved" ? <div className="notice" role="status">Onaylayan: {openCount.approvedBy} · {openCount.approvedAt ? dateTime(openCount.approvedAt) : ""}. Düzeltme hareketleri deftere yazıldı.</div> : <div className="notice" role="status">Sayım iptal edildi. Stokta düzeltme yapılmadı.</div>}
         </>}
         {!openCount && <div className="card generic-empty">Henüz sayım yok. Sayım başlattığınızda stok miktarları o an için sabitlenir.</div>}
       </section>
@@ -298,6 +303,8 @@ function IngredientTable({ items, editable = false, thresholdDrafts, setThreshol
 }
 
 function MovementTable({ items }: { items: Movement[] }) {
-  const kindName: Record<string, string> = { opening: "Açılış", manual_in: "Elle giriş", manual_out: "Elle çıkış", count_adjustment: "Sayım düzeltmesi" };
+  const kindName: Record<string, string> = { opening: "Açılış", manual_in: "Elle giriş", manual_out: "Elle çıkış",
+    count_adjustment: "Sayım düzeltmesi", receiving: "Mal kabul", purchase_correction: "Eksik teslim düzeltmesi",
+    supplier_return: "Tedarikçiye iade" };
   return <section className="card content-card"><div className="card-heading padded"><div><span className="card-kicker">DEĞİŞTİRİLEMEZ HAREKET DEFTERİ</span><h2>Son stok hareketleri</h2></div></div><div className="table-scroll"><table><thead><tr><th>ZAMAN</th><th>HAMMADDE</th><th>KAYNAK</th><th>AÇIKLAMA</th><th>MİKTAR ETKİSİ</th><th>AKTÖR</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{dateTime(item.createdAt)}</td><td>{item.ingredientName}</td><td>{kindName[item.kind] ?? item.kind}</td><td>{item.description}</td><td>{item.delta > 0 ? "+" : ""}{fmtQty(item.delta)} {item.unit}</td><td>{item.actor}</td></tr>)}</tbody></table>{items.length === 0 && <div className="empty-list">Henüz stok hareketi yok.</div>}</div></section>;
 }

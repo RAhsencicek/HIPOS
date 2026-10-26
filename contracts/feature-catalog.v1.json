@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": 15,
+  "catalogVersion": 16,
   "definitions": [
     { "key": "catalog.products", "name": "Ürün ve Menü", "category": "Menü", "description": "Ürünleri, kategorileri ve menü yayınlarını yönetin.", "scopeType": "branch", "availability": "prototype", "dependencies": [], "icon": "book-open" },
     { "key": "catalog.menus", "name": "Menü Yönetimi", "category": "Menü", "description": "Menüye özel bölümler oluşturun, katalog ürünlerini yeniden kullanın ve seçili şubede tek menüyü yayına alın.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products"], "disableWithParent": true, "icon": "book-open" },
@@ -21,7 +21,7 @@
     { "key": "inventory.items", "name": "Stok Takibi", "category": "Stok ve Tedarik", "description": "Hammadde kartı, stok hareketi ve mevcut miktarı yönetin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "boxes" },
     { "key": "inventory.recipes", "name": "Reçete", "category": "Stok ve Tedarik", "description": "Katalog ürününe bağlı, sürümlü hammadde reçeteleri yönetin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["catalog.products", "inventory.items"], "disableWithParent": true, "icon": "notebook-tabs" },
     { "key": "inventory.counts", "name": "Stok Sayımı", "category": "Stok ve Tedarik", "description": "Sistem miktarı anlık görüntüsüyle fiziksel sayım yapıp onaylı düzeltme hareketi oluşturun.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["inventory.items"], "disableWithParent": true, "icon": "clipboard-check" },
-    { "key": "procurement.requests", "name": "Satın Alma", "category": "Stok ve Tedarik", "description": "Talep, sipariş ve mal kabul akışlarını yönetin.", "scopeType": "branch", "availability": "planned", "dependencies": ["inventory.items"], "icon": "truck" },
+    { "key": "procurement.requests", "name": "Satın Alma ve Mal Kabul", "category": "Stok ve Tedarik", "description": "Tedarikçi belgesini taslak olarak hazırlayın; onayda stok girişini ve tedarikçi borcunu birlikte kaydedin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": ["inventory.items", "cari.management"], "disableWithParent": true, "icon": "truck" },
     { "key": "finance.expenses", "name": "Gider Yönetimi", "category": "Finans", "description": "Şube kapsamındaki manuel gider kayıtlarını yönetin.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "wallet" },
     { "key": "cash.monitoring", "name": "Kasa İzleme", "category": "Finans", "description": "Kasa vardiyası ve ödeme dağılımını inceleyin.", "scopeType": "branch", "availability": "planned", "dependencies": ["sales.monitoring"], "icon": "landmark" },
     { "key": "cash.management", "name": "Kasa Vardiyası ve Nakit Defteri", "category": "Finans", "description": "Tek şubedeki kasa vardiyasını, manuel nakit hareketlerini ve kapanış sayımını yönetin. POS entegrasyonu içermez.", "scopeType": "branch", "availability": "backend_preview", "dependencies": [], "icon": "wallet" },
