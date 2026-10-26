@@ -142,7 +142,7 @@ Salondaki masaların, garson atamalarının ve açık adisyonların yönetildiğ
 
 #### B. ✅ Bugün Kodda Çalışanlar (Mevcut Durum)
 * **Yönetici Masa Planı ([ServiceTablesPage.tsx:L1-L60](../../apps/admin/src/features/branches/ServiceTablesPage.tsx#L1-L60)):** Salon masa listesi, kapasiteleri ve sorumlu garson tanımları görüntülenir.
-* **Garson Servis Ekranı ([OperationalApps.tsx:L38-L120](../../apps/pos/src/OperationalApps.tsx#L38-L120) - `/waiter`):** Masalar grid düzeninde listelenir; masaya tıklandığında menüden sipariş kalemleri seçilerek masaya sipariş eklenir.
+* **Garson Servis Ekranı ([OperationalApps.tsx](../../apps/pos/src/OperationalApps.tsx) - `/waiter`):** Masalar, sipariş menüsü ve sepet akışına ek olarak masa taşıma/birleştirme, adisyon bölme ve indirim/ikram önizlemesi bulunur. İndirim/ikram kaydı henüz API'ye bağlı değildir.
 * **Backend API ve Veri Modeli:**
   * [ServiceDbContext.cs:L6-L30](../../apps/api/Hipos.Api/Service/ServiceDbContext.cs#L6-L30) — `service.tables`, `service.employees`, `service.assignments`, `service.audit`.
   * [SalesDbContext.cs:L6-L56](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs#L6-L56) — `sales.checks`, `sales.orders`, `sales.order_lines`, `sales.payment_attempts` ve audit tabloları.
@@ -151,10 +151,10 @@ Salondaki masaların, garson atamalarının ve açık adisyonların yönetildiğ
 #### C. 🚧 Henüz Yapılmayanlar & Hedef Ekran Davranışları (Geliştirilecek Backlog)
 1. **Adisyon Kapanışı ve Masayı Boşaltma:** Mevcut kodda adisyonlar hep `status='open'` durumunda kalmaktadır. Kasa modülü tahsilatı tamamladığında adisyonun `paid`/`closed` durumuna geçmesi ve masanın anında yeşile (boş) dönmesi.
 2. **Açık Adisyon Draining (Tahliye) Kuralı:** Şubede `service.tables` veya satış yeteneği kapatıldığında açıkta kalan adisyonları denetleyen ve tahliye eden mekanizma henüz yoktur.
-3. **Masa Taşıma Modalı (Hedef Modal):** Kaynak Masa (`Masa 4`) -> Hedef Masa (`Masa 9`). Onaylandığında tüm siparişler ve adisyon aktarılır, eski masa boşa çıkar (`POST /service/tables/{id}/transfer`).
-4. **Masa Birleştirme Modalı (Hedef Modal):** İki adisyon tek bir adisyonda konsolide edilir (`POST /service/tables/{id}/merge`).
-5. **Adisyon Bölme (Split Check):** Aynı masadaki hesabın ayrı adisyon fişlerine ayrılması.
-6. **İskonto ve İkram Modalı (Hedef Modal):** Kalem ikramı veya indirim uygulandığında müdür PIN'i ve gerekçe istenir (`check_voids`).
+3. **Masa Taşıma Modalı:** Garson ekranında kaynak masanın açık adisyonu boş hedefe aktarılır (`POST /service/tables/{id}/transfer`).
+4. **Masa Birleştirme Modalı:** Seçili hedefe kaynak masaların açık adisyonları konsolide edilir (`POST /service/tables/{id}/merge`).
+5. **Adisyon Bölme:** Garson ekranında seçilen adisyon kalem/miktar bazında yeni adisyona ayrılır.
+6. **İskonto ve İkram Modalı:** Önizleme arayüzü var; işlem API'si, audit ve müdür yetkilendirmesi bekleniyor.
 
 #### D. Şartname ve İlgili Dokümanlar
 * 🌟 **A'dan Z'ye Modül Devir Şartnamesi:** 👉 [MODUL_02_MASA_VE_ADISYON.md](MODUL_02_MASA_VE_ADISYON.md)
@@ -351,3 +351,7 @@ Geliştirilen her yeni özellik şu 5 kalite kapısından geçmek zorundadır:
 3. **Şema İzolasyonu:** Hiçbir servis başka bir iş alanının tablosuna doğrudan SQL güncellemesi atamaz; işlemler sadece tanımlı domain servisleri ve event'ler üzerinden akar.
 4. **Görsel Durum Dürüstlüğü:** Mock veri ile gerçek veri ekranda asla karıştırılmamalı, örnek veriler açıkça *"Örnek Gösterim"* etiketi taşımalıdır.
 5. **Otomatik Testler:** Değişiklikler Node testleri (`npm test`), API testleri (`test:api`) ve PostgreSQL geçici veritabanı testlerinden (`npm run test:db`) hatasız geçmelidir.
+
+### 23 Ekim 2026 — Fiziksel masa grubu
+
+Garson ekranında kalabalık misafirler için ana masa ve boş ek masaları birlikte kullanımda tutma eklendi. Tüm üyeler ana masanın hesabını açar; mutfak birlikte kullanılan masa adlarını gösterir. Grup ayırma hesabı ana masada korur. Service şeması `table_groups` kaydı ve `tables.table_group_id` bağıyla sahipliği tutar; mevcut adisyon birleştirme davranışı korunur. Sınırlar, API ve yeni Service migration [Modül 2 sözleşmesinde](../00-devir-rehberi/MODUL_02_MASA_VE_ADISYON.md), elle kontroller [masa servisi test rehberinde](../04-test-ve-rehberler/MASA_SERVISI_TEST.md) kayıtlıdır. Gerçek tahsilat/otomatik masa kapatma bu dilime dahil değildir.

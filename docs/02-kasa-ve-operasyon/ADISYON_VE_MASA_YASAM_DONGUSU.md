@@ -7,11 +7,14 @@
 
 ## 1. Problem Tanımı ve Mevcut Kod Durumu
 
-Şu anki HIPOS sisteminde [`sales.checks`](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) tablosunda bir adisyon açılabilmekte ve içerisine sipariş eklenebilmektedir. Ancak:
-* Adisyon kapatma (`closed`) iş akışı kodlanmamıştır. Masadaki hesap ödendikten sonra masa boşaltılamamaktadır.
+Şu anki HIPOS sisteminde [`sales.checks`](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) tablosunda bir adisyon açılabilmekte ve içerisine sipariş eklenebilmektedir. Development simüle tahsilat akışında:
+* Tahsilat toplamı adisyonun indirim/ikram/iptal sonrası ödenecek tutarına ulaştığında adisyon `closed` yapılır.
+* Aynı masa veya fiziksel masa grubunda başka açık adisyon varsa masa/grup bağlantıları korunur. Son açık adisyon da kapanınca aktif garson atamaları kapatılır, masa üyeleri boş duruma alınır ve fiziksel grup kapatılır.
+* Bu davranış gerçek kasa/POS tahsilatı değildir; simüle ödeme hareketi kasa kaydı oluşturmaz. `CloseChecksAfterPayment` Sales migration'ı veritabanına uygulanıp API yeniden başlatılmalıdır.
+Ancak:
 * Masa taşıma, ödeme girişimi olmayan açık adisyonları birleştirme ve açık adisyonu kalem/miktar bazında bölme API'leri uygulanmıştır.
-* Masaya yanlışlıkla girilen bir ürünün **iptali**, **müşteriye ikram edilmesi** veya **masaya indirim yapılması** mekanizması yoktur.
-* Sipariş kalemlerinde "Az pişmiş", "Buzsuz", "Acı soslu" gibi **ürün seçenekleri ve servis notları (modifiers)** saklanamamaktadır.
+* Garson ekranında gerekçeli ürün iptali/ikramı ve yüzde/sabit indirim API'si vardır. Yönetici onayı yalnızca Development test ortamında atlanır; diğer ortamlarda onaysız kayıt reddedilir. Gerçek yönetici kimliği/PIN onayı henüz yoktur.
+* Sipariş kaleminde serbest ürün notu ve demo hazırlama tercihleri saklanabilir; ancak ücret etkili katalog modifier seçenekleri Modül 4 API'sine henüz bağlı değildir.
 
 ---
 
@@ -83,28 +86,25 @@ CREATE TABLE sales.check_voids (
    * Kaynak masalardaki siparişler hedef masanın adisyonuna transfer edilir, kaynak masalar kapatılıp boşaltılır.
 3. **Adisyon Bölme (`POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/split`) — API uygulandı:**
    * Gövde: `{ requestId, expectedVersion, items: [{ orderLineId, quantity }] }`. `orderLineId`, sipariş kaleminin sayısal kimliğidir; tüm miktar seçilirse kalemin tamamı, daha azı seçilirse yalnız seçilen miktar taşınır.
-   * Seçilen miktarlar aynı masa, garson ve müşteri bağlamıyla yeni bir açık adisyon ve sipariş oluşturur. Kaynak adisyonda en az bir kalem kalmalıdır. Ödeme girişimi bulunan adisyon bölünmez.
+   * Seçilen miktarlar aynı masa, garson ve müşteri bağlamıyla yeni bir açık adisyona ayrılır. Tamamı seçilen sipariş silinmeden, kimliği ve kalemleri korunarak yeni adisyona bağlanır; yalnızca kısmen ayrılan kalemler için yeni bir bölme siparişi oluşturulur. Masa bağlantısının ilk sipariş kimliği korunur. Kaynak adisyonda en az bir kalem kalmalıdır. Ödeme girişimi bulunan adisyon bölünmez.
    * İstek kimliği tekrar denemeyi güvenli kılar; farklı içerikle aynı kimlik kullanılırsa çakışma döner. Adisyon sürümü eskiyse işlem reddedilir.
    * Serbest tutarlı kısmi ödemeler bölme işlemi değildir: aynı adisyonda birden fazla ödeme girişimi olarak kaydedilir.
+   * Mutfak hazırlık içeriği sipariş ilk gönderildiğinde ayrı bir anlık görüntü olarak saklanır. Adisyon bölme yalnızca hesap kalemlerini dağıtır; bu mutfak görüntüsünün miktarını değiştirmez ve yeni bir mutfak bileti oluşturmaz.
 
-### Adım 2: İptal, İkram ve İskonto Mekanizması
-* `POST /api/v1/.../sales/checks/{checkId}/discount`: Masaya yüzde veya sabit TL indirim uygular. Müdür PIN'i zorunludur.
-* `POST /api/v1/.../sales/checks/{checkId}/lines/{lineId}/void`: Siparişteki ürünü iptal eder veya ikrama çevirir.
-  * Eğer ürün mutfağa gönderilmişse mutfak ekranına otomatik **"İPTAL EDİLDİ"** uyarısı düşer.
+### Adım 2: İptal, İkram ve İskonto Mekanizması (Development test akışı uygulandı)
+* `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/adjustments`: Yüzde/sabit adisyon indirimi veya ürün kalemine miktar bazlı ikram/iptal kaydeder. Gerekçe zorunludur; aktör, zaman ve `development_bypass` onay modu denetim kaydında tutulur.
+* Gerçek yönetici onayı henüz uygulanmadığından onaysız istekler Development dışındaki ortamlarda `MANAGER_APPROVAL_REQUIRED` ile reddedilir.
+  * İptal kaydı adisyon toplamını düşürür. Mutfak ekranında otomatik **"İPTAL EDİLDİ"** uyarısı ayrıca doğrulanmalıdır.
   * İptal gerekçesi (`Müşteri Vazgeçti`, `Hatalı Sipariş`, `Kalite Şikayeti`) seçilmesi zorunludur.
 
 ### Adım 3: Adisyon Kapatma ve Masa Boşaltma
-* Adisyondaki tüm ödemelerin toplamı (`payments_total_minor`) adisyon tutarını (`total_minor - discount_minor`) karşıladığında:
-  * `status = 'closed'` yapılır.
-  * Bağlı masa `service.tables` tablosunda `status = 'idle'` durumuna getirilir.
-  * Mutfak ve garson ekranlarında masanın kapandığı anlık yansıtılır.
+* Development simüle ödemeleri toplamı, indirim/ikram/iptal sonrası adisyon bakiyesini karşıladığında adisyon `closed` olur. Tahsilat ve kapanış aynı transaction içindedir.
+* Masa veya fiziksel masa grubunda başka açık adisyon kalmışsa masa/atamalar/grup açık tutulur. Son açık adisyon kapanınca aktif garson atamaları kapatılır, masa üyeleri `idle` yapılır ve varsa grup kapatılır.
+* Salon görünümü Service API'sinden masanın güncel durumunu alır; garson ödeme almaz. Gerçek kasa/POS tahsilatının bu akışa bağlanması ve migration'ın veritabanına uygulanması beklenmektedir.
 
-### Adım 4: Kullanıcı Arayüzü (Masa Planı ve Adisyon İşlemleri)
-* `apps/admin` (veya Dokunmatik POS): Masa üzerine tıklandığında açılan işlem menüsü:
-  * `[ Masayı Taşı ]` ➡️ Boş masa seçici açılır.
-  * `[ Masaları Birleştir ]` ➡️ Masalar çoklu seçilir.
-  * `[ İndirim / İskonto ]` ➡️ Müdür onay modalı açılır.
-  * `[ Kalem İptali / İkram ]` ➡️ Gerekçe listesi açılır.
+### Adım 4: Kullanıcı Arayüzü (Garson Ekranı)
+* `/waiter` masa detayında `[ Masayı Taşı ]`, `[ Masaları Birleştir ]`, `[ Adisyon Böl ]` ve `[ İndirim / İkram ]` akışları bulunur.
+* İndirim/ikram kaydı Development ortamında etkin; üretim kullanımı gerçek yönetici onay/kimlik altyapısı tamamlanana kadar engellenir.
 
 ---
 
@@ -114,3 +114,7 @@ CREATE TABLE sales.check_voids (
 2. Mutfakta hazırlanmakta olan bir pizza iptal edildiğinde, mutfak KDS ekranında o pizza kırmızı çizgi ve "İPTAL" rozetiyle işaretlenmeli.
 3. Kasiyer yetkisiz bir kullanıcıyla %20 indirim yapmaya kalktığında sistem müdür şifresi sormalı; şifresiz indirim kaydedilememeli.
 4. Parçalı veya tek seferde tam ödemesi alınan adisyon kapandığında masa otomatik olarak boş (yeşil) renge dönmeli.
+
+## Fiziksel masa grubu (23 Ekim 2026)
+
+Kalabalık misafirler için bir ana masa ve boş ek masalar kalıcı `service.table_groups` kaydıyla birlikte kullanımda tutulur. Hesap ve siparişler ana masaya bağlıdır; her üye aynı açık adisyon görünümünü verir. Ek masada ayrı hesap açılması reddedilir. Grup, adisyonların konsolidasyonundan ayrıdır: mevcut adisyon birleştirme kaynak masayı boşaltır. Dolu ek masaların hesapları önce birleştirilir, sonra grup oluşturulur. Grup ayırma ek masaları serbest bırakır, hesapları ana masada korur; ödeme veya adisyon kapatma yapmaz. Aktif grup üzerinde taşıma/birleştirme/silme reddedilir; adisyon bölme desteklenir. Ayrıntılar ve uçlar [Modül 2 sözleşmesindedir](../00-devir-rehberi/MODUL_02_MASA_VE_ADISYON.md).

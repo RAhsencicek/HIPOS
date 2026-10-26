@@ -183,7 +183,7 @@ $posLog = Join-Path $logDir "pos.log"
 
 # API environment
 $env:ASPNETCORE_ENVIRONMENT = "Development"
-$env:ASPNETCORE_URLS = "http://127.0.0.1:5180"
+$env:ASPNETCORE_URLS = "http://0.0.0.0:5180"
 $env:HIPOS_FEATURE_STORAGE = "postgres"
 
 $apiProc = Start-Process -FilePath "dotnet" `

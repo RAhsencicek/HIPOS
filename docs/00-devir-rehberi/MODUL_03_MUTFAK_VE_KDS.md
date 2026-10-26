@@ -60,6 +60,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 
 * Garson ekranından girilen siparişler PostgreSQL `sales.orders` tablosuna kaydedilmektedir.
 * `/kitchen` ekranı 3 saniyede bir polling yaparak açık siparişleri listeleyebilmektedir.
+* Adisyon bölme, sipariş ilk gönderildiğindeki mutfak kalem/miktar anlık görüntüsünü değiştirmez ve mutfağa yeni bilet oluşturmaz; bölünmüş siparişler yeni hazırlık işi olarak gösterilmez.
 
 ---
 

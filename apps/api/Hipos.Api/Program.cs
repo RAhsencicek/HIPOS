@@ -44,6 +44,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogCategoryCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
+    builder.Services.AddScoped<PaidCheckTableSettlement>();
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
     builder.Services.AddScoped<CashProvisioningService>();
@@ -123,7 +124,7 @@ if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
-if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
+if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
@@ -373,8 +374,14 @@ app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders",
             return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede POS siparişi oluşturma izni yok.");
         if (!catalogReady || !salesReady)
             return Failure(context, "SALES_STORAGE_UNAVAILABLE", 503, "Katalog ve satış migration'ları uygulanmalı.");
+        var check = new SalesCheckRow
+        {
+            Id = command.OrderId, FirmId = firmId, BranchId = branchId, Status = "open",
+            Currency = "TRY", CreatedAt = DateTimeOffset.UtcNow, Version = 1,
+        };
         var result = await services.GetRequiredService<SalesOrders>().CreateAsync(
-            firmId, branchId, command, actor.Name, context.RequestAborted);
+            firmId, branchId, command, actor.Name, context.RequestAborted,
+            command.OrderId, check, "sales.pos_orders", "test_pos");
         if (result.Failure is { } failure)
             return Failure(context, failure.Code, failure.Status, failure.Message);
         return result.Created

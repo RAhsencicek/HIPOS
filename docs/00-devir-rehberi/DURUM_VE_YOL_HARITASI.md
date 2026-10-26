@@ -69,15 +69,16 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
   - 24 masa, garson çalışanları ve açık masa-adisyon bağlantıları PostgreSQL'e bağlıdır.
   - Garson ekranından (`/waiter`) masaya sipariş girildiğinde ortak adisyon oluşturulmakta ve kalemler API'ye yazılmaktadır.
+  - Development simüle tahsilatında bakiye tamamlandığında adisyon kapatılır; masada veya fiziksel grupta başka açık adisyon varsa masa korunur. Son açık adisyon kapandığında Service tarafı aynı transaction içinde atamaları kapatıp masaları/grubu boşaltır. `CloseChecksAfterPayment` migration'ı uygulanmalıdır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
-  - Adisyon kapatma (`closed`) akışı yoktur; ödeme yapıldığında masa boşalmamaktadır.
-  - Masa taşıma ve birleştirme API'leri var; arayüz akışı henüz yoktur. Birleştirme açık ve ödeme girişimi olmayan adisyonlarla sınırlıdır.
-  - Kalem iptali, ikram, indirim ve müdür onay şifresi (`check_voids`) yoktur.
+  - Masa taşıma/birleştirme API'leri garson ekranındaki modal akışlara bağlandı; birleştirme açık ve ödeme girişimi olmayan adisyonlarla sınırlıdır.
+  - Adisyon bölme API'si kalem/miktar seçen garson ekranına bağlandı.
+  - Gerçek kasa/POS tahsilatının adisyon kapanışına bağlanması, ödeme hareketinin kasa kaydıyla eşleştirilmesi ve gerçek müdür yetkisi eksiktir.
   - Ürün seçenekleri ve varyasyonları (modifiers) sipariş kalemine eklenememektedir.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
-  1. Masa taşıma/birleştirme UI akışı ve API kabul testlerinin tamamlanması.
-  2. Adisyon bölme (hesabı ikiye bölme) yeteneği.
-  3. Adisyon ödendiği anda masanın durumunun otomatik `empty` (yeşil) durumuna geçmesi.
+  1. Masa taşıma/birleştirme ve bölme UI akışları eklendi; gerçek veritabanı kabul testleri gereklidir.
+  2. İndirim/ikram/kalem iptali API'si ve gerçek yetki/audit altyapısı.
+  3. Gerçek kasa/POS tahsilatını ve kasa hareket kaydını çalışan adisyon kapanışına bağlama.
 
 ---
 
@@ -240,3 +241,7 @@ Geliştirilen her yeni özellik şu 5 kalite kapısından geçmek zorundadır:
 3. **Şema İzolasyonu:** Hiçbir servis başka bir iş alanının tablosuna doğrudan SQL güncellemesi atamaz; işlemler sadece tanımlı domain servisleri ve event'ler üzerinden akar.
 4. **Görsel Durum Dürüstlüğü:** Mock veri ile gerçek veri ekranda asla karıştırılmamalı, örnek veriler açıkça *"Örnek Gösterim"* etiketi taşımalıdır.
 5. **Otomatik Testler:** Değişiklikler Node testleri (`npm test`), API testleri (`test:api`) ve PostgreSQL geçici veritabanı testlerinden (`npm run test:db`) hatasız geçmelidir.
+
+### 23 Ekim 2026 — Fiziksel masa grubu
+
+Garson ekranında kalabalık misafirler için ana masa ve boş ek masaları birlikte kullanımda tutma eklendi. Tüm üyeler ana masanın hesabını açar; mutfak birlikte kullanılan masa adlarını gösterir. Grup ayırma hesabı ana masada korur. Service şeması `table_groups` kaydı ve `tables.table_group_id` bağıyla sahipliği tutar; mevcut adisyon birleştirme davranışı korunur. Sınırlar, API ve yeni Service migration [Modül 2 sözleşmesinde](../00-devir-rehberi/MODUL_02_MASA_VE_ADISYON.md), elle kontroller [masa servisi test rehberinde](../04-test-ve-rehberler/MASA_SERVISI_TEST.md) kayıtlıdır. Gerçek tahsilat/otomatik masa kapatma bu dilime dahil değildir.

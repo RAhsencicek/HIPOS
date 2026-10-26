@@ -7,19 +7,30 @@ using Npgsql;
 namespace Hipos.Api.Service;
 
 public sealed record CreateServiceTable(int? Number, string? Name);
+public sealed record UpdateServiceTableState(int ExpectedVersion);
+public sealed record ReserveServiceTable(int ExpectedVersion, DateTimeOffset ReservedFor, string? GuestName);
 public sealed record CreateServiceWaiter(string Name);
 public sealed record CreateServiceEmployee(Guid RequestId, string Name, string Department, string JobTitle, string? Phone);
 public sealed record UpdateServiceEmployee(int ExpectedVersion, string Name, string Department, string JobTitle, string? Phone, bool IsActive);
 public sealed record AssignServiceOrder(Guid RequestId, string TableId, Guid OrderId, string? WaiterId);
 public sealed record CloseServiceAssignment(int ExpectedVersion);
+public sealed record CreateServiceTableGroup(Guid RequestId, string PrimaryTableId, string[] MemberTableIds, int GuestCount);
+public sealed record CloseServiceTableGroup(int ExpectedVersion);
+public sealed record ServiceTableGroupView(Guid Id, string PrimaryTableId, string[] TableIds, string[] TableNames,
+    int GuestCount, int Version, DateTimeOffset? ClosedAt);
 public sealed record TransferServiceTable(Guid RequestId, string TargetTableId, int ExpectedVersion);
 public sealed record MergeServiceTables(Guid RequestId, IReadOnlyList<string> SourceTableIds,
     IReadOnlyDictionary<string, int> ExpectedVersions);
-public sealed record ServiceLineView(string ProductId, string ProductName, int Quantity, long UnitPriceMinor, long LineTotalMinor);
+public sealed record ServiceLineView(string ProductId, string ProductName, int Quantity, long UnitPriceMinor,
+    long LineTotalMinor, string? Note, IReadOnlyList<PosOrderItemOption> Options, long OrderLineId);
+public sealed record ServiceAdjustmentView(string Action, long AmountMinor, string Reason, DateTimeOffset CreatedAt,
+    long? OrderLineId, int Quantity);
 public sealed record ServiceAssignmentView(string Id, string OrderId, string? WaiterId, string? WaiterName,
     DateTimeOffset OpenedAt, DateTimeOffset OrderCreatedAt, string OrderStatus, string PaymentStatus,
-    long TotalMinor, int Version, ServiceLineView[] Items);
-public sealed record ServiceTableView(string Id, int Number, string Name, bool IsActive, ServiceAssignmentView? Assignment);
+    long TotalMinor, int Version, ServiceLineView[] Items, string[] OrderIds,
+    long GrossTotalMinor, long AdjustmentMinor, ServiceAdjustmentView[] Adjustments);
+public sealed record ServiceTableView(string Id, int Number, string Name, bool IsActive, ServiceAssignmentView? Assignment,
+    ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null);
 public sealed record ServiceWaiterView(string Id, string Name, bool IsActive);
 public sealed record ServiceEmployeeView(string Id, string Name, string Department, string JobTitle, string? Phone,
     bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -58,15 +69,218 @@ public static class ServiceEndpoints
             var orders = await sales.Orders.AsNoTracking().Include(row => row.Lines)
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.CheckId))
                 .ToListAsync(context.RequestAborted);
+            var adjustments = await sales.CheckAdjustments.AsNoTracking().Where(row => row.FirmId == firmId &&
+                row.BranchId == branchId && checkIds.Contains(row.CheckId)).ToListAsync(context.RequestAborted);
             var ordersByCheck = orders.GroupBy(row => row.CheckId)
                 .ToDictionary(group => group.Key, group => group.ToArray());
+            var adjustmentsByCheck = adjustments.GroupBy(row => row.CheckId)
+                .ToDictionary(group => group.Key, group => group.ToArray());
             var byTable = assignments.ToDictionary(row => row.TableId);
-            var items = tables.Select(table => new ServiceTableView(table.Id, table.Number, table.Name, table.IsActive,
-                byTable.TryGetValue(table.Id, out var assignment) && checkIdsByTable.TryGetValue(table.Id, out var tableChecks)
+            var activeGroups = await db.TableGroups.AsNoTracking().Where(row => row.FirmId == firmId &&
+                row.BranchId == branchId && row.ClosedAt == null).ToDictionaryAsync(row => row.Id, context.RequestAborted);
+            var tablesById = tables.ToDictionary(row => row.Id);
+            var items = tables.Select(table =>
+            {
+                var tableGroup = table.TableGroupId is { } groupId && activeGroups.TryGetValue(groupId, out var foundGroup) ? foundGroup : null;
+                var primaryId = tableGroup?.PrimaryTableId ?? table.Id;
+                return new ServiceTableView(table.Id, table.Number, table.Name, table.IsActive,
+                byTable.TryGetValue(primaryId, out var assignment) && checkIdsByTable.TryGetValue(primaryId, out var tableChecks)
                     ? ToView(assignment, tableChecks.SelectMany(checkId => ordersByCheck.TryGetValue(checkId, out var checkOrders)
-                        ? checkOrders : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
-                    : null)).ToArray();
+                        ? checkOrders : []).ToArray(), tableChecks.SelectMany(checkId => adjustmentsByCheck.TryGetValue(checkId, out var checkAdjustments)
+                        ? checkAdjustments : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
+                    : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName);
+            }).ToArray();
             return Results.Ok(new { source = "postgres", tablesEnabled, waitersEnabled, items });
+        });
+
+        group.MapPost("/tables/{tableId}/request-bill", async (string firmId, string branchId, string tableId,
+            UpdateServiceTableState command, HttpContext context, ServiceDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1) return Fail(context, "INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "bill_requested")
+            { await transaction.CommitAsync(context.RequestAborted); return Results.Ok(new { tableId, status = table.Status, version = table.Version, repeated = true }); }
+            if (table.Status != "occupied" || !await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.TableId == tableId && row.ClosedAt == null, context.RequestAborted))
+                return Fail(context, "TABLE_NOT_OCCUPIED", 409, "Hesap ancak açık adisyon bulunan dolu masada istenebilir.");
+            if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa durumu değişti; masaları yenileyin.");
+            table.Status = "bill_requested"; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+            AddAudit(db, firmId, branchId, table.Id, "bill_requested", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
+            await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { tableId, status = table.Status, version = table.Version });
+        });
+
+        group.MapPost("/tables/{tableId}/cancel-bill-request", async (string firmId, string branchId, string tableId,
+            UpdateServiceTableState command, HttpContext context, ServiceDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1) return Fail(context, "INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "occupied")
+            { await transaction.CommitAsync(context.RequestAborted); return Results.Ok(new { tableId, status = table.Status, version = table.Version, repeated = true }); }
+            if (table.Status != "bill_requested" || !await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.TableId == tableId && row.ClosedAt == null, context.RequestAborted))
+                return Fail(context, "BILL_REQUEST_NOT_FOUND", 409, "Bu masada kaldırılabilecek bir hesap isteği yok.");
+            if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa durumu değişti; masaları yenileyin.");
+            table.Status = "occupied"; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+            AddAudit(db, firmId, branchId, table.Id, "bill_request_cancelled", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
+            await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { tableId, status = table.Status, version = table.Version });
+        });
+
+        group.MapPost("/tables/{tableId}/reservation", async (string firmId, string branchId, string tableId,
+            ReserveServiceTable command, HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1 || command.ReservedFor <= DateTimeOffset.UtcNow)
+                return Fail(context, "INVALID_RESERVATION", 400, "Rezervasyon zamanı gelecekte olmalı ve masa sürümü geçerli olmalı.");
+            var guestName = command.GuestName?.Trim();
+            if (string.IsNullOrWhiteSpace(guestName) || guestName.Length > 120)
+                return Fail(context, "INVALID_RESERVATION_GUEST", 400, "Rezervasyon için en fazla 120 karakterlik ad soyad girin.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "reserved" && table.ReservedFor == command.ReservedFor.ToUniversalTime() && table.ReservationGuestName == guestName)
+            { await transaction.CommitAsync(context.RequestAborted); return Results.Ok(new { tableId, status = table.Status, reservedFor = table.ReservedFor, reservationGuestName = table.ReservationGuestName, version = table.Version, repeated = true }); }
+            if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa durumu değişti; masaları yenileyin.");
+            if (table.Status is not ("idle" or "reserved") || table.TableGroupId is not null ||
+                await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.TableId == tableId && row.ClosedAt == null, context.RequestAborted))
+                return Fail(context, "TABLE_NOT_AVAILABLE", 409, "Yalnızca boş ve grupta olmayan masalar rezerve edilebilir.");
+            var wasReserved = table.Status == "reserved";
+            table.Status = "reserved"; table.ReservedFor = command.ReservedFor.ToUniversalTime(); table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+            table.ReservationGuestName = guestName;
+            AddAudit(db, firmId, branchId, table.Id, wasReserved ? "table_reservation_updated" : "table_reserved", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
+            await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { tableId, status = table.Status, reservedFor = table.ReservedFor, reservationGuestName = table.ReservationGuestName, version = table.Version });
+        });
+
+        group.MapPost("/tables/{tableId}/reservation/cancel", async (string firmId, string branchId, string tableId,
+            UpdateServiceTableState command, HttpContext context, ServiceDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1) return Fail(context, "INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "idle")
+            { await transaction.CommitAsync(context.RequestAborted); return Results.Ok(new { tableId, status = table.Status, version = table.Version, repeated = true }); }
+            if (table.Status != "reserved") return Fail(context, "TABLE_NOT_RESERVED", 409, "Bu masa rezerve durumda değil.");
+            if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa durumu değişti; masaları yenileyin.");
+            table.Status = "idle"; table.ReservedFor = null; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+            table.ReservationGuestName = null;
+            AddAudit(db, firmId, branchId, table.Id, "table_reservation_cancelled", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
+            await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { tableId, status = table.Status, version = table.Version });
+        });
+
+        group.MapPost("/table-groups", async (string firmId, string branchId, CreateServiceTableGroup command,
+            HttpContext context, ServiceDbContext db, SalesDbContext sales, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            var members = command.MemberTableIds ?? [];
+            if (command.RequestId == Guid.Empty || string.IsNullOrWhiteSpace(command.PrimaryTableId) || command.PrimaryTableId.Length > 80 ||
+                command.GuestCount is < 1 or > 999 || members.Length is < 1 or > 20 ||
+                members.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 80) || members.Contains(command.PrimaryTableId) ||
+                members.Distinct(StringComparer.Ordinal).Count() != members.Length)
+                return Fail(context, "INVALID_TABLE_GROUP", 400, "Ana masa, birlikte kullanılacak masalar ve kişi sayısı geçerli olmalı.");
+            var ids = members.Prepend(command.PrimaryTableId).ToArray();
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var prior = await db.TableGroups.SingleOrDefaultAsync(row => row.Id == command.RequestId, context.RequestAborted);
+            if (prior is not null)
+            {
+                if (prior.FirmId != firmId || prior.BranchId != branchId || prior.PrimaryTableId != command.PrimaryTableId ||
+                    prior.GuestCount != command.GuestCount || !prior.TableIds.ToHashSet(StringComparer.Ordinal).SetEquals(ids))
+                    return Fail(context, "TABLE_GROUP_REQUEST_CONFLICT", 409, "İstek kimliği farklı masa grubu için kullanılmış.");
+                var priorTables = await db.Tables.Where(row => row.FirmId == firmId && row.BranchId == branchId && ids.Contains(row.Id))
+                    .ToDictionaryAsync(row => row.Id, context.RequestAborted);
+                return Results.Ok(GroupView(prior, priorTables));
+            }
+            var tables = await LockTablesAsync(db, firmId, branchId, ids, context.RequestAborted);
+            if (tables is null || tables.Values.Any(row => !row.IsActive))
+                return Fail(context, "TABLE_NOT_FOUND", 404, "Seçilen masalardan biri bu şubede aktif değil.");
+            if (tables.Values.Any(row => row.TableGroupId != null))
+                return Fail(context, "TABLE_GROUP_ACTIVE", 409, "Seçilen masalardan biri zaten bir grupta. Masaları yenileyin.");
+            if (tables.Values.Any(row => row.Status == "reserved"))
+                return Fail(context, "TABLE_RESERVED", 409, "Rezerve masa gruba eklenemez.");
+            if (await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.ClosedAt == null && members.Contains(row.TableId), context.RequestAborted) ||
+                await sales.Checks.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.Status == "open" && row.TableId != null && members.Contains(row.TableId), context.RequestAborted))
+                return Fail(context, "TABLE_ALREADY_OCCUPIED", 409, "Ek masalar boş olmalı. Dolu masaların adisyonlarını önce birleştirin.");
+            var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var row = new ServiceTableGroupRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
+                PrimaryTableId = command.PrimaryTableId, TableIds = ids, GuestCount = command.GuestCount, CreatedAt = now, CreatedBy = actor };
+            db.TableGroups.Add(row);
+            // Grup önce kaydedilir; masa/grup yabancı anahtarları döngü oluşturmadan aynı transaction içinde tamamlanır.
+            await db.SaveChangesAsync(context.RequestAborted);
+            foreach (var table in tables.Values)
+            {
+                table.TableGroupId = row.Id;
+                if (table.Status != "bill_requested") table.Status = "occupied";
+                table.ReservedFor = null; table.Version++; table.UpdatedAt = now;
+            }
+            AddAudit(db, firmId, branchId, row.Id.ToString(), "table_group_created", actor, now);
+            await db.SaveChangesAsync(context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/table-groups/{row.Id}", GroupView(row, tables));
+        });
+
+        group.MapPost("/table-groups/{groupId:guid}/close", async (string firmId, string branchId, Guid groupId,
+            CloseServiceTableGroup command, HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1) return Fail(context, "INVALID_VERSION", 400, "Geçerli grup sürümü gerekli.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var row = await db.TableGroups.SingleOrDefaultAsync(row => row.Id == groupId && row.FirmId == firmId &&
+                row.BranchId == branchId, context.RequestAborted);
+            if (row is null) return Fail(context, "TABLE_GROUP_NOT_FOUND", 404, "Masa grubu bulunamadı.");
+            if (row.Version != command.ExpectedVersion && !(row.ClosedAt != null && row.Version == command.ExpectedVersion + 1))
+                return Fail(context, "VERSION_CONFLICT", 409, "Masa grubu güncel değil; masaları yenileyin.");
+            var tables = await LockTablesAsync(db, firmId, branchId, row.TableIds, context.RequestAborted);
+            if (tables is null) return Fail(context, "TABLE_NOT_FOUND", 409, "Grup masaları bulunamadı.");
+            if (row.ClosedAt == null)
+            {
+                row.ClosedAt = DateTimeOffset.UtcNow;
+                row.Version++;
+                var primaryHasAssignment = await db.Assignments.AnyAsync(assignment => assignment.FirmId == firmId &&
+                    assignment.BranchId == branchId && assignment.TableId == row.PrimaryTableId && assignment.ClosedAt == null,
+                    context.RequestAborted);
+                foreach (var table in tables.Values.Where(table => table.TableGroupId == row.Id))
+                {
+                    table.TableGroupId = null;
+                    if (table.Id == row.PrimaryTableId && table.Status == "bill_requested") { }
+                    else if (table.Id == row.PrimaryTableId && primaryHasAssignment) table.Status = "occupied";
+                    else table.Status = "idle";
+                    table.ReservedFor = null; table.Version++; table.UpdatedAt = row.ClosedAt.Value;
+                }
+                AddAudit(db, firmId, branchId, row.Id.ToString(), "table_group_closed", DemoAccess.Resolve(context)!.Name, row.ClosedAt.Value);
+                await db.SaveChangesAsync(context.RequestAborted);
+            }
+            await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(GroupView(row, tables));
         });
 
         group.MapPost("/tables/{sourceTableId}/transfer", async (string firmId, string branchId,
@@ -105,6 +319,11 @@ public static class ServiceEndpoints
                 [sourceTableId, command.TargetTableId], context.RequestAborted);
             if (lockedTables is null || !lockedTables[sourceTableId].IsActive || !lockedTables[command.TargetTableId].IsActive)
                 return Fail(context, "TABLE_NOT_FOUND", 404, "Kaynak veya hedef masa bu şubede aktif değil.");
+            if (lockedTables.Values.Any(table => table.TableGroupId != null))
+                return Fail(context, "TABLE_GROUP_ACTIVE", 409, "Masa taşımadan önce masa grubunu ayırın.");
+            if (lockedTables[command.TargetTableId].Status != "idle")
+                return Fail(context, lockedTables[command.TargetTableId].Status == "reserved" ? "TABLE_RESERVED" : "TABLE_NOT_AVAILABLE", 409,
+                    lockedTables[command.TargetTableId].Status == "reserved" ? "Rezerve masa hedef olarak kullanılamaz." : "Hedef masa kullanılabilir durumda değil.");
             if (await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
                 row.TableId == command.TargetTableId && row.ClosedAt == null, context.RequestAborted))
                 return Fail(context, "TABLE_ALREADY_OCCUPIED", 409, "Hedef masada açık adisyon var.");
@@ -131,6 +350,11 @@ public static class ServiceEndpoints
             if (changed == 0)
                 return Fail(context, "CHECK_NOT_OPEN", 409, "Adisyon açık değil veya kaynak masaya bağlı değil.");
 
+            var movedTableStatus = lockedTables[sourceTableId].Status == "bill_requested" ? "bill_requested" : "occupied";
+            lockedTables[sourceTableId].Status = "idle"; lockedTables[sourceTableId].ReservedFor = null;
+            lockedTables[sourceTableId].Version++; lockedTables[sourceTableId].UpdatedAt = now;
+            lockedTables[command.TargetTableId].Status = movedTableStatus; lockedTables[command.TargetTableId].ReservedFor = null;
+            lockedTables[command.TargetTableId].Version++; lockedTables[command.TargetTableId].UpdatedAt = now;
             assignment.TableId = command.TargetTableId;
             assignment.Version++;
             db.TableTransfers.Add(new ServiceTableTransferRow
@@ -209,6 +433,11 @@ public static class ServiceEndpoints
                 sourceIds.Append(targetTableId).ToArray(), context.RequestAborted);
             if (lockedTables is null || lockedTables.Values.Any(table => !table.IsActive))
                 return Fail(context, "TABLE_NOT_FOUND", 404, "Birleştirilecek masalardan biri bu şubede aktif değil.");
+            if (lockedTables.Values.Any(table => table.TableGroupId != null))
+                return Fail(context, "TABLE_GROUP_ACTIVE", 409, "Adisyon birleştirmeden önce masa grubunu ayırın.");
+            if (lockedTables[targetTableId].Status == "reserved" || sourceIds.Any(id => lockedTables[id].Status == "reserved"))
+                return Fail(context, "TABLE_RESERVED", 409, "Rezerve masa adisyon birleştirme işlemine alınamaz.");
+            var mergeBillWasRequested = expectedIds.Any(id => lockedTables[id].Status == "bill_requested");
 
             var assignments = new Dictionary<string, ServiceAssignmentRow>(StringComparer.Ordinal);
             foreach (var tableId in expectedIds.OrderBy(id => id, StringComparer.Ordinal))
@@ -236,6 +465,10 @@ public static class ServiceEndpoints
             if (!tableChecks.Any(row => row.Id == targetAssignment.CheckId && row.TableId == targetTableId) ||
                 sourceIds.Any(id => !tableChecks.Any(row => row.Id == assignments[id].CheckId && row.TableId == id)))
                 return Fail(context, "CHECK_ASSIGNMENT_CONFLICT", 409, "Masa-adisyon bağlantısı güncel değil; masaları yenileyin.");
+            var mergeCheckIds = sourceCheckIds.Append(targetAssignment.CheckId).ToArray();
+            if (await salesDb.CheckAdjustments.AnyAsync(row => mergeCheckIds.Contains(row.CheckId) &&
+                row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted))
+                return Fail(context, "CHECK_HAS_ADJUSTMENTS", 409, "İndirim veya ikram bulunan adisyonlar masa birleştirme işlemine alınamaz.");
             var now = DateTimeOffset.UtcNow;
             var actor = DemoAccess.Resolve(context)!.Name;
             var mergeFailure = await sales.MergeChecksAsync(db.Database.GetDbConnection(),
@@ -247,6 +480,8 @@ public static class ServiceEndpoints
             foreach (var sourceId in sourceIds)
             {
                 var assignment = assignments[sourceId];
+                lockedTables[sourceId].Status = "idle"; lockedTables[sourceId].ReservedFor = null;
+                lockedTables[sourceId].Version++; lockedTables[sourceId].UpdatedAt = now;
                 assignment.ClosedAt = now;
                 assignment.ClosedBy = actor;
                 assignment.Version++;
@@ -258,6 +493,8 @@ public static class ServiceEndpoints
                 });
                 AddAudit(db, firmId, branchId, assignment.Id.ToString(), "assignment_merged", actor, now);
             }
+            lockedTables[targetTableId].Status = mergeBillWasRequested ? "bill_requested" : "occupied";
+            lockedTables[targetTableId].ReservedFor = null; lockedTables[targetTableId].Version++; lockedTables[targetTableId].UpdatedAt = now;
             try
             {
                 await db.SaveChangesAsync(context.RequestAborted);
@@ -293,6 +530,7 @@ public static class ServiceEndpoints
             var table = await db.Tables.AsNoTracking().SingleOrDefaultAsync(row => row.Id == tableId &&
                 row.FirmId == firmId && row.BranchId == branchId && row.IsActive, context.RequestAborted);
             if (table is null) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "reserved") return Fail(context, "TABLE_RESERVED", 409, "Rezerve masaya sipariş eklenemez.");
             var waiter = await db.Employees.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.WaiterId &&
                 row.FirmId == firmId && row.BranchId == branchId && row.Department == "service" && row.IsActive,
                 context.RequestAborted);
@@ -300,31 +538,28 @@ public static class ServiceEndpoints
 
             var assignment = await db.Assignments.AsNoTracking().SingleOrDefaultAsync(row => row.FirmId == firmId &&
                 row.BranchId == branchId && row.TableId == tableId && row.ClosedAt == null, context.RequestAborted);
-            SalesCheckRow check;
-            Guid checkId;
+            SalesCheckRow? checkToCreate = null;
+            var checkId = assignment?.CheckId ?? command.OrderId;
             if (assignment is not null)
             {
                 if (assignment.WaiterId != command.WaiterId)
                     return Fail(context, "TABLE_ASSIGNED_TO_OTHER_WAITER", 409, "Bu masa başka bir garsona atanmış.");
-                checkId = assignment.CheckId;
-                var existingCheck = await salesDb.Checks.AsNoTracking().SingleOrDefaultAsync(row => row.Id == checkId &&
+                var hasOpenCheck = await salesDb.Checks.AsNoTracking().AnyAsync(row => row.Id == checkId &&
                     row.FirmId == firmId && row.BranchId == branchId && row.Status == "open", context.RequestAborted);
-                if (existingCheck is null)
+                if (!hasOpenCheck)
                     return Fail(context, "CHECK_NOT_FOUND", 409, "Masanın açık adisyonu bulunamadı; yönetim ekranından yenileyin.");
-                check = existingCheck;
             }
             else
             {
-                checkId = command.OrderId;
-                check = new SalesCheckRow { Id = checkId, FirmId = firmId, BranchId = branchId,
+                checkToCreate = new SalesCheckRow { Id = checkId, FirmId = firmId, BranchId = branchId,
                     TableId = tableId, WaiterId = waiter.Id, Status = "open", Currency = "TRY",
                     CreatedAt = DateTimeOffset.UtcNow, Version = 1 };
             }
 
             var result = await salesOrders.CreateAsync(firmId, branchId,
                 new CreatePosOrder(command.OrderId, command.Items), waiter.Name, context.RequestAborted,
-                requestedCheckId: checkId, checkToCreate: assignment is null ? check : null,
-                source: "waiter_web");
+                checkId: checkId, checkToCreate: checkToCreate,
+                featureKey: "sales.checks", source: "waiter_web");
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             return result.Created
                 ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/orders/{command.OrderId}",
@@ -435,7 +670,8 @@ public static class ServiceEndpoints
                 AddAudit(db, firmId, branchId, existing.Id, "table_reactivated", DemoAccess.Resolve(context)!.Name, now);
                 await db.SaveChangesAsync(context.RequestAborted);
                 await transaction.CommitAsync(context.RequestAborted);
-                return Results.Ok(new ServiceTableView(existing.Id, existing.Number, existing.Name, true, null));
+                return Results.Ok(new ServiceTableView(existing.Id, existing.Number, existing.Name, true, null, null,
+                    existing.Status, existing.ReservedFor, existing.Version));
             }
             var row = new ServiceTableRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
                 Number = number, Name = name?.Length > 0 ? name : $"Masa {number:00}", UpdatedAt = now };
@@ -445,7 +681,7 @@ public static class ServiceEndpoints
             catch (DbUpdateException error) when (Unique(error))
             { return Fail(context, "TABLE_EXISTS", 409, "Bu numarada masa zaten var."); }
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{row.Id}",
-                new ServiceTableView(row.Id, row.Number, row.Name, row.IsActive, null));
+                new ServiceTableView(row.Id, row.Number, row.Name, row.IsActive, null, null, row.Status, row.ReservedFor, row.Version));
         });
 
         group.MapDelete("/tables/{tableId}", async (string firmId, string branchId, string tableId,
@@ -463,6 +699,8 @@ public static class ServiceEndpoints
             var lastNumber = await db.Tables.Where(row => row.FirmId == firmId && row.BranchId == branchId && row.IsActive)
                 .MaxAsync(row => (int?)row.Number, context.RequestAborted);
             if (table.Number != lastNumber) return Fail(context, "ONLY_LAST_TABLE_CAN_BE_REMOVED", 409, "Yalnızca en son numaralı masa kaldırılabilir.");
+            if (table.TableGroupId != null) return Fail(context, "TABLE_GROUP_ACTIVE", 409, "Masa kaldırmadan önce masa grubunu ayırın.");
+            if (table.Status == "reserved") return Fail(context, "TABLE_RESERVED", 409, "Rezerve masa kaldırılmadan önce rezervasyon iptal edilmeli.");
             if (await db.Assignments.AnyAsync(row => row.TableId == table.Id && row.ClosedAt == null, context.RequestAborted))
                 return Fail(context, "TABLE_HAS_OPEN_CHECK", 409, "Bu masada açık adisyon var; masa kaldırılamaz.");
             var now = DateTimeOffset.UtcNow;
@@ -529,6 +767,10 @@ public static class ServiceEndpoints
             var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {command.TableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Status == "reserved") return Fail(context, "TABLE_RESERVED", 409, "Rezerve masaya adisyon bağlanamaz.");
+            if (table.TableGroupId is { } tableGroupId && await db.TableGroups.AnyAsync(row => row.Id == tableGroupId &&
+                row.PrimaryTableId != table.Id && row.ClosedAt == null, context.RequestAborted))
+                return Fail(context, "TABLE_GROUP_PRIMARY_REQUIRED", 409, "Siparişi grubun ana masasına bağlayın.");
             if (await db.Assignments.AnyAsync(row => row.TableId == table.Id && row.ClosedAt == null, context.RequestAborted))
                 return Fail(context, "TABLE_OCCUPIED", 409, "Masada zaten açık adisyon var.");
             if (command.WaiterId is not null && !await db.Employees.AnyAsync(row => row.Id == command.WaiterId &&
@@ -542,6 +784,7 @@ public static class ServiceEndpoints
                 CheckId = order.CheckId, TableId = table.Id, OrderId = order.Id, WaiterId = command.WaiterId,
                 OpenedAt = now, CreatedBy = DemoAccess.Resolve(context)!.Name };
             db.Assignments.Add(row);
+            table.Status = "occupied"; table.ReservedFor = null; table.Version++; table.UpdatedAt = now;
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE sales.checks SET table_id = {table.Id}, waiter_id = {command.WaiterId}, version = version + 1
                 WHERE id = {order.CheckId} AND firm_id = {firmId} AND branch_id = {branchId}
@@ -574,6 +817,13 @@ public static class ServiceEndpoints
             row.ClosedAt = DateTimeOffset.UtcNow;
             row.ClosedBy = DemoAccess.Resolve(context)!.Name;
             row.Version++;
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {row.TableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is not null)
+            {
+                table.Status = table.TableGroupId is null ? "idle" : "occupied";
+                table.ReservedFor = null; table.Version++; table.UpdatedAt = row.ClosedAt.Value;
+            }
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 UPDATE sales.checks SET table_id = NULL, waiter_id = NULL, version = version + 1
                 WHERE id = {row.CheckId} AND firm_id = {firmId} AND branch_id = {branchId} AND table_id = {row.TableId}
@@ -591,15 +841,25 @@ public static class ServiceEndpoints
         });
     }
 
-    private static ServiceAssignmentView ToView(ServiceAssignmentRow assignment, IReadOnlyList<SalesOrderRow> orders, string? waiterName)
+    private static ServiceTableGroupView GroupView(ServiceTableGroupRow row, IReadOnlyDictionary<string, ServiceTableRow> tables) =>
+        new(row.Id, row.PrimaryTableId, row.TableIds, row.TableIds.Select(id => tables[id].Name).ToArray(), row.GuestCount, row.Version, row.ClosedAt);
+
+    private static ServiceAssignmentView ToView(ServiceAssignmentRow assignment, IReadOnlyList<SalesOrderRow> orders,
+        IReadOnlyList<SalesCheckAdjustmentRow> adjustments, string? waiterName)
     {
         var primaryOrder = orders.FirstOrDefault(order => order.Id == assignment.OrderId) ?? orders[0];
+        var gross = orders.Sum(order => order.TotalMinor);
+        var reduction = adjustments.Sum(row => row.AmountMinor);
         return new ServiceAssignmentView(assignment.Id.ToString(), assignment.OrderId.ToString(), assignment.WaiterId, waiterName,
             assignment.OpenedAt, primaryOrder.CreatedAt, primaryOrder.Status, primaryOrder.PaymentStatus,
-            orders.Sum(order => order.TotalMinor), assignment.Version,
+            Math.Max(0, gross - reduction), assignment.Version,
             orders.SelectMany(order => order.Lines).OrderBy(line => line.Id)
                 .Select(line => new ServiceLineView(line.ProductId.ToString(), line.ProductName, line.Quantity,
-                    line.UnitPriceMinor, line.LineTotalMinor)).ToArray());
+                    line.UnitPriceMinor, line.LineTotalMinor, line.Note,
+                    System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [], line.Id)).ToArray(),
+            orders.Select(order => order.Id.ToString()).ToArray(), gross, reduction,
+            adjustments.Select(row => new ServiceAdjustmentView(row.Action, row.AmountMinor, row.Reason, row.CreatedAt,
+                row.OrderLineId, row.Quantity)).ToArray());
     }
 
     private static async Task<Dictionary<string, ServiceTableRow>?> LockTablesAsync(ServiceDbContext db,

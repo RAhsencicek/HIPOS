@@ -17,7 +17,10 @@ const repo = fileURLToPath(new URL("../../../", import.meta.url));
 const project = fileURLToPath(
   new URL("../Hipos.Api/Hipos.Api.csproj", import.meta.url),
 );
-const pgBin = "/opt/homebrew/opt/postgresql@18/bin";
+const pgBin = process.env.HIPOS_TEST_PG_BIN ?? (process.platform === "win32"
+  ? "C:/Program Files/PostgreSQL/15/bin"
+  : "/opt/homebrew/opt/postgresql@18/bin");
+const pgUser = process.env.USER ?? process.env.USERNAME;
 const firm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const moda = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 const besiktas = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
@@ -71,7 +74,7 @@ async function waitForUi(base, child, output) {
 
 test(
   "PostgreSQL modül tercihini yeniden başlatma ve eşzamanlı istekte korur",
-  { timeout: 90000 },
+  { timeout: 300000 },
   async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hipos-postgres-test-"));
     const data = join(temporary, "data");
@@ -81,7 +84,7 @@ test(
     const uiPort = await freePort();
     const base = `http://127.0.0.1:${apiPort}`;
     const uiBase = `http://127.0.0.1:${uiPort}`;
-    const connection = `Host=127.0.0.1;Port=${pgPort};Database=hipos_features;Username=${process.env.USER};Pooling=false`;
+    const connection = `Host=127.0.0.1;Port=${pgPort};Database=hipos_features;Username=${pgUser};Pooling=false`;
     const env = {
       ...process.env,
       ASPNETCORE_ENVIRONMENT: "Development",
@@ -166,7 +169,7 @@ test(
         "-l",
         log,
         "-o",
-        `-h 127.0.0.1 -p ${pgPort} -k /tmp`,
+        process.platform === "win32" ? `-h 127.0.0.1 -p ${pgPort}` : `-h 127.0.0.1 -p ${pgPort} -k /tmp`,
         "start",
       ]);
       postgresStarted = true;
@@ -176,7 +179,7 @@ test(
         "-p",
         String(pgPort),
         "-U",
-        process.env.USER,
+        pgUser,
         "hipos_features",
       ]);
       await execFile(
@@ -197,7 +200,7 @@ test(
           env,
         },
       );
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO modules.branch_feature_states
           (firm_id,branch_id,feature_key,desired_enabled,effective_for_new_work,lifecycle,in_flight_work_count,version,updated_at)
@@ -242,7 +245,7 @@ test(
       );
       const legacyFirm = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
       await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO catalog.products
           (id,firm_id,brand_id,name,sku,category_id,category_name,status,channels,image,recipe_linked,base_price_minor,currency,description,allergens,option_groups,branch_ids,updated_at,version)
@@ -256,12 +259,12 @@ test(
         { cwd: repo, env },
       ));
       const failedMigration = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT to_regclass('catalog.categories')",
       ]);
       assert.equal(failedMigration.stdout.trim(), "");
       await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         "UPDATE catalog.products SET category_name = 'Eski Kategori' WHERE id = '99999999-9999-4999-8999-999999999902'",
       ]);
@@ -276,7 +279,7 @@ test(
       const legacyPayment = "dededede-dede-4ede-8ede-dededededede";
       await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
         "20261007122833_AddSimulatedPayments", "--project", project, "--context", "SalesDbContext"], { cwd: repo, env });
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO sales.orders (id,firm_id,branch_id,source,status,payment_status,total_minor,currency,request_fingerprint,created_at,version)
          VALUES ('${legacySalesOrder}','${legacySalesFirm}','${legacySalesBranch}','migration_fixture','open','paid',1000,'TRY',repeat('a',64),'2026-10-08T09:00:00Z',1);
@@ -288,13 +291,13 @@ test(
          VALUES ('${legacyPayment}','${legacySalesOrder}','${legacySalesFirm}','${legacySalesBranch}','migration-test','started','succeeded',1,'2026-10-08T09:01:00Z');`]);
       await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
         "20261015114911_SalesChecksNullableBackfill", "--project", project, "--context", "SalesDbContext"], { cwd: repo, env });
-      const salesBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const salesBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT (SELECT check_id::text FROM sales.orders WHERE id='${legacySalesOrder}')||','||
                 (SELECT check_id::text FROM sales.payment_attempts WHERE id='${legacyPayment}')||','||
                 (SELECT count(*)::text FROM sales.check_audit WHERE check_id='${legacySalesOrder}')`]);
       assert.equal(salesBackfill.stdout.trim(), `${legacySalesOrder},${legacySalesOrder},1`);
-      const preservedSales = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const preservedSales = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT (SELECT count(*) FROM sales.orders WHERE id='${legacySalesOrder}')||','||
                 (SELECT count(*) FROM sales.order_audit WHERE order_id='${legacySalesOrder}')||','||
@@ -309,7 +312,7 @@ test(
         ["tool", "run", "dotnet-ef", "database", "update", "20261008100143_InitCari", "--project", project, "--context", "CariDbContext"],
         { cwd: repo, env },
       );
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO cari.parties (id,firm_id,branch_id,name,types,is_active,version,updated_at)
          VALUES ('legacy-party-preserved','${single}','${singleBranch}','Önceki Cari',ARRAY['customer'],true,1,'2026-10-08T09:00:00Z');
@@ -327,7 +330,7 @@ test(
       );
       await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "20261008113750_InitService",
         "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO service.waiters (id,firm_id,branch_id,name,is_active,updated_at)
          VALUES ('legacy-waiter-preserved','${single}','${singleBranch}','Önceki Garson',true,'2026-10-08T09:00:00Z');
@@ -337,12 +340,12 @@ test(
          VALUES ('efefefef-efef-4fef-8fef-efefefefefef','${legacySalesFirm}','${legacySalesBranch}','legacy-migration-table','${legacySalesOrder}',NULL,'2026-10-08T09:02:00Z',NULL,1,'migration-test',NULL);`]);
       await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update",
         "20261015114942_ServiceAssignmentsChecksNullableBackfill", "--project", project, "--context", "ServiceDbContext"], { cwd: repo, env });
-      const serviceBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const serviceBackfill = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT (SELECT check_id::text FROM service.assignments WHERE id='efefefef-efef-4fef-8fef-efefefefefef')||','||
                 (SELECT table_id FROM sales.checks WHERE id='${legacySalesOrder}')`]);
       assert.equal(serviceBackfill.stdout.trim(), `${legacySalesOrder},legacy-migration-table`);
-      const preservedAssignment = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const preservedAssignment = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*)||','||order_id||','||table_id||','||coalesce(waiter_id,'')||','||check_id::text||','||
                 (closed_at IS NULL)::text
@@ -368,7 +371,7 @@ test(
         { cwd: repo, env },
       );
       const migratedCategory = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT name FROM catalog.categories WHERE firm_id = '${legacyFirm}' AND id = 'legacy'`,
       ]);
@@ -497,14 +500,14 @@ test(
       assert.equal((await request(`/api/v1/firms/${single}/branches/${singleBranch}/cash/registers/default`, "PUT",
         { requestId: "99999999-9999-4999-8999-999999999e03" }, "manager-moda")).status, 403,
       "Yönetici yetkili olmadığı şubeye kasa provision edememeli.");
-      const provisionCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const provisionCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${moda}' AND code='MAIN'`]);
       assert.equal(provisionCounts.stdout.trim(), "1,1", "İdempotent provisioning ikinci kasa/audit oluşturmamalı.");
-      const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
-      const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         "SELECT (SELECT count(*) FROM cash.registers)||','||(SELECT count(*) FROM cash.shifts)||','||(SELECT count(*) FROM cash.movements)"]);
       assert.equal(cashSeedCounts.stdout.trim(), "2,2,6", "Demo KAD-01 ve ayrıca provision edilen MAIN kasası vardır.");
@@ -524,11 +527,11 @@ test(
       const replayedDefault = await request(emptyBranchPath, "PUT", emptyBranchRequest, "manager-multi");
       assert.equal(replayedDefault.status, 200);
       assert.equal(replayedDefault.data.register.id, createdDefault.data.register.id);
-      const emptyBranchCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const emptyBranchCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${besiktas}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${besiktas}' AND code='MAIN'`]);
       assert.equal(emptyBranchCounts.stdout.trim(), "1,1", "Provisioning tekrarı ek kasa veya audit üretmemeli.");
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-c",
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-c",
         `INSERT INTO cash.registers (id,firm_id,branch_id,code,name,provider_mode,is_active,version) VALUES ('99999999-9999-4999-8999-999999999e06','${firm}','${atasehir}','MAIN','Yanlış Varsayılan','manual',true,1)`]);
       const conflictingMain = await request(`/api/v1/firms/${firm}/branches/${atasehir}/cash/registers/default`, "PUT",
         { requestId: "99999999-9999-4999-8999-999999999e07" }, "manager-multi");
@@ -597,7 +600,7 @@ test(
       }, "manager-single")).data.code, "INVALID_CORRECTION");
       const reversalBody = { requestId: "99999999-9999-4999-8999-999999999f0d",
         correctionType: "reversal", correctionReason: "Yanlış manuel gider kaydı" };
-      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO cash.movements (id,firm_id,branch_id,register_id,shift_id,kind,category,amount_minor,currency,description,source,original_movement_id,correction_type,correction_reason,actor,created_at) VALUES ('99999999-9999-4999-8999-999999999f17','${single}','${singleBranch}','${cashRegisterId}','${cashShiftId}','manual_out','other',1,'TRY','invalid correction','manual','77777777-7777-4777-8777-777777777712','reversal',NULL,'test',now())`]));
       const reversed = await request(correctionPath, "POST", reversalBody, "manager-single");
@@ -613,7 +616,7 @@ test(
         requestId: "99999999-9999-4999-8999-999999999f0e" }, "manager-single")).data.code, "MOVEMENT_ALREADY_CORRECTED");
       const originalAfterCorrection = await request(`${cashPath}/movements?shiftId=${cashShiftId}`, "GET", undefined, "manager-single");
       assert.equal(originalAfterCorrection.data.items.find((movement) => movement.id === cashOut.requestId).kind, "manual_out");
-      const correctionAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const correctionAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM cash.audit WHERE firm_id='${single}' AND branch_id='${singleBranch}' AND action='movement_reversed' AND entity_id='${reversalBody.requestId}'`]);
       assert.equal(correctionAudit.stdout.trim(), "1");
@@ -664,10 +667,10 @@ test(
       const cashMovements = await request(`${cashPath}/movements?shiftId=${cashShiftId}`, "GET", undefined, "manager-single");
       assert.equal(cashMovements.data.total, 3);
       const immutableCashMovement = cashIn.requestId;
-      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      await assert.rejects(runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `UPDATE cash.movements SET description='değiştirildi' WHERE id='${immutableCashMovement}'`]));
-      const cashAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const cashAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM cash.audit WHERE firm_id='${single}' AND branch_id='${singleBranch}'`]);
       assert.equal(Number(cashAuditCount.stdout.trim()) >= 12, true);
@@ -680,7 +683,7 @@ test(
       const cariFeature = cariFeatures.find((row) => row.key === "cari.management");
       assert.equal(cariFeature.effectiveForNewWork, true);
       assert.equal(cariFeatures.some((row) => row.key === "cari.customers" || row.key === "cari.suppliers"), false);
-      const migratedCariFeature = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const migratedCariFeature = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT desired_enabled::text||','||effective_for_new_work::text FROM modules.branch_feature_states WHERE firm_id='${single}' AND branch_id='${singleBranch}' AND feature_key='cari.management'`]);
       assert.equal(migratedCariFeature.stdout.trim(), "true,true");
@@ -704,18 +707,18 @@ test(
       }, "manager-single");
       assert.equal(reenablingCari.status, 200);
       assert.equal(reenablingCari.data.effectiveForNewWork, true);
-      const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
-      const seededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const seededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(seededCariCounts.stdout.trim(), "11,20");
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
-      const reseededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const reseededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(reseededCariCounts.stdout.trim(), "11,20");
       assert.deepEqual((await request(catalogPath(firm, moda))).data.items, []);
       await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO catalog.categories (firm_id,id,brand_id,name,is_active,sort_order,version,updated_at)
          VALUES ('${firm}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z'),
@@ -738,13 +741,13 @@ test(
 
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
       });
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
       });
-      const seedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const seedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         "SELECT (SELECT count(*) FROM inventory.ingredients)||','||(SELECT count(*) FROM inventory.recipes)||','||(SELECT count(*) FROM inventory.movements)||','||(SELECT count(*) FROM inventory.counts)"]);
       assert.equal(seedCounts.stdout.trim(), "21,4,39,1");
@@ -766,14 +769,14 @@ test(
       assert.equal(initialPizzaEstimate.status, "ready");
       assert.equal(initialPizzaEstimate.theoreticalPortions, 6);
       assert.equal(initialPizzaEstimate.limitingIngredientName, "Mozzarella");
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         "UPDATE inventory.recipe_lines SET unit='ml' WHERE recipe_id='recipe-margherita' AND ingredient_id='flour'"]);
       const mismatchedEstimate = await request(`${singleInventory}/production-estimates?warehouseId=warehouse-kadikoy-main`, "GET", undefined, "manager-single");
       const invalidPizzaEstimate = mismatchedEstimate.data.items.find((item) => item.productId === "55555555-5555-4555-8555-555555555501");
       assert.equal(invalidPizzaEstimate.status, "unit_mismatch");
       assert.equal(invalidPizzaEstimate.theoreticalPortions ?? null, null);
       assert.equal(invalidPizzaEstimate.lines.find((line) => line.ingredientId === "flour").possiblePortions ?? null, null);
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         "UPDATE inventory.recipe_lines SET unit='g' WHERE recipe_id='recipe-margherita' AND ingredient_id='flour'"]);
       const seededRecipes = (await request(`${singleInventory}/recipes`, "GET", undefined, "manager-single")).data.items;
       assert.equal(seededRecipes.length, 4);
@@ -820,7 +823,7 @@ test(
       }, "manager-single")).data.code, "COUNT_ALREADY_APPROVED");
       assert.equal((await request(`${singleInventory}/ingredients`, "GET", undefined, "manager-single")).data.items
         .find((row) => row.id === "mozzarella").onHand, 700);
-      const adjustmentCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const adjustmentCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM inventory.movements WHERE count_id='${demoCount.id}' AND ingredient_id='mozzarella' AND delta=-100 AND kind='count_adjustment'`]);
       assert.equal(adjustmentCount.stdout.trim(), "1");
@@ -840,7 +843,7 @@ test(
         delta: 25, kind: "manual_in", description: "Kabul testi stok girişi" };
       assert.equal((await request(`${singleInventory}/movements`, "POST", inbound, "manager-single")).status, 201);
       assert.equal((await request(`${singleInventory}/movements`, "POST", inbound, "manager-single")).status, 200);
-      const movementAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const movementAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM inventory.audit WHERE request_id='${inbound.requestId}' AND warehouse_id='warehouse-kadikoy-main' AND action='movement_added'`]);
       assert.equal(movementAudit.stdout.trim(), "1");
@@ -866,14 +869,14 @@ test(
       }, "manager-single");
       assert.equal(lockedMovement.status, 409);
       assert.equal(lockedMovement.data.code, "COUNT_IN_PROGRESS");
-      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO inventory.movements(id,firm_id,branch_id,warehouse_id,ingredient_id,delta,unit,kind,description,count_id,created_at,actor)
          VALUES ('44444444-4444-4444-8444-444444444414','${single}','${singleBranch}','warehouse-kadikoy-main','flour',1,'g','manual_in','Out-of-band giriş',NULL,now(),'test'),
                 ('44444444-4444-4444-8444-444444444416','${single}','${singleBranch}','warehouse-kadikoy-main','flour',-1,'g','manual_out','Out-of-band ters hareket',NULL,now(),'test')`]);
       assert.equal((await request(`${countListPath}/${conflictCount.id}/approve`, "POST", {
         requestId: "44444444-4444-4444-8444-444444444410", expectedVersion: conflictCount.version,
       }, "manager-single")).data.code, "COUNT_STOCK_CHANGED");
-      const conflictAdjustments = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const conflictAdjustments = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM inventory.movements WHERE count_id='${conflictCount.id}' AND kind='count_adjustment'`]);
       assert.equal(conflictAdjustments.stdout.trim(), "0");
@@ -1280,7 +1283,7 @@ test(
         "-p",
         String(pgPort),
         "-U",
-        process.env.USER,
+        pgUser,
         "-d",
         "hipos_features",
         "-t",
@@ -1290,19 +1293,19 @@ test(
       ]);
       assert.equal(migrationCount.stdout.trim(), "1");
       const catalogMigrationCount = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM catalog."__EFMigrationsHistory"',
       ]);
       assert.equal(catalogMigrationCount.stdout.trim(), "8");
       const salesMigrationCount = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM sales."__EFMigrationsHistory"',
       ]);
       assert.equal(salesMigrationCount.stdout.trim(), "3");
       const auditCount = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM catalog.draft_audit WHERE draft_id = '${draftId}'`,
       ]);
@@ -1345,7 +1348,7 @@ test(
       assert.equal((await request(updatePath, "PUT", { ...updateDraft, expectedVersion: 3 })).data.code,
         "CATEGORY_NAME_MISMATCH");
       const categoryAudit = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT action || ':' || actor || ':' || version FROM catalog.category_audit
          WHERE firm_id = '${firm}' ORDER BY id`,
@@ -1354,7 +1357,7 @@ test(
         "created:manager-multi:1", "renamed:manager-multi:2",
       ]);
       const renamedDraftAudit = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT action || ':' || version FROM catalog.draft_audit WHERE draft_id = '${draftId}' ORDER BY id`,
       ]);
@@ -1436,7 +1439,7 @@ test(
       });
       assert.equal(activeChef.data.isActive, true);
       assert.equal(activeChef.data.version, 4);
-      const employeeAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const employeeAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM service.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND entity_id='${employeeId}' AND action LIKE 'employee_%'`]);
       assert.equal(employeeAudit.stdout.trim(), "4");
@@ -1528,7 +1531,7 @@ test(
         requestId, firstOrderId, items: [{ productId: pizzaId, quantity: 1 }],
         customerId: links.customerId ?? null, tableId: links.tableId ?? null, waiterId: links.waiterId ?? null,
       });
-      const ledgerCountsBeforeChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const ledgerCountsBeforeChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||
                 (SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
@@ -1586,7 +1589,7 @@ test(
       assert.equal((await request(`${checkDetailPath}/orders`, "POST", {
         orderId: "88888888-8888-4888-8888-888888888909", items: [{ productId: pizzaId, quantity: 2 }],
       }, "pos-moda")).data.code, "ORDER_ID_CONFLICT");
-      const ledgerCountsAfterChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const ledgerCountsAfterChecks = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||
                 (SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
@@ -1598,7 +1601,7 @@ test(
         "--context", "SalesDbContext"], { cwd: repo, env });
       await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
         "--context", "ServiceDbContext"], { cwd: repo, env });
-      const requiredCheckColumns = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const requiredCheckColumns = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT string_agg(table_schema||'.'||table_name||':'||is_nullable, ',' ORDER BY table_schema,table_name)
          FROM information_schema.columns
@@ -1720,7 +1723,7 @@ test(
         desiredEnabled: true, expectedVersion: 3,
       })).status, 200);
       const orderAudit = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT action || ':' || actor || ':' || version FROM sales.order_audit
          WHERE order_id = '${orderId}' ORDER BY id`,
@@ -1733,7 +1736,7 @@ test(
       // Simüle ödeme: kısmi başarı, belirsiz sonuç, çözüm, iptal ve tamamlama.
       const paymentsPath = `${posOrders(moda)}/${orderId}/payment-attempts`;
       const simulatedMovementCounts = async () => {
-        const counts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        const counts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
           "-d", "hipos_features", "-t", "-A", "-c",
           `SELECT (SELECT count(*) FROM cash.movements WHERE firm_id='${firm}' AND branch_id='${moda}')||','||` +
           `(SELECT count(*) FROM cari.movements WHERE firm_id='${firm}' AND branch_id='${moda}')`]);
@@ -1817,7 +1820,7 @@ test(
       })).status, 200);
       assert.equal((await request(paymentsPath)).data.length, 4);
       const paymentAudit = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT action || ':' || status FROM sales.payment_attempt_audit
          WHERE order_id = '${orderId}' ORDER BY id`,
@@ -1897,7 +1900,7 @@ test(
       assert.equal((await request(publishHistoryPath, "GET", undefined, "manager-single")).status, 403);
       assert.equal((await request(`/api/v1/firms/${firm}/branches/${besiktas}/catalog/products/${publishedProductId}/publications`)).status, 404);
       const publishAudit = await runPg("psql", [
-        "-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT action || ':' || version FROM catalog.draft_audit
          WHERE draft_id = '${publishedProductId}' ORDER BY id`,
@@ -2099,7 +2102,7 @@ test(
       const productHistoryPath = `/api/v1/firms/${firm}/branches/${moda}/catalog/products/${panelProduct.id}/publications`;
       assert.equal((await request(productHistoryPath)).data.length, 1);
 
-      const activationAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const activationAudit = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT request_id::text || ':' || action || ':' || version || ':' || is_active
          FROM catalog.product_activation_audit WHERE product_id='${panelProduct.id}'`]);
@@ -2119,7 +2122,7 @@ test(
       })).data.code, "FEATURE_DISABLED");
       assert.equal((await request(`/api/v1/firms/${firm}/catalog/products/${panelProduct.id}?branchId=${moda}`)).data.isActive, false,
         "Başka şubenin kapalı modülünden gelen istek ürün durumunu değiştirememeli.");
-      const activationAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const activationAuditCount = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM catalog.product_activation_audit WHERE product_id='${panelProduct.id}'`]);
       assert.equal(activationAuditCount.stdout.trim(), "1");
@@ -2146,16 +2149,197 @@ test(
       })).status, 200);
 
       await verifyMenuApi({ request, firm, branch: moda, otherBranch: besiktas, pizzaId, cakeId,
-        sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+        sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
           "-d", "hipos_features", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", query])).stdout });
-      const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${process.env.USER}@127.0.0.1:${pgPort}/hipos_features` };
+      const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], { cwd: repo, env: menuSeedEnv });
       for (let repetition = 0; repetition < 2; repetition++)
         await execFile(process.execPath, [join(repo, "scripts/seed-menus.mjs")], { cwd: repo, env: menuSeedEnv });
-      const menuSeeds = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", process.env.USER,
+      const menuSeeds = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", `SELECT count(*) FROM catalog.menus WHERE firm_id='${single}'`]);
       assert.equal(menuSeeds.stdout.trim(), "2");
       await verifyMenuPanel({ browser, uiBase, request, single, singleBranch });
+      // Garson ilk siparişi ve ek sipariş aynı adisyonda kalmalı; test POS kapısına bağlı olmamalı.
+      {
+        const root = `/api/v1/firms/${single}/branches/${singleBranch}`;
+        for (const key of ["staff.records", "branches.tables", "service.waiters", "sales.checks"]) {
+          const state = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === key);
+          if (!state.desiredEnabled) assert.equal((await request(`${root}/features/${key}`, "PUT", {
+            desiredEnabled: true, expectedVersion: state.version,
+          }, "manager-single")).status, 200);
+        }
+        const posState = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === "sales.pos_orders");
+        if (posState.desiredEnabled) assert.equal((await request(`${root}/features/sales.pos_orders`, "PUT", {
+          desiredEnabled: false, expectedVersion: posState.version,
+        }, "manager-single")).status, 200);
+        const waiterTable = await request(`${root}/service/tables`, "POST", { name: "Ek sipariş testi" }, "manager-single");
+        assert.equal(waiterTable.status, 201);
+        const waiter = await request(`${root}/service/waiters`, "POST", { name: "Ek sipariş garsonu" }, "manager-single");
+        assert.equal(waiter.status, 201);
+        const path = `${root}/service/tables/${waiterTable.data.id}/orders`;
+        const first = { orderId: "f1200000-0000-4000-8000-000000000001", waiterId: waiter.data.id,
+          items: [{ productId: "55555555-5555-4555-8555-555555555501", quantity: 1 }] };
+        const second = { ...first, orderId: "f1200000-0000-4000-8000-000000000002" };
+        const created = await request(path, "POST", first, "pos-single");
+        assert.equal(created.status, 201);
+        const checksBefore = (await request(`${root}/sales/checks`, "GET", undefined, "manager-single")).data.items.length;
+        const added = await request(path, "POST", second, "pos-single");
+        assert.equal(added.status, 201, "Açık adisyona ek sipariş yeni adisyon oluşturmamalı.");
+        const detailPath = `${root}/sales/checks/${first.orderId}`;
+        const detail = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        assert.equal(detail.orders.length, 2);
+        assert.equal(detail.tableId, waiterTable.data.id);
+        assert.equal(detail.totalMinor, created.data.order.totalMinor + added.data.order.totalMinor);
+        assert.deepEqual(detail.orders.find(order => order.id === first.orderId).kitchenItems.map(line => line.quantity), [1],
+          "Mutfak hazırlık miktarı sipariş oluşturulurken sabitlenmeli.");
+        const kitchenTable = (await request(`${root}/service/tables`, "GET", undefined, "manager-single"))
+          .data.items.find(row => row.id === waiterTable.data.id);
+        assert.deepEqual([...kitchenTable.assignment.orderIds].sort(), [first.orderId, second.orderId].sort(),
+          "Mutfak için masa bilgisi ilk ve ek siparişin ikisini de eşlemeli.");
+        assert.equal((await request(`${root}/sales/checks`, "GET", undefined, "manager-single")).data.items.length, checksBefore);
+        assert.equal((await request(path, "POST", second, "pos-single")).status, 200);
+        const replay = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        assert.equal(replay.orders.length, 2);
+        assert.equal(replay.totalMinor, detail.totalMinor);
+        assert.equal(replay.version, detail.version);
+        assert.equal((await request(path, "POST", {
+          ...second, items: [{ ...second.items[0], quantity: 2 }],
+        }, "pos-single")).data.code, "ORDER_ID_CONFLICT");
+        assert.equal((await request(`${root}/sales/checks`, "POST", {
+          requestId: first.orderId, firstOrderId: "f1200000-0000-4000-8000-000000000003", items: first.items,
+        }, "pos-single")).data.code, "CHECK_REQUEST_CONFLICT");
+        const firstOrder = detail.orders.find(order => order.id === first.orderId);
+        const splitBody = { requestId: "f1200000-0000-4000-8000-000000000006", expectedVersion: detail.version,
+          items: firstOrder.items.map(line => ({ orderLineId: line.id, quantity: line.quantity })) };
+        const splitPath = `${detailPath}/split`;
+        const split = await request(splitPath, "POST", splitBody, "pos-single");
+        assert.equal(split.status, 201, "Masa bağının tuttuğu ilk siparişin tamamı silinmeden ayrılabilmeli.");
+        assert.equal(split.data.source.orders.length, 1);
+        assert.equal(split.data.source.orders[0].id, second.orderId);
+        assert.equal(split.data.check.orders.length, 1);
+        assert.equal(split.data.check.orders[0].id, first.orderId);
+        assert.equal(split.data.check.orders[0].source, "waiter_web");
+        assert.deepEqual(split.data.check.orders[0].items, firstOrder.items);
+        assert.equal(split.data.source.totalMinor + split.data.check.totalMinor, detail.totalMinor);
+        const splitReplay = await request(splitPath, "POST", splitBody, "pos-single");
+        assert.equal(splitReplay.status, 200);
+        assert.equal(splitReplay.data.check.id, split.data.check.id);
+        const tableAfterSplit = (await request(`${root}/service/tables`, "GET", undefined, "manager-single"))
+          .data.items.find(row => row.id === waiterTable.data.id);
+        assert.equal(tableAfterSplit.assignment.id, kitchenTable.assignment.id);
+        assert.equal(tableAfterSplit.assignment.orderId, first.orderId);
+        assert.deepEqual([...tableAfterSplit.assignment.orderIds].sort(), [first.orderId, second.orderId].sort());
+        const third = { ...first, orderId: "f1200000-0000-4000-8000-000000000007",
+          items: [{ ...first.items[0], quantity: 3, note: "Az tuzlu", options: [{ groupName: "Hazırlama", optionName: "Sosu ayrı" }] }] };
+        assert.equal((await request(path, "POST", third, "pos-single")).status, 201,
+          "Bölmeden sonra kaynak adisyona yeni garson siparişi eklenebilmeli.");
+        const beforePartial = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        const thirdLine = beforePartial.orders.find(order => order.id === third.orderId).items[0];
+        const partial = await request(splitPath, "POST", {
+          requestId: "f1200000-0000-4000-8000-000000000008", expectedVersion: beforePartial.version,
+          items: [{ orderLineId: thirdLine.id, quantity: 1 }],
+        }, "pos-single");
+        assert.equal(partial.status, 201);
+        assert.equal(partial.data.source.orders.find(order => order.id === third.orderId).items[0].quantity, 2);
+        assert.equal(partial.data.check.orders[0].source, "split");
+        assert.equal(partial.data.check.orders[0].items[0].quantity, 1);
+        assert.equal(partial.data.check.orders[0].items[0].note, thirdLine.note);
+        assert.deepEqual(partial.data.check.orders[0].items[0].options, thirdLine.options);
+        assert.deepEqual(partial.data.source.orders.find(order => order.id === third.orderId).kitchenItems.map(line => line.quantity), [3],
+          "Adisyon bölünmesi mutfağın hazırlayacağı kaynak sipariş miktarını değiştirmemeli.");
+        assert.deepEqual(partial.data.check.orders[0].kitchenItems, [],
+          "Bölme ile oluşan finansal sipariş mutfak hazırlık işi oluşturmamalı.");
+        assert.equal(partial.data.source.totalMinor + partial.data.check.totalMinor, beforePartial.totalMinor);
+        const state = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === "sales.pos_orders");
+        assert.equal((await request(`${root}/features/sales.pos_orders`, "PUT", {
+          desiredEnabled: true, expectedVersion: state.version,
+        }, "manager-single")).status, 200);
+        const selfServiceId = "f1200000-0000-4000-8000-000000000004";
+        assert.equal((await request(`${root}/sales/orders`, "POST", {
+          orderId: selfServiceId, items: first.items,
+        }, "pos-single")).status, 201);
+        const selfService = (await request(`${root}/sales/checks/${selfServiceId}`, "GET", undefined, "manager-single")).data;
+        assert.equal(selfService.tableId ?? null, null);
+        assert.equal(selfService.orders.length, 1);
+      }
+      // Fiziksel masa grubu: ek masalar dolu görünür, hesap ana masada kalır.
+      {
+        const root = `/api/v1/firms/${single}/branches/${singleBranch}`;
+        const service = `${root}/service`;
+        const ids = [];
+        for (const name of ["Grup ana masa", "Grup ek masa 1", "Grup ek masa 2", "Grup boş hedef"]) {
+          const result = await request(`${service}/tables`, "POST", { name }, "manager-single");
+          assert.equal(result.status, 201); ids.push(result.data.id);
+        }
+        const waiter = (await request(`${service}/waiters`, "POST", { name: "Grup garsonu" }, "manager-single")).data;
+        const body = { requestId: "f1300000-0000-4000-8000-000000000001", primaryTableId: ids[0], memberTableIds: ids.slice(1, 3), guestCount: 10 };
+        const create = await request(`${service}/table-groups`, "POST", body, "pos-single");
+        assert.equal(create.status, 201, JSON.stringify(create.data));
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, memberTableIds: [...body.memberTableIds].reverse() }, "pos-single")).status, 200);
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, guestCount: 9 }, "pos-single")).data.code, "TABLE_GROUP_REQUEST_CONFLICT");
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, requestId: "f1300000-0000-4000-8000-000000000002", primaryTableId: ids[3], memberTableIds: [ids[1]] }, "pos-single")).data.code, "TABLE_GROUP_ACTIVE");
+        const tableList = async () => (await request(`${service}/tables`, "GET", undefined, "manager-single")).data.items;
+        const before = (await tableList()).filter(table => ids.slice(0, 3).includes(table.id));
+        assert.equal(before.length, 3);
+        for (const table of before) { assert.equal(table.group.id, body.requestId); assert.equal(table.group.guestCount, 10); assert.equal(table.assignment ?? null, null); }
+        const order = { orderId: "f1300000-0000-4000-8000-000000000003", waiterId: waiter.id,
+          items: [{ productId: "55555555-5555-4555-8555-555555555501", quantity: 3, note: "Grup siparişi" }] };
+        assert.equal((await request(`${service}/tables/${ids[1]}/orders`, "POST", order, "pos-single")).data.code, "TABLE_GROUP_PRIMARY_REQUIRED");
+        assert.equal((await request(`${root}/sales/checks`, "POST", { requestId: order.orderId, firstOrderId: "f1300000-0000-4000-8000-000000000004", tableId: ids[2], waiterId: waiter.id, items: order.items }, "pos-single")).data.code, "TABLE_GROUP_PRIMARY_REQUIRED");
+        assert.equal((await request(`${service}/tables/${ids[0]}/orders`, "POST", order, "pos-single")).status, 201);
+        const extra = { ...order, orderId: "f1300000-0000-4000-8000-000000000005" };
+        assert.equal((await request(`${service}/tables/${ids[0]}/orders`, "POST", extra, "pos-single")).status, 201);
+        const occupied = (await tableList()).filter(table => ids.slice(0, 3).includes(table.id));
+        for (const table of occupied) {
+          assert.equal(table.assignment.orderIds.length, 2);
+          assert.equal(table.assignment.totalMinor, occupied[0].assignment.totalMinor);
+          assert.equal(table.assignment.id, occupied[0].assignment.id);
+        }
+        assert.equal((await request(`${service}/tables/${ids[0]}/transfer`, "POST", { requestId: "f1300000-0000-4000-8000-000000000006", targetTableId: ids[3], expectedVersion: occupied[0].assignment.version }, "pos-single")).data.code, "TABLE_GROUP_ACTIVE");
+        const detail = (await request(`${root}/sales/checks/${order.orderId}`, "GET", undefined, "manager-single")).data;
+        const split = await request(`${root}/sales/checks/${order.orderId}/split`, "POST", { requestId: "f1300000-0000-4000-8000-000000000007", expectedVersion: detail.version, items: [{ orderLineId: detail.orders[0].items[0].id, quantity: 1 }] }, "pos-single");
+        assert.equal(split.status, 201);
+        for (const table of (await tableList()).filter(table => ids.slice(0, 3).includes(table.id))) assert.equal(table.assignment.totalMinor, occupied[0].assignment.totalMinor);
+        const paymentFeature = (await request(`${root}/features`, "GET", undefined, "manager-single"))
+          .data.find(row => row.key === "payments.simulator");
+        if (!paymentFeature.desiredEnabled) assert.equal((await request(`${root}/features/payments.simulator`, "PUT", {
+          desiredEnabled: true, expectedVersion: paymentFeature.version,
+        }, "manager-single")).status, 200);
+        const settleCheck = async (checkId, attemptBase) => {
+          const checkPath = `${root}/sales/checks/${checkId}`;
+          const beforePayment = (await request(checkPath, "GET", undefined, "manager-single")).data;
+          assert.equal(beforePayment.status, "open");
+          for (const [index, checkOrder] of beforePayment.orders.entries()) {
+            const paid = await request(`${root}/sales/checks/${checkId}/payment-attempts`, "POST", {
+              orderId: checkOrder.id,
+              attemptId: `f1300000-0000-4000-8000-${String(attemptBase + index).padStart(12, "0")}`,
+              amountMinor: checkOrder.totalMinor, method: "cash", simulatedOutcome: "succeeded",
+              expectedOrderVersion: checkOrder.version,
+            }, "pos-single");
+            assert.equal(paid.status, 201, JSON.stringify(paid.data));
+          }
+          return (await request(checkPath, "GET", undefined, "manager-single")).data;
+        };
+        const sourceClosed = await settleCheck(order.orderId, 11);
+        assert.equal(sourceClosed.status, "closed", "Son tahsilat kaynak adisyonu kapatmalı.");
+        const splitStillOpen = (await request(`${root}/sales/checks/${split.data.check.id}`, "GET", undefined, "manager-single")).data;
+        assert.equal(splitStillOpen.status, "open", "Bölünmüş ikinci adisyon açık kalmalı.");
+        for (const table of (await tableList()).filter(table => ids.slice(0, 3).includes(table.id))) {
+          assert.equal(table.status, "occupied");
+          assert.equal(table.group.id, body.requestId, "Başka açık adisyon varken fiziksel masa grubu korunmalı.");
+        }
+        const splitClosed = await settleCheck(split.data.check.id, 21);
+        assert.equal(splitClosed.status, "closed", "Son açık adisyonun tahsilatı adisyonu kapatmalı.");
+        const afterSettlement = await tableList();
+        for (const id of ids.slice(0, 3)) {
+          const table = afterSettlement.find(row => row.id === id);
+          assert.equal(table.status, "idle", "Son adisyon kapanınca fiziksel masa boşalmalı.");
+          assert.equal(table.assignment ?? null, null, "Son adisyon kapanınca garson ataması kapanmalı.");
+          assert.equal(table.group ?? null, null, "Son adisyon kapanınca fiziksel grup kapanmalı.");
+        }
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, requestId: "f1300000-0000-4000-8000-000000000008", primaryTableId: ids[3], memberTableIds: [ids[0]] }, "pos-single")).status, 201,
+          "Kapanan fiziksel masalar yeni bir grupta tekrar kullanılabilmeli.");
+      }
       await browser.close();
       browser = undefined;
       ui.kill("SIGTERM");

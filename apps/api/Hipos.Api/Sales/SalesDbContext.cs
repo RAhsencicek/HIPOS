@@ -15,6 +15,7 @@ public sealed class SalesOrderRow
     public long TotalMinor { get; set; }
     public string Currency { get; set; } = "TRY";
     public string RequestFingerprint { get; set; } = "";
+    public string KitchenItemsJson { get; set; } = "[]";
     public DateTimeOffset CreatedAt { get; set; }
     public int Version { get; set; } = 1;
     public List<SalesOrderLineRow> Lines { get; set; } = [];
@@ -50,6 +51,7 @@ public sealed class SalesCheckRow
     public string? TableId { get; set; }
     public string? WaiterId { get; set; }
     public Guid? MergedIntoCheckId { get; set; }
+    public DateTimeOffset? ClosedAt { get; set; }
     public string Currency { get; set; } = "TRY";
     public DateTimeOffset CreatedAt { get; set; }
     public int Version { get; set; } = 1;
@@ -74,6 +76,26 @@ public sealed class SalesCheckSplitRow
     public Guid TargetCheckId { get; set; }
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class SalesCheckAdjustmentRow
+{
+    public Guid RequestId { get; set; }
+    public Guid CheckId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid? OrderId { get; set; }
+    public long? OrderLineId { get; set; }
+    public string Action { get; set; } = "";
+    public string? ValueType { get; set; }
+    public int? Value { get; set; }
+    public int Quantity { get; set; }
+    public long AmountMinor { get; set; }
+    public string Reason { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string ApprovalMode { get; set; } = "development_bypass";
     public string Fingerprint { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -103,6 +125,8 @@ public sealed class SalesOrderLineRow
     public long UnitPriceMinor { get; set; }
     public long LineTotalMinor { get; set; }
     public string Currency { get; set; } = "TRY";
+    public string? Note { get; set; }
+    public string OptionsJson { get; set; } = "[]";
     public SalesOrderRow Order { get; set; } = null!;
 }
 
@@ -123,6 +147,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
     public DbSet<SalesCheckRow> Checks => Set<SalesCheckRow>();
     public DbSet<SalesCheckAuditRow> CheckAudit => Set<SalesCheckAuditRow>();
     public DbSet<SalesCheckSplitRow> CheckSplits => Set<SalesCheckSplitRow>();
+    public DbSet<SalesCheckAdjustmentRow> CheckAdjustments => Set<SalesCheckAdjustmentRow>();
     public DbSet<SalesOrderRow> Orders => Set<SalesOrderRow>();
     public DbSet<SalesOrderLineRow> Lines => Set<SalesOrderLineRow>();
     public DbSet<SalesOrderAuditRow> Audit => Set<SalesOrderAuditRow>();
@@ -137,8 +162,8 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.ToTable("checks", table =>
             {
                 table.HasCheckConstraint("ck_check_version_positive", "version > 0");
-                table.HasCheckConstraint("ck_check_status", "status IN ('open', 'merged')");
-                table.HasCheckConstraint("ck_check_merged_target", "(status = 'merged' AND merged_into_check_id IS NOT NULL) OR (status = 'open' AND merged_into_check_id IS NULL)");
+                table.HasCheckConstraint("ck_check_status", "status IN ('open', 'merged', 'closed')");
+                table.HasCheckConstraint("ck_check_merged_target", "(status = 'merged' AND merged_into_check_id IS NOT NULL AND closed_at IS NULL) OR (status = 'closed' AND merged_into_check_id IS NULL AND closed_at IS NOT NULL) OR (status = 'open' AND merged_into_check_id IS NULL AND closed_at IS NULL)");
                 table.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
             });
             entity.HasKey(row => row.Id);
@@ -150,6 +175,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.TableId).HasColumnName("table_id").HasMaxLength(80);
             entity.Property(row => row.WaiterId).HasColumnName("waiter_id").HasMaxLength(80);
             entity.Property(row => row.MergedIntoCheckId).HasColumnName("merged_into_check_id");
+            entity.Property(row => row.ClosedAt).HasColumnName("closed_at");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
@@ -177,6 +203,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.TotalMinor).HasColumnName("total_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.RequestFingerprint).HasColumnName("request_fingerprint").HasMaxLength(64);
+            entity.Property(row => row.KitchenItemsJson).HasColumnName("kitchen_items_json").HasColumnType("jsonb").HasDefaultValue("[]");
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CreatedAt });
@@ -200,6 +227,8 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.UnitPriceMinor).HasColumnName("unit_price_minor");
             entity.Property(row => row.LineTotalMinor).HasColumnName("line_total_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
+            entity.Property(row => row.Note).HasColumnName("note").HasMaxLength(500);
+            entity.Property(row => row.OptionsJson).HasColumnName("options_json").HasColumnType("jsonb").HasDefaultValue("[]");
             entity.HasOne(row => row.Order).WithMany(order => order.Lines)
                 .HasForeignKey(row => row.OrderId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -276,6 +305,38 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.SourceCheckId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.TargetCheckId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.SourceCheckId });
+        });
+        modelBuilder.Entity<SalesCheckAdjustmentRow>(entity =>
+        {
+            entity.ToTable("check_adjustments", table =>
+            {
+                table.HasCheckConstraint("ck_check_adjustment_action", "action IN ('discount','comp','void')");
+                table.HasCheckConstraint("ck_check_adjustment_amount", "amount_minor > 0");
+                table.HasCheckConstraint("ck_check_adjustment_quantity", "quantity >= 0");
+                table.HasCheckConstraint("ck_check_adjustment_scope", "(action = 'discount' AND order_id IS NULL AND order_line_id IS NULL AND value_type IS NOT NULL AND value IS NOT NULL AND quantity = 0) OR (action IN ('comp','void') AND order_id IS NOT NULL AND order_line_id IS NOT NULL AND quantity > 0 AND value_type IS NULL AND value IS NULL)");
+            });
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.CheckId).HasColumnName("check_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.OrderId).HasColumnName("order_id");
+            entity.Property(row => row.OrderLineId).HasColumnName("order_line_id");
+            entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(16);
+            entity.Property(row => row.ValueType).HasColumnName("value_type").HasMaxLength(16);
+            entity.Property(row => row.Value).HasColumnName("value");
+            entity.Property(row => row.Quantity).HasColumnName("quantity");
+            entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
+            entity.Property(row => row.Reason).HasColumnName("reason").HasMaxLength(500);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.ApprovalMode).HasColumnName("approval_mode").HasMaxLength(32);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<SalesCheckRow>().WithMany().HasForeignKey(row => row.CheckId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SalesOrderRow>().WithMany().HasForeignKey(row => row.OrderId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SalesOrderLineRow>().WithMany().HasForeignKey(row => row.OrderLineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.CheckId, row.CreatedAt });
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.OrderLineId });
         });
         modelBuilder.Entity<PaymentAttemptAuditRow>(entity =>
         {

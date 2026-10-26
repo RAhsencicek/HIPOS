@@ -11,14 +11,21 @@ namespace Hipos.Api.Sales;
 
 public sealed record CreatePosOrder(Guid OrderId, IReadOnlyList<PosOrderItem> Items);
 public sealed record CreateWaiterOrder(Guid OrderId, string WaiterId, IReadOnlyList<PosOrderItem> Items);
-public sealed record PosOrderItem(Guid ProductId, int Quantity);
+public sealed record PosOrderItem(Guid ProductId, int Quantity, string? Note = null,
+    IReadOnlyList<PosOrderItemOption>? Options = null);
+public sealed record PosOrderItemOption(string GroupName, string OptionName);
 public sealed record SalesOrderLine(
     long Id, string ProductId, string ProductName, string Sku, int Quantity,
-    long UnitPriceMinor, long LineTotalMinor, string Currency);
+    long UnitPriceMinor, long LineTotalMinor, string Currency, string? Note,
+    IReadOnlyList<PosOrderItemOption> Options);
+public sealed record SalesKitchenLine(
+    string ProductId, string ProductName, int Quantity, string? Note,
+    IReadOnlyList<PosOrderItemOption> Options);
 public sealed record SalesOrderDetail(
     string Id, string FirmId, string BranchId, string Source, string Status,
     string PaymentStatus, long TotalMinor, long PaidMinor, long RemainingMinor, string Currency,
-    DateTimeOffset CreatedAt, int Version, IReadOnlyList<SalesOrderLine> Items);
+    DateTimeOffset CreatedAt, int Version, IReadOnlyList<SalesOrderLine> Items,
+    IReadOnlyList<SalesKitchenLine> KitchenItems);
 public sealed record SalesOrderResult(SalesOrderDetail? Order, FeatureFailure? Failure, bool Created)
 {
     public static SalesOrderResult Rejected(string code, int status, string message) =>
@@ -103,29 +110,25 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
 
     public async Task<SalesOrderResult> CreateAsync(
         string firmId, string branchId, CreatePosOrder command, string actor,
-        CancellationToken cancellationToken, Guid? requestedCheckId = null,
-        SalesCheckRow? checkToCreate = null, string featureKey = "sales.pos_orders",
-        string source = "test_pos")
+        CancellationToken cancellationToken, Guid checkId,
+        SalesCheckRow? checkToCreate, string featureKey, string source)
     {
         if (command.OrderId == Guid.Empty || command.Items is null ||
             command.Items.Count is < 1 or > 20 ||
-            command.Items.Any(item => item.ProductId == Guid.Empty || item.Quantity is < 1 or > 99) ||
-            command.Items.Select(item => item.ProductId).Distinct().Count() != command.Items.Count)
+            command.Items.Any(item => item.ProductId == Guid.Empty || item.Quantity is < 1 or > 99 ||
+                item.Note?.Length > 500 || item.Options is { Count: > 10 } ||
+                item.Options?.Any(option => option is null || string.IsNullOrWhiteSpace(option.GroupName) || option.GroupName.Length > 80 ||
+                    string.IsNullOrWhiteSpace(option.OptionName) || option.OptionName.Length > 120) == true))
             return SalesOrderResult.Rejected("INVALID_ORDER", 400, "Sipariş kimliği veya kalemleri geçersiz.");
 
-        var sorted = command.Items.OrderBy(item => item.ProductId).ToArray();
+        var sorted = command.Items.OrderBy(item => item.ProductId).ThenBy(item => item.Note)
+            .ThenBy(item => System.Text.Json.JsonSerializer.Serialize(item.Options ?? [])).ToArray();
         if (source is not ("test_pos" or "waiter_web"))
             return SalesOrderResult.Rejected("INVALID_ORDER_SOURCE", 400, "Sipariş kaynağı geçersiz.");
-        var itemFingerprint = string.Join("|", sorted.Select(item => $"{item.ProductId:N}:{item.Quantity}"));
+        var itemFingerprint = string.Join("|", sorted.Select(item =>
+            $"{item.ProductId:N}:{item.Quantity}:{item.Note?.Trim()}:{System.Text.Json.JsonSerializer.Serialize(item.Options ?? [])}"));
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             source == "test_pos" ? itemFingerprint : $"{source}|{itemFingerprint}")));
-        var checkId = requestedCheckId ?? command.OrderId;
-        if (checkToCreate is null && featureKey == "sales.pos_orders")
-            checkToCreate = new SalesCheckRow
-            {
-                Id = checkId, FirmId = firmId, BranchId = branchId, Status = "open",
-                Currency = "TRY", CreatedAt = DateTimeOffset.UtcNow, Version = 1,
-            };
         if (checkId == Guid.Empty || checkToCreate is not null && checkToCreate.Id != checkId)
             return SalesOrderResult.Rejected("INVALID_CHECK", 400, "Adisyon kimliği geçersiz.");
         var existing = await db.Orders.AsNoTracking().Include(row => row.Lines).Include(row => row.PaymentAttempts)
@@ -157,6 +160,17 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             return SalesOrderResult.Rejected("CHECK_REQUEST_CONFLICT", 409, "Adisyon requestId zaten kullanılmış.");
         if (check is not null && check.Status != "open")
             return SalesOrderResult.Rejected("CHECK_NOT_OPEN", 409, "Adisyona yeni sipariş eklenemez.");
+
+        if (check?.TableId is not null)
+        {
+            await LockRowsAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                "SELECT id FROM service.tables WHERE id=@table AND firm_id=@firm AND branch_id=@branch FOR UPDATE",
+                cancellationToken, ("table", check.TableId), ("firm", firmId), ("branch", branchId));
+            if (await ExistsAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                "SELECT EXISTS (SELECT 1 FROM service.tables WHERE id=@table AND firm_id=@firm AND branch_id=@branch AND status='reserved')",
+                cancellationToken, ("table", check.TableId), ("firm", firmId), ("branch", branchId)))
+                return SalesOrderResult.Rejected("TABLE_RESERVED", 409, "Rezerve masaya sipariş eklenemez.");
+        }
 
         if (createCheck)
         {
@@ -193,18 +207,23 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 ProductName = product.Name, Sku = product.Sku, Quantity = item.Quantity,
                 UnitPriceMinor = product.Price.AmountMinor,
                 LineTotalMinor = lineTotal, Currency = "TRY",
+                Note = string.IsNullOrWhiteSpace(item.Note) ? null : item.Note.Trim(),
+                OptionsJson = System.Text.Json.JsonSerializer.Serialize(item.Options ?? []),
             });
         }
 
         var now = DateTimeOffset.UtcNow;
         check ??= checkToCreate!;
         if (createCheck) db.Checks.Add(check);
-        else { check.Version++; check.Status = "open"; }
+        else check.Version++;
         var order = new SalesOrderRow
         {
             Id = command.OrderId, CheckId = checkId, FirmId = firmId, BranchId = branchId,
             Source = source, Status = "open", PaymentStatus = "unpaid",
             TotalMinor = total, Currency = "TRY", RequestFingerprint = fingerprint,
+            KitchenItemsJson = System.Text.Json.JsonSerializer.Serialize(lines.Select(line => new SalesKitchenLine(
+                line.ProductId.ToString(), line.ProductName, line.Quantity, line.Note,
+                System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [])).ToArray()),
             CreatedAt = now, Version = 1, Lines = lines,
         };
         db.Orders.Add(order);
@@ -223,6 +242,11 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             await db.SaveChangesAsync(cancellationToken);
             if (createCheck && check.TableId is not null)
                 await CreateServiceAssignmentAsync(check, order, actor, transaction.GetDbTransaction(), cancellationToken);
+            else if (check.TableId is not null)
+                await ExecuteAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(), """
+                    UPDATE service.tables SET status='occupied', reserved_for=NULL, version=version+1, updated_at=@at
+                    WHERE id=@table AND firm_id=@firm AND branch_id=@branch AND status='bill_requested'
+                    """, cancellationToken, ("table", check.TableId), ("firm", firmId), ("branch", branchId), ("at", now));
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -286,10 +310,21 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             var blocked = await gate.CheckAndLockAsync(connection, transaction, firmId, branchId,
                 "branches.tables", cancellationToken);
             if (blocked is not null) return blocked;
+            await LockRowsAsync(connection, transaction,
+                "SELECT id FROM service.tables WHERE id=@id AND firm_id=@firm AND branch_id=@branch FOR UPDATE",
+                cancellationToken, ("id", check.TableId), ("firm", firmId), ("branch", branchId));
             if (!await ExistsAsync(connection, transaction,
                 "SELECT EXISTS (SELECT 1 FROM service.tables WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active)",
                 cancellationToken, ("id", check.TableId), ("firm", firmId), ("branch", branchId)))
                 return new FeatureFailure("TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM service.tables WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND status='reserved')",
+                cancellationToken, ("id", check.TableId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("TABLE_RESERVED", 409, "Rezerve masaya sipariş eklenemez.");
+            if (await ExistsAsync(connection, transaction,
+                "SELECT EXISTS (SELECT 1 FROM service.tables t JOIN service.table_groups g ON g.id=t.table_group_id WHERE t.id=@id AND t.firm_id=@firm AND t.branch_id=@branch AND g.closed_at IS NULL AND g.primary_table_id<>t.id)",
+                cancellationToken, ("id", check.TableId), ("firm", firmId), ("branch", branchId)))
+                return new FeatureFailure("TABLE_GROUP_PRIMARY_REQUIRED", 409, "Bu masa bir gruba bağlı. Siparişi grubun ana masasından alın.");
             if (await ExistsAsync(connection, transaction,
                 "SELECT EXISTS (SELECT 1 FROM service.assignments WHERE table_id=@id AND closed_at IS NULL)",
                 cancellationToken, ("id", check.TableId)))
@@ -322,6 +357,11 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             """, cancellationToken, ("id", id), ("check", check.Id), ("firm", check.FirmId),
             ("branch", check.BranchId), ("table", check.TableId!), ("order", order.Id),
             ("waiter", (object?)check.WaiterId ?? DBNull.Value), ("opened", now), ("actor", actor));
+        await ExecuteAsync(db.Database.GetDbConnection(), transaction, """
+            UPDATE service.tables SET status='occupied', reserved_for=NULL, version=version+1, updated_at=@at
+            WHERE id=@table AND firm_id=@firm AND branch_id=@branch
+            """, cancellationToken, ("table", check.TableId!), ("firm", check.FirmId),
+            ("branch", check.BranchId), ("at", now));
         await ExecuteAsync(db.Database.GetDbConnection(), transaction,
             "INSERT INTO service.audit (firm_id,branch_id,entity_id,action,actor,occurred_at) VALUES (@firm,@branch,@id,'assignment_opened',@actor,@at)",
             cancellationToken, ("firm", check.FirmId), ("branch", check.BranchId), ("id", id.ToString()),
@@ -380,5 +420,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             row.Currency, row.CreatedAt, row.Version,
             row.Lines.OrderBy(line => line.ProductId).Select(line =>
                 new SalesOrderLine(line.Id, line.ProductId.ToString(), line.ProductName, line.Sku,
-                    line.Quantity, line.UnitPriceMinor, line.LineTotalMinor, line.Currency)).ToArray());
+                    line.Quantity, line.UnitPriceMinor, line.LineTotalMinor, line.Currency, line.Note,
+                    System.Text.Json.JsonSerializer.Deserialize<PosOrderItemOption[]>(line.OptionsJson) ?? [])).ToArray(),
+            System.Text.Json.JsonSerializer.Deserialize<SalesKitchenLine[]>(row.KitchenItemsJson) ?? []);
 }

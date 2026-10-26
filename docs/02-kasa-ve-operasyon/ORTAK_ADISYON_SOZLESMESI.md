@@ -50,7 +50,8 @@ Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis i�
 
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks`: `requestId`, `firstOrderId`, `items` ve isteğe bağlı `customerId`, `tableId`, `waiterId` ile adisyonu ve ilk siparişi aynı transaction'da oluşturur.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/orders`: var olan açık adisyona yeni `orderId` ve `items` ekler.
-- `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks`: son 100 adisyonu listeler.
+- Sipariş `items` kalemi isteğe bağlı `note` (en fazla 500 karakter) ve `options: [{ groupName, optionName }]` (en fazla 10 tercih) alanlarını kabul eder. Bunlar kalem anlık görüntüsü olarak `sales.order_lines` içinde saklanır; masa/adisyon okumasında ve mutfak siparişinde geri döner. İstemci bu alanlardan fiyat belirleyemez; fiyatlar ürün kataloğundan hesaplanır. Fiyat farkı oluşturan gerçek modifier seçenekleri Modül 4'ün `catalog.option_groups` / `catalog.option_items` kapsamındadır ve bu not alanından ayrı ele alınmalıdır.
+- `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks`: filtresiz çağrıda son 100 adisyonu listeler. `?tableId={tableId}` verildiğinde seçilen masanın tüm açık adisyonlarını döndürür; masa operasyonları bu sorguyu kullanarak genel liste sınırından etkilenmez.
 - `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}`: adisyon, sipariş/kalemler, toplanmış TRY tutarları ve ödeme girişimlerini döndürür.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts`: gövdedeki `orderId` adisyana bağlı olmalı; ödeme girişimi mevcut simülatör durum makinesini kullanır.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts/{attemptId}/resolve`: adisyana ait bekleyen/belirsiz girişimi mevcut simülatör kurallarıyla sonuçlandırır.
@@ -78,6 +79,7 @@ Mevcut satırlar veya kapsam eşleşmeleri eksikse migration hata vererek durmal
 - Farklı firma/şube müşterisi, masası, garsonu veya adisyonu ile yazmayı reddetme.
 - Açık assignment ve `checks.table_id` eşleşmesini doğrulama; assignment kapanınca geçerli masa bağının temizlenmesini, geçmiş atamanın korunmasını doğrulama.
 - Aynı adisyana birden fazla sipariş ekleyip toplam ve ödeme özetini doğrulama.
+- İlk siparişin tüm kalemlerini başka adisyona bölme; sipariş/kalem kimlikleri, masa bağlantısı ve sipariş geçmişinin korunmasını, iki adisyon toplamının değişmemesini ve aynı istek tekrarının yeni kayıt oluşturmamasını doğrulama.
 - Açık adisyonu boş masaya taşıma; dolu hedefi ve eski sürümü reddetme; aynı `requestId` tekrarını idempotent yanıtlama.
 - Ödemesiz kaynak adisyonları hedef açık adisyona birleştirme; kaynak adisyonun `merged_into_check_id` bağını, sipariş geçmişini ve assignment/audit kayıtlarını koruma; ödeme denemesi olan birleştirmeyi reddetme.
 - Backfill sonrası sipariş, ödeme, audit ve assignment satırlarının kimlik ve sayılarının korunduğunu doğrulama.

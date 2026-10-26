@@ -11,8 +11,26 @@ public sealed class ServiceTableRow
     public int Number { get; set; }
     public string Name { get; set; } = "";
     public bool IsActive { get; set; } = true;
+    public string Status { get; set; } = "idle";
+    public DateTimeOffset? ReservedFor { get; set; }
+    public string? ReservationGuestName { get; set; }
+    public Guid? TableGroupId { get; set; }
     public int Version { get; set; } = 1;
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class ServiceTableGroupRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string PrimaryTableId { get; set; } = "";
+    public string[] TableIds { get; set; } = [];
+    public int GuestCount { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ClosedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
 }
 
 public sealed class ServiceWaiterRow
@@ -85,6 +103,7 @@ public sealed class ServiceTableTransferRow
 public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options) : DbContext(options)
 {
     public DbSet<ServiceTableRow> Tables => Set<ServiceTableRow>();
+    public DbSet<ServiceTableGroupRow> TableGroups => Set<ServiceTableGroupRow>();
     public DbSet<ServiceWaiterRow> Employees => Set<ServiceWaiterRow>();
     public DbSet<ServiceWaiterRow> Waiters => Set<ServiceWaiterRow>(); // Geriye dönük servis API'si uyumluluğu.
     public DbSet<ServiceAssignmentRow> Assignments => Set<ServiceAssignmentRow>();
@@ -96,7 +115,12 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
         modelBuilder.HasDefaultSchema("service");
         modelBuilder.Entity<ServiceTableRow>(entity =>
         {
-            entity.ToTable("tables", table => table.HasCheckConstraint("ck_table_number", "number BETWEEN 1 AND 999"));
+            entity.ToTable("tables", table =>
+            {
+                table.HasCheckConstraint("ck_table_number", "number BETWEEN 1 AND 999");
+                table.HasCheckConstraint("ck_table_status", "status IN ('idle','occupied','bill_requested','reserved')");
+                table.HasCheckConstraint("ck_table_reserved_for", "(status = 'reserved') = (reserved_for IS NOT NULL)");
+            });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
@@ -104,9 +128,37 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.Property(row => row.Number).HasColumnName("number");
             entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(80);
             entity.Property(row => row.IsActive).HasColumnName("is_active");
+            entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(24).HasDefaultValue("idle");
+            entity.Property(row => row.ReservedFor).HasColumnName("reserved_for");
+            entity.Property(row => row.ReservationGuestName).HasColumnName("reservation_guest_name").HasMaxLength(120);
+            entity.Property(row => row.TableGroupId).HasColumnName("table_group_id");
+            entity.HasOne<ServiceTableGroupRow>().WithMany().HasForeignKey(row => row.TableGroupId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Number }).IsUnique();
+        });
+        modelBuilder.Entity<ServiceTableGroupRow>(entity =>
+        {
+            entity.ToTable("table_groups", table =>
+            {
+                table.HasCheckConstraint("ck_table_group_guests", "guest_count BETWEEN 1 AND 999");
+                table.HasCheckConstraint("ck_table_group_members", "cardinality(table_ids) BETWEEN 2 AND 21");
+                table.HasCheckConstraint("ck_table_group_version", "version > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.PrimaryTableId).HasColumnName("primary_table_id").HasMaxLength(80);
+            entity.Property(row => row.TableIds).HasColumnName("table_ids");
+            entity.Property(row => row.GuestCount).HasColumnName("guest_count");
+            entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.ClosedAt).HasColumnName("closed_at");
+            entity.Property(row => row.CreatedBy).HasColumnName("created_by").HasMaxLength(80);
+            entity.HasOne<ServiceTableRow>().WithMany().HasForeignKey(row => row.PrimaryTableId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => row.PrimaryTableId).IsUnique().HasFilter("closed_at IS NULL");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ClosedAt });
         });
         modelBuilder.Entity<ServiceWaiterRow>(entity =>
         {

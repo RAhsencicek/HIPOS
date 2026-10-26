@@ -186,6 +186,77 @@ namespace Hipos.Api.Service.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Service.ServiceTableGroupRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<int>("GuestCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("guest_count");
+
+                    b.Property<string>("PrimaryTableId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("primary_table_id");
+
+                    b.PrimitiveCollection<string[]>("TableIds")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("table_ids");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrimaryTableId")
+                        .IsUnique()
+                        .HasFilter("closed_at IS NULL");
+
+                    b.HasIndex("FirmId", "BranchId", "ClosedAt");
+
+                    b.ToTable("table_groups", "service", t =>
+                        {
+                            t.HasCheckConstraint("ck_table_group_guests", "guest_count BETWEEN 1 AND 999");
+
+                            t.HasCheckConstraint("ck_table_group_members", "cardinality(table_ids) BETWEEN 2 AND 21");
+
+                            t.HasCheckConstraint("ck_table_group_version", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("Hipos.Api.Service.ServiceTableRow", b =>
                 {
                     b.Property<string>("Id")
@@ -219,6 +290,27 @@ namespace Hipos.Api.Service.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("number");
 
+                    b.Property<string>("ReservationGuestName")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("reservation_guest_name");
+
+                    b.Property<DateTimeOffset?>("ReservedFor")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reserved_for");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("idle")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("TableGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("table_group_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -230,12 +322,18 @@ namespace Hipos.Api.Service.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TableGroupId");
+
                     b.HasIndex("FirmId", "BranchId", "Number")
                         .IsUnique();
 
                     b.ToTable("tables", "service", t =>
                         {
                             t.HasCheckConstraint("ck_table_number", "number BETWEEN 1 AND 999");
+
+                            t.HasCheckConstraint("ck_table_reserved_for", "(status = 'reserved') = (reserved_for IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_table_status", "status IN ('idle','occupied','bill_requested','reserved')");
                         });
                 });
 
@@ -402,6 +500,23 @@ namespace Hipos.Api.Service.Migrations
                     b.HasOne("Hipos.Api.Service.ServiceWaiterRow", null)
                         .WithMany()
                         .HasForeignKey("WaiterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Service.ServiceTableGroupRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Service.ServiceTableRow", null)
+                        .WithMany()
+                        .HasForeignKey("PrimaryTableId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Service.ServiceTableRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Service.ServiceTableGroupRow", null)
+                        .WithMany()
+                        .HasForeignKey("TableGroupId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

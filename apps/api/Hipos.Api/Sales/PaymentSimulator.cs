@@ -1,4 +1,5 @@
 using Hipos.Api.Features;
+using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -19,7 +20,7 @@ public sealed record PaymentCommandResult(
         new(null, null, new FeatureFailure(code, status, detail), false);
 }
 
-public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
+public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate, PaidCheckTableSettlement settlement)
 {
     public async Task<PaymentCommandResult> StartAsync(
         string firmId, string branchId, Guid orderId, StartSimulatedPayment command,
@@ -64,7 +65,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
             return PaymentCommandResult.Rejected("PAYMENT_UNRESOLVED", 409,
                 "Bekleyen veya belirsiz ödeme sonuçlanmadan yeni girişim başlatılamaz.");
         var paid = PaidMinor(order);
-        if (command.AmountMinor > order.TotalMinor - paid)
+        var payableTotal = await PayableOrderTotalAsync(order, cancellationToken);
+        if (command.AmountMinor > payableTotal - paid)
             return PaymentCommandResult.Rejected("AMOUNT_EXCEEDS_REMAINING", 409,
                 "Tutar siparişin kalan tutarını aşıyor.");
 
@@ -79,12 +81,14 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
         };
         order.PaymentAttempts.Add(attempt);
         db.Entry(attempt).State = EntityState.Added;
-        UpdateOrderPaymentStatus(order);
+        UpdateOrderPaymentStatus(order, payableTotal);
         order.Version++;
         AddAudit(attempt, order, actor, "started", now);
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (attempt.Status == "succeeded")
+                await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -126,12 +130,14 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
         attempt.Status = command.Outcome;
         attempt.Version++;
         attempt.UpdatedAt = now;
-        UpdateOrderPaymentStatus(order);
+        UpdateOrderPaymentStatus(order, await PayableOrderTotalAsync(order, cancellationToken));
         order.Version++;
         AddAudit(attempt, order, actor, "resolved", now);
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (command.Outcome == "succeeded")
+                await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -139,6 +145,39 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
             return PaymentCommandResult.Rejected("VERSION_CONFLICT", 409, "Sipariş başka bir işlemle değişti.");
         }
         return new PaymentCommandResult(ToInfo(attempt), SalesOrders.ToDetail(order), null, false);
+    }
+
+    private async Task CloseCheckAndReleaseTablesIfSettledAsync(Guid checkId, string firmId, string branchId,
+        string actor, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var check = await db.Checks.FromSqlInterpolated($"""
+            SELECT * FROM sales.checks
+            WHERE id = {checkId} AND firm_id = {firmId} AND branch_id = {branchId}
+            FOR UPDATE
+            """).SingleOrDefaultAsync(cancellationToken);
+        if (check is null || check.Status != "open") return;
+
+        var orders = await db.Orders.AsNoTracking().Include(row => row.PaymentAttempts)
+            .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+            .ToArrayAsync(cancellationToken);
+        var adjustments = await db.CheckAdjustments.AsNoTracking().Where(row => row.CheckId == checkId &&
+            row.FirmId == firmId && row.BranchId == branchId).ToArrayAsync(cancellationToken);
+        var due = Math.Max(0, orders.Sum(row => row.TotalMinor) - adjustments.Sum(row => row.AmountMinor));
+        var paid = orders.SelectMany(row => row.PaymentAttempts).Where(row => row.Status == "succeeded")
+            .Sum(row => row.AmountMinor);
+        if (due <= 0 || paid < due) return;
+
+        check.Status = "closed";
+        check.ClosedAt = now;
+        check.Version++;
+        db.CheckAudit.Add(new SalesCheckAuditRow
+        {
+            CheckId = check.Id, FirmId = firmId, BranchId = branchId, Actor = actor,
+            Action = "payment_completed_check_closed", Version = check.Version, OccurredAt = now,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        if (check.TableId is null) return;
+        await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, cancellationToken);
     }
 
     public async Task<IReadOnlyList<PaymentAttemptInfo>> ListAsync(
@@ -178,12 +217,49 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate)
     private static long PaidMinor(SalesOrderRow order) =>
         order.PaymentAttempts.Where(row => row.Status == "succeeded").Sum(row => row.AmountMinor);
 
-    private static void UpdateOrderPaymentStatus(SalesOrderRow order)
+    private async Task<long> PayableOrderTotalAsync(SalesOrderRow order, CancellationToken cancellationToken)
+    {
+        var orders = await db.Orders.AsNoTracking().Where(row => row.CheckId == order.CheckId &&
+                row.FirmId == order.FirmId && row.BranchId == order.BranchId)
+            .OrderBy(row => row.Id).Select(row => new { row.Id, row.TotalMinor }).ToArrayAsync(cancellationToken);
+        var adjustments = await db.CheckAdjustments.AsNoTracking().Where(row => row.CheckId == order.CheckId &&
+                row.FirmId == order.FirmId && row.BranchId == order.BranchId)
+            .ToArrayAsync(cancellationToken);
+        var reductionsByOrder = adjustments.Where(row => (row.Action is "comp" or "void") && row.OrderId != null)
+            .GroupBy(row => row.OrderId!.Value).ToDictionary(group => group.Key, group => group.Sum(row => row.AmountMinor));
+        var remaining = orders.Select(row => new
+        {
+            row.Id,
+            Base = Math.Max(0, row.TotalMinor - (reductionsByOrder.TryGetValue(row.Id, out var reduction) ? reduction : 0)),
+        }).ToArray();
+        var discount = adjustments.Where(row => row.Action == "discount").Sum(row => row.AmountMinor);
+        var available = remaining.Sum(row => row.Base);
+        var appliedDiscount = Math.Min(discount, available);
+        if (available == 0) return 0;
+        var result = remaining.ToDictionary(row => row.Id, row => row.Base);
+        var allocated = 0L;
+        foreach (var row in remaining)
+        {
+            var share = (long)((decimal)appliedDiscount * row.Base / available);
+            result[row.Id] -= share;
+            allocated += share;
+        }
+        var left = appliedDiscount - allocated;
+        foreach (var row in remaining.Where(row => result[row.Id] > 0).OrderBy(row => row.Id))
+        {
+            if (left == 0) break;
+            result[row.Id]--;
+            left--;
+        }
+        return result.TryGetValue(order.Id, out var payable) ? payable : 0;
+    }
+
+    private static void UpdateOrderPaymentStatus(SalesOrderRow order, long payableTotal)
     {
         var paid = PaidMinor(order);
         order.PaymentStatus = order.PaymentAttempts.Any(row => row.Status == "unknown") ? "unknown" :
             order.PaymentAttempts.Any(row => row.Status == "pending") ? "pending" :
-            paid == order.TotalMinor ? "paid" : paid > 0 ? "partially_paid" : "unpaid";
+            paid >= payableTotal && payableTotal > 0 ? "paid" : paid > 0 ? "partially_paid" : "unpaid";
     }
 
     private void AddAudit(PaymentAttemptRow attempt, SalesOrderRow order, string actor, string action, DateTimeOffset now)
