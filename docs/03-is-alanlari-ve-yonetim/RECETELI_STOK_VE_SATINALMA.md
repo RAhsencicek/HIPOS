@@ -20,8 +20,8 @@
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
 | **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
-| **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
-| **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
+| **Fire kaydı** | **Çalışıyor** | Gerekçeli hammadde fire/zayi kaydı, bağlı stok çıkışı ve net alış maliyeti snapshot raporu kalıcıdır; gerçek PIN ve reçeteli ürün zayisi eksiktir |
+| **Maliyet hesabı** | **Kısmi** | Hammadde firelerinde hareketli ağırlıklı ortalama net alış maliyeti çalışır; genel stok değerleme ve kârlılık henüz yoktur |
 
 ---
 
@@ -31,7 +31,7 @@
 * Satışlar (`sales`) ile Stok (`inventory`) arasında **hiçbir otomatik bağlantı yoktur**.
 * POS'ta veya masada 100 porsiyon Pizza satılsa bile, depodaki un, domates sosu veya mozzarella stoğu **1 gram bile azalmamaktadır**.
 * Mal kabul, eksik teslim düzeltmesi ve tedarikçi iadesi kodlanmıştır; satın alma siparişi ve mal kabulün siparişle eşleştirilmesi henüz yoktur.
-* Restorancılıkta fire ve zayi (dökülen, bozulan ürünler) stoktan düşülememektedir.
+* Fire ve zayi stoktan düşülebilir; gerçek şef PIN onayı ve parasal kayıp raporu henüz bağlanmamıştır.
 
 ---
 

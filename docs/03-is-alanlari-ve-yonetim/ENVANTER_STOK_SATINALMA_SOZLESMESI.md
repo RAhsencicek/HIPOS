@@ -17,8 +17,8 @@
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
 | **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
-| **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
-| **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
+| **Fire kaydı** | **Çalışıyor** | Gerekçeli kayıt, `waste_loss` stok çıkışı ve hammadde zayi maliyet raporu kalıcıdır; gerçek şef PIN onayı yoktur |
+| **Maliyet hesabı** | **Kısmi** | Hammadde firelerinde hareketli ağırlıklı ortalama net alış maliyeti çalışır; genel stok değerleme ve kârlılık henüz yoktur |
 
 ---
 
@@ -40,6 +40,11 @@ Durum: 8 Ekim 2026. Bu belge mevcut reçete/stok/sayım MVP'sinin üzerine gelec
 - Bir satırdaki düzeltmelerin toplamı kabul edilen miktarı aşamaz. Açık sayım veya yetersiz stok varsa düzeltme reddedilir. Düzeltme açıklaması, aktör ve özgün belge bağlantısı denetim izinde korunur.
 - Tedarikçiye iade, depoya gerçekten alınmış ürünün sonradan geri gönderilmesidir. Özgün mal kabul satırına bağlı ayrı iade irsaliye numarası, tarih, miktar ve neden taşır; `supplier_return` stok çıkışıyla `adjustment_decrease` cari hareketi aynı işlemde oluşur.
 - Eksik teslim ve iade miktarlarının toplamı özgün kabul miktarını aşamaz. İade irsaliye numarası şube içinde tektir; açık sayım veya yetersiz stok iadeyi engeller. Aynı istek kimliğinin tekrarı çift stok/cari hareketi üretmez.
+- Fire/zayi kaydı hammadde, miktar, kontrollü neden türü ve açıklama taşır. Kayıt ile bağlı negatif `waste_loss` hareketi aynı işlemde oluşur; açık sayım ve yetersiz stok kaydı engeller. Aynı istek kimliğinin tekrarı çift stok düşümü üretmez.
+- Fire kaydı mevcut demo yönetici aktörünü denetim izine yazar. Şef PIN doğrulaması gerçek auth bulunmadığı için bu dilimde uygulanmış gibi gösterilmez.
+- Maliyetli fire kayıtlarında yöntem `moving_weighted_average_net`tir. Birim maliyet, aynı depo ve hammadde için onaylı mal kabul satırlarının KDV hariç, iskonto sonrası net tutarlarının miktar ağırlıklı ortalamasıdır; eksik teslim düzeltmeleri miktar ve net tutar bazından düşülür.
+- Tedarikçiye iade ortalama birim maliyeti değiştirmez. Yeni fire kaydı `snapshot_unit_cost_minor` ve `total_cost_minor` değerlerini zorunlu olarak saklar; alış maliyeti bulunmayan hammaddede maliyetli fire kaydı reddedilir. Maliyet alanlarından önce oluşturulmuş eski fire kayıtları sonradan fiyatlandırılmaz.
+- Onaylı mal kabul maliyeti bulunmayan mevcut stok için tek seferlik açılış birim maliyeti girilebilir. Sistem o andaki pozitif stok miktarını, birimi, birim/toplam maliyeti ve aktörü değiştirilemez snapshot olarak saklar. Açık sayım, sıfır stok, mevcut açılış maliyeti veya onaylı mal kabul geçmişi yeni açılış maliyetini engeller.
 
 ## PostgreSQL sahipliği
 
@@ -67,6 +72,8 @@ Temel yol: `/api/v1/firms/{firmId}/branches/{branchId}/inventory`. Tüm uçlar d
 | `GET /critical-stock?warehouseId=…` | Kaynak API'nin hesapladığı `criticalCount` ve kritik kalem listesi. Ana sayfa hesabı kopyalamaz. |
 | `POST /movements` | `requestId`, `warehouseId?`, `ingredientId`, signed `delta`, `kind=manual_in\|manual_out`, `description`. Tenant/şube/depo, birim snapshot'ı, aktör/tarih ve audit saklanır. Negatif bakiye ve açık sayım reddedilir. |
 | `GET /movements?warehouseId=…` | Depo kapsamlı geçmiş; imzalı miktar, birim, tür, açıklama, aktör ve zaman. |
+| `GET/POST /waste?warehouseId=…` | Depo kapsamlı fire geçmişi ve gerekçeli fire çıkışı; `inventory.items`, yeterli stok, kapalı sayım ve idempotency gerektirir. |
+| `GET /costs`, `POST /opening-costs` | Hammadde maliyet durumları ve onaylı alışı olmayan mevcut stok için tek seferlik açılış maliyeti. |
 | `GET /recipes` ve `GET /recipes/{productId}` | Kalıcı reçete sürümleri ve miktar/birim satırları. |
 | `PUT /recipes/{productId}` | Yeni reçete sürümü; mevcut imzalı komut uyumlu kalır, birim API tarafından hammaddeden sabitlenir. |
 | `GET /production-estimates?warehouseId=…` | Reçete başına teorik porsiyon sayısı, kısıtlayan hammadde ve satır kapasitesi; birim uyumsuzluğunda açık hata. |
@@ -88,7 +95,7 @@ Modül tercihleri bağımsız kalır: `inventory.items`, `inventory.recipes`, `i
 
 ## Bu dilimin dışında
 
-Satın alma siparişi, mal kabulün tedarik siparişine bağlanması, depo transferi, barkod, birim dönüşüm tablosu, fire/bozulma kaydı, satıştan otomatik stok tüketimi ve üretim emri yoktur. `manual_in` yalnızca manuel envanter girişidir; aşağıdaki mal kabul akışı ayrı `receiving` hareketi üretir ve ödeme belgesi değildir.
+Satın alma siparişi, mal kabulün tedarik siparişine bağlanması, depo transferi, barkod, birim dönüşüm tablosu, satıştan otomatik stok tüketimi ve üretim emri yoktur. Fire kaydında gerçek şef PIN onayı ve reçeteli ürün zayisi henüz yoktur; hammadde zayi maliyeti çalışır. `manual_in` yalnızca manuel envanter girişidir; aşağıdaki mal kabul akışı ayrı `receiving` hareketi üretir ve ödeme belgesi değildir.
 
 ## Mal kabul ilk kalıcı dilimi (26 Ekim 2026)
 

@@ -387,6 +387,11 @@ namespace Hipos.Api.Inventory.Migrations
                         .HasColumnType("character varying(80)")
                         .HasColumnName("warehouse_id");
 
+                    b.Property<string>("WasteLogId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("waste_log_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("IngredientId");
@@ -401,6 +406,10 @@ namespace Hipos.Api.Inventory.Migrations
 
                     b.HasIndex("WarehouseId");
 
+                    b.HasIndex("WasteLogId")
+                        .IsUnique()
+                        .HasFilter("waste_log_id IS NOT NULL");
+
                     b.HasIndex("CountId", "IngredientId")
                         .IsUnique()
                         .HasFilter("count_id IS NOT NULL");
@@ -413,9 +422,87 @@ namespace Hipos.Api.Inventory.Migrations
 
                     b.ToTable("movements", "inventory", t =>
                         {
-                            t.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return')");
+                            t.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return', 'waste_loss')");
 
                             t.HasCheckConstraint("ck_inventory_movement_nonzero", "delta <> 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryOpeningCostRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<string>("IngredientId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<decimal>("QuantitySnapshot")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity_snapshot");
+
+                    b.Property<long>("TotalCostMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_cost_minor");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.Property<decimal>("UnitCostMinor")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("unit_cost_minor");
+
+                    b.Property<string>("WarehouseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngredientId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("FirmId", "BranchId", "WarehouseId", "IngredientId")
+                        .IsUnique();
+
+                    b.ToTable("opening_costs", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_opening_cost_quantity", "quantity_snapshot > 0");
+
+                            t.HasCheckConstraint("ck_opening_cost_unit_cost", "unit_cost_minor > 0 AND total_cost_minor > 0");
                         });
                 });
 
@@ -963,6 +1050,100 @@ namespace Hipos.Api.Inventory.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryWasteLogRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("CostMethod")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("cost_method");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<string>("IngredientId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("ReasonType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("reason_type");
+
+                    b.Property<string>("ReportedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("reported_by");
+
+                    b.Property<decimal?>("SnapshotUnitCostMinor")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("snapshot_unit_cost_minor");
+
+                    b.Property<long?>("TotalCostMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_cost_minor");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.Property<string>("WarehouseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngredientId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("FirmId", "BranchId", "WarehouseId", "CreatedAt");
+
+                    b.ToTable("waste_logs", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_waste_log_quantity", "quantity > 0");
+
+                            t.HasCheckConstraint("ck_waste_log_reason", "reason_type IN ('spoilage', 'expired', 'spill_breakage', 'burn', 'quality_control')");
+                        });
+                });
+
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryAuditRow", b =>
                 {
                     b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
@@ -1022,6 +1203,26 @@ namespace Hipos.Api.Inventory.Migrations
                         .WithMany()
                         .HasForeignKey("PurchaseReturnId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryWasteLogRow", null)
+                        .WithMany()
+                        .HasForeignKey("WasteLogId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryOpeningCostRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
                         .WithMany()
@@ -1104,6 +1305,21 @@ namespace Hipos.Api.Inventory.Migrations
                     b.HasOne("Hipos.Api.Inventory.InventoryProductRef", null)
                         .WithMany()
                         .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryWasteLogRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

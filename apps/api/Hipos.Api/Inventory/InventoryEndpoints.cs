@@ -16,6 +16,10 @@ public sealed record CreateInventoryCount(string RequestId, string? WarehouseId 
 public sealed record SetInventoryCountLine(decimal PhysicalQuantity, int ExpectedVersion);
 public sealed record ApproveInventoryCount(string RequestId, int ExpectedVersion);
 public sealed record CancelInventoryCount(string RequestId, int ExpectedVersion);
+public sealed record CreateInventoryWaste(string RequestId, string IngredientId, decimal Quantity,
+    string ReasonType, string Description, string? WarehouseId = null);
+public sealed record CreateInventoryOpeningCost(string RequestId, string IngredientId, decimal UnitCostMinor,
+    string? WarehouseId = null);
 
 public sealed record InventoryWarehouseView(string Id, string Name, bool IsActive);
 public sealed record InventoryIngredientView(string Id, string WarehouseId, string Name, string Unit, decimal CriticalBelow,
@@ -35,6 +39,11 @@ public sealed record InventoryCountLineView(string IngredientId, string Ingredie
 public sealed record InventoryCountView(string Id, string WarehouseId, string Status, int Version, DateTimeOffset CreatedAt,
     string CreatedBy, DateTimeOffset? ApprovedAt, string? ApprovedBy, DateTimeOffset? CancelledAt,
     string? CancelledBy, InventoryCountLineView[] Lines);
+public sealed record InventoryWasteView(string Id, string WarehouseId, string IngredientId, string IngredientName,
+    decimal Quantity, string Unit, string ReasonType, string Description, decimal? SnapshotUnitCostMinor,
+    long? TotalCostMinor, string? CostMethod, DateTimeOffset CreatedAt, string ReportedBy);
+public sealed record InventoryCostView(string IngredientId, string IngredientName, string Unit,
+    decimal? UnitCostMinor, string Status, string? Source);
 
 public static class InventoryEndpoints
 {
@@ -184,6 +193,145 @@ public static class InventoryEndpoints
             return Results.Ok(new { source = "postgres", warehouseId = warehouse.Id, items = rows.Select(row => new InventoryMovementView(row.Id, row.WarehouseId, row.IngredientId,
                 names.GetValueOrDefault(row.IngredientId)?.Name ?? "Silinmiş hammadde",
                 row.Delta, row.Unit, row.Kind, row.Description, row.CreatedAt, row.Actor)).ToArray() });
+        });
+
+        group.MapGet("/costs", async (string firmId, string branchId, string? warehouseId, HttpContext context, InventoryDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, false);
+            if (denied is not null) return denied;
+            var warehouse = await ResolveWarehouse(db, firmId, branchId, warehouseId, context.RequestAborted);
+            if (warehouse is null) return Fail(context, "WAREHOUSE_NOT_FOUND", 404, "Bu şubede etkin depo bulunamadı.");
+            var ingredients = await db.Ingredients.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && row.IsActive)
+                .OrderBy(row => row.Name).ToListAsync(context.RequestAborted);
+            var items = new List<InventoryCostView>();
+            foreach (var ingredient in ingredients)
+            {
+                var cost = await MovingAverageUnitCost(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
+                var hasOpening = await db.OpeningCosts.AsNoTracking().AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.WarehouseId == warehouse.Id && row.IngredientId == ingredient.Id, context.RequestAborted);
+                items.Add(new InventoryCostView(ingredient.Id, ingredient.Name, ingredient.Unit, cost,
+                    cost is null ? "missing" : "ready", cost is null ? null : hasOpening ? "opening_and_purchases" : "purchases"));
+            }
+            return Results.Ok(new { source = "postgres", warehouseId = warehouse.Id, items });
+        });
+
+        group.MapPost("/opening-costs", async (string firmId, string branchId, CreateInventoryOpeningCost command,
+            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            if (!Guid.TryParse(command.RequestId, out _) || command.UnitCostMinor <= 0 ||
+                command.UnitCostMinor > 999999999999m || decimal.Round(command.UnitCostMinor, 6) != command.UnitCostMinor)
+                return Fail(context, "INVALID_OPENING_COST", 400, "Açılış birim maliyeti sıfırdan büyük ve en çok altı ondalıklı olmalıdır.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, "inventory.items", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var warehouse = await ResolveWarehouse(db, firmId, branchId, command.WarehouseId, context.RequestAborted);
+            if (warehouse is null) return Fail(context, "WAREHOUSE_NOT_FOUND", 404, "Depo bu şubede etkin değil.");
+            var existingById = await db.OpeningCosts.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.RequestId, context.RequestAborted);
+            if (existingById is not null)
+                return existingById.FirmId == firmId && existingById.BranchId == branchId && existingById.WarehouseId == warehouse.Id &&
+                    existingById.IngredientId == command.IngredientId && existingById.UnitCostMinor == command.UnitCostMinor
+                    ? Results.Ok(existingById)
+                    : Fail(context, "OPENING_COST_ID_CONFLICT", 409, "İstek kimliği farklı açılış maliyetiyle kullanılmış.");
+            var ingredient = await LockIngredient(db, firmId, branchId, command.IngredientId, context.RequestAborted);
+            if (ingredient is null || !ingredient.IsActive) return Fail(context, "INGREDIENT_NOT_FOUND", 404, "Aktif hammadde bulunamadı.");
+            if (await HasOpenCount(db, firmId, branchId, warehouse.Id, context.RequestAborted))
+                return Fail(context, "COUNT_IN_PROGRESS", 409, "Bu depoda sayım açık. Açılış maliyeti için önce sayımı tamamlayın veya iptal edin.");
+            if (await db.OpeningCosts.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.WarehouseId == warehouse.Id &&
+                row.IngredientId == ingredient.Id, context.RequestAborted))
+                return Fail(context, "OPENING_COST_EXISTS", 409, "Bu hammadde için açılış maliyeti daha önce tanımlandı ve değiştirilemez.");
+            var hasApprovedPurchase = await (from line in db.PurchaseLines
+                                             join purchase in db.Purchases on line.PurchaseId equals purchase.Id
+                                             where purchase.FirmId == firmId && purchase.BranchId == branchId && purchase.WarehouseId == warehouse.Id &&
+                                                 purchase.Status == "approved" && line.IngredientId == ingredient.Id
+                                             select line.Id).AnyAsync(context.RequestAborted);
+            if (hasApprovedPurchase)
+                return Fail(context, "PURCHASE_COST_EXISTS", 409, "Onaylı alış maliyeti bulunan hammaddeye açılış maliyeti girilemez.");
+            var onHand = await OnHand(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
+            if (onHand <= 0) return Fail(context, "NO_OPENING_STOCK", 409, "Açılış maliyeti için mevcut stok sıfırdan büyük olmalıdır.");
+            var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var row = new InventoryOpeningCostRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
+                WarehouseId = warehouse.Id, IngredientId = ingredient.Id, QuantitySnapshot = onHand, Unit = ingredient.Unit,
+                UnitCostMinor = command.UnitCostMinor,
+                TotalCostMinor = checked((long)decimal.Round(onHand * command.UnitCostMinor, 0, MidpointRounding.AwayFromZero)),
+                CreatedAt = now, CreatedBy = actor };
+            db.OpeningCosts.Add(row);
+            Audit(db, firmId, branchId, row.Id, "opening_cost_created", actor,
+                $"{ingredient.Name}: {onHand:0.###} {ingredient.Unit} × {command.UnitCostMinor:0.######} kuruş", now, warehouse.Id, row.Id);
+            try { await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted); }
+            catch (DbUpdateException error) when (Unique(error)) { return Fail(context, "OPENING_COST_EXISTS", 409, "Bu hammadde için açılış maliyeti daha önce tanımlandı."); }
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/inventory/opening-costs/{row.Id}", row);
+        });
+
+        group.MapGet("/waste", async (string firmId, string branchId, string? warehouseId, HttpContext context, InventoryDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, false);
+            if (denied is not null) return denied;
+            var warehouse = await ResolveWarehouse(db, firmId, branchId, warehouseId, context.RequestAborted);
+            if (warehouse is null) return Fail(context, "WAREHOUSE_NOT_FOUND", 404, "Bu şubede etkin depo bulunamadı.");
+            var rows = await db.WasteLogs.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && row.WarehouseId == warehouse.Id)
+                .OrderByDescending(row => row.CreatedAt).ThenByDescending(row => row.Id).Take(500).ToListAsync(context.RequestAborted);
+            var names = await db.Ingredients.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId)
+                .ToDictionaryAsync(row => row.Id, row => row.Name, context.RequestAborted);
+            return Results.Ok(new { source = "postgres", warehouseId = warehouse.Id,
+                items = rows.Select(row => WasteView(row, names.GetValueOrDefault(row.IngredientId) ?? "Silinmiş hammadde")).ToArray() });
+        });
+
+        group.MapPost("/waste", async (string firmId, string branchId, CreateInventoryWaste command,
+            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var reasonType = command.ReasonType?.Trim().ToLowerInvariant() ?? "";
+            var description = command.Description?.Trim() ?? "";
+            var allowedReasons = new[] { "spoilage", "expired", "spill_breakage", "burn", "quality_control" };
+            if (!Guid.TryParse(command.RequestId, out _) || !QuantityValid(command.Quantity, false) || command.Quantity <= 0 ||
+                !allowedReasons.Contains(reasonType) || description.Length is < 3 or > 500)
+                return Fail(context, "INVALID_WASTE", 400, "Hammadde, miktar, fire türü veya açıklama geçersiz.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, "inventory.items", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var warehouse = await ResolveWarehouse(db, firmId, branchId, command.WarehouseId, context.RequestAborted);
+            if (warehouse is null) return Fail(context, "WAREHOUSE_NOT_FOUND", 404, "Depo bu şubede etkin değil.");
+            var existing = await db.WasteLogs.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.RequestId, context.RequestAborted);
+            if (existing is not null)
+            {
+                var existingName = await db.Ingredients.AsNoTracking().Where(row => row.Id == existing.IngredientId)
+                    .Select(row => row.Name).SingleAsync(context.RequestAborted);
+                return existing.FirmId == firmId && existing.BranchId == branchId && existing.WarehouseId == warehouse.Id &&
+                    existing.IngredientId == command.IngredientId && existing.Quantity == command.Quantity && existing.ReasonType == reasonType && existing.Description == description
+                    ? Results.Ok(WasteView(existing, existingName))
+                    : Fail(context, "WASTE_ID_CONFLICT", 409, "İstek kimliği farklı fire içeriğiyle kullanılmış.");
+            }
+            var ingredient = await LockIngredient(db, firmId, branchId, command.IngredientId, context.RequestAborted);
+            if (ingredient is null) return Fail(context, "INGREDIENT_NOT_FOUND", 404, "Bu şubede hammadde bulunamadı.");
+            if (!ingredient.IsActive) return Fail(context, "INGREDIENT_INACTIVE", 409, "Pasif hammadde için fire kaydı oluşturulamaz.");
+            if (await HasOpenCount(db, firmId, branchId, warehouse.Id, context.RequestAborted))
+                return Fail(context, "COUNT_IN_PROGRESS", 409, "Bu depoda sayım açık. Fire kaydı için önce sayımı tamamlayın veya iptal edin.");
+            var current = await OnHand(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
+            if (current < command.Quantity) return Fail(context, "NEGATIVE_STOCK", 409, "Fire miktarı mevcut stoktan fazla olamaz.");
+            var unitCost = await MovingAverageUnitCost(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
+            if (unitCost is null)
+                return Fail(context, "COST_NOT_AVAILABLE", 409, "Bu hammadde için onaylı net alış maliyeti yok. Önce maliyetli bir mal kabul kaydı oluşturun.");
+            var totalCost = checked((long)decimal.Round(unitCost.Value * command.Quantity, 0, MidpointRounding.AwayFromZero));
+            var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var waste = new InventoryWasteLogRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
+                WarehouseId = warehouse.Id, IngredientId = ingredient.Id, Quantity = command.Quantity, Unit = ingredient.Unit,
+                ReasonType = reasonType, Description = description, SnapshotUnitCostMinor = unitCost,
+                TotalCostMinor = totalCost, CostMethod = "moving_weighted_average_net", CreatedAt = now, ReportedBy = actor };
+            var movement = new InventoryMovementRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
+                WarehouseId = warehouse.Id, IngredientId = ingredient.Id, Delta = -command.Quantity, Unit = ingredient.Unit,
+                Kind = "waste_loss", Description = description, WasteLogId = waste.Id, CreatedAt = now, Actor = actor };
+            db.WasteLogs.Add(waste); db.Movements.Add(movement);
+            ingredient.Version++; ingredient.UpdatedAt = now;
+            Audit(db, firmId, branchId, waste.Id, "waste_recorded", actor,
+                $"{ingredient.Name}: {command.Quantity} {ingredient.Unit} · {reasonType} · {description}", now, warehouse.Id, command.RequestId);
+            await db.SaveChangesAsync(context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/inventory/waste/{waste.Id}", WasteView(waste, ingredient.Name));
         });
 
         group.MapPost("/movements", async (string firmId, string branchId, AddInventoryMovement command,
@@ -563,6 +711,32 @@ public static class InventoryEndpoints
 
     private static InventoryMovementView MovementView(InventoryMovementRow row, InventoryIngredientRow ingredient) =>
         new(row.Id, row.WarehouseId, row.IngredientId, ingredient.Name, row.Delta, row.Unit, row.Kind, row.Description, row.CreatedAt, row.Actor);
+
+    private static InventoryWasteView WasteView(InventoryWasteLogRow row, string ingredientName) =>
+        new(row.Id, row.WarehouseId, row.IngredientId, ingredientName, row.Quantity, row.Unit,
+            row.ReasonType, row.Description, row.SnapshotUnitCostMinor, row.TotalCostMinor, row.CostMethod,
+            row.CreatedAt, row.ReportedBy);
+
+    private static async Task<decimal?> MovingAverageUnitCost(InventoryDbContext db, string firmId, string branchId,
+        string warehouseId, string ingredientId, CancellationToken cancellationToken)
+    {
+        var lines = await (from line in db.PurchaseLines.AsNoTracking()
+                           join purchase in db.Purchases.AsNoTracking() on line.PurchaseId equals purchase.Id
+                           where purchase.FirmId == firmId && purchase.BranchId == branchId &&
+                               purchase.WarehouseId == warehouseId && purchase.Status == "approved" &&
+                               line.IngredientId == ingredientId
+                           select new { line.Id, line.Quantity, line.NetMinor }).ToListAsync(cancellationToken);
+        var opening = await db.OpeningCosts.AsNoTracking().SingleOrDefaultAsync(row => row.FirmId == firmId &&
+            row.BranchId == branchId && row.WarehouseId == warehouseId && row.IngredientId == ingredientId, cancellationToken);
+        if (lines.Count == 0 && opening is null) return null;
+        var lineIds = lines.Select(line => line.Id).ToArray();
+        var corrections = await db.PurchaseCorrections.AsNoTracking()
+            .Where(row => lineIds.Contains(row.PurchaseLineId))
+            .Select(row => new { row.Quantity, row.NetMinor }).ToListAsync(cancellationToken);
+        var costedQuantity = (opening?.QuantitySnapshot ?? 0) + lines.Sum(line => line.Quantity) - corrections.Sum(row => row.Quantity);
+        var netCostMinor = (opening?.TotalCostMinor ?? 0) + lines.Sum(line => line.NetMinor) - corrections.Sum(row => row.NetMinor);
+        return costedQuantity > 0 && netCostMinor > 0 ? netCostMinor / costedQuantity : null;
+    }
 
     private static InventoryCountView CountView(InventoryCountRow count, IReadOnlyDictionary<string, InventoryIngredientRow> ingredients) =>
         new(count.Id, count.WarehouseId, count.Status, count.Version, count.CreatedAt, count.CreatedBy, count.ApprovedAt, count.ApprovedBy,

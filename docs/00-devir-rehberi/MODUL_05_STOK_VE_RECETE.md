@@ -2,7 +2,7 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi, Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Eksik Teslim ve Tedarikçi İadesi (Çalışıyor) · Otomatik Tüketim (Hedef / Sırada)
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Eksik Teslim, Tedarikçi İadesi ve Fire/Zayi (Çalışıyor) · Otomatik Tüketim (Hedef / Sırada)
 > **PostgreSQL Şeması:** `inventory`
 > **Yönetim Paneli:** Var (`InventoryHttpPage.tsx`)
 > **API:** Var (`InventoryDbContext.cs`)
@@ -29,8 +29,8 @@
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
 | **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
-| **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
-| **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
+| **Fire kaydı** | **Çalışıyor** | Gerekçeli fire kaydı stoktan `waste_loss` hareketiyle düşer; gerçek şef PIN onayı auth modülünü bekler |
+| **Maliyet hesabı** | **Kısmi** | Hammadde firelerinde hareketli ağırlıklı ortalama net alış maliyeti çalışır; genel stok değerleme ve kârlılık henüz yoktur |
 
 ---
 
@@ -90,12 +90,15 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
   * Giren Hammadde: `500 kg Pizza Unu` · Birim Fiyat: `22,50 TL/kg`.
   * `[ Mal Kabulü Onayla ]` tıklandığında: Depo stoğu anında 500 kg artar ve tedarikçinin Cari hesabına borç faturası işlenir.
 
-### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Modalı (Hedef Modal — Geliştirilecek)
+### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Ekranı (Çalışıyor)
 * Mutfakta yere dökülen süt, bozulan et veya yanan pizza için:
   * Hammadde: `Dana Kıyma (1.5 kg)`.
   * Fire Türü: `Bozulma / Son Kullanma Tarihi Geçti`.
   * Açıklama: `"Dolap arızası sebebiyle bozuldu"`.
-  * Onaylayan Şef PIN'i ile stoktan düşülür; maliyet zayi raporuna işlenir.
+  * Kayıt mevcut yönetici aktörüyle stoktan düşülür ve denetim izi oluşturur.
+  * Hammadde zayisi, hareketli ağırlıklı ortalama KDV hariç net alış maliyetini kayıt anında snapshot olarak saklar ve aylık/toplam maliyet özetinde gösterir.
+  * Onaylı alışı olmayan başlangıç stoklarına tek seferlik, değiştirilemez açılış birim maliyeti girilebilir.
+  * Gerçek şef PIN onayı auth modülünü; reçeteli ürün zayisi ise ürün/reçete giriş türünü bekler.
 
 ### 📋 EKRAN 5: Depo Fiziksel Sayım ve Onay Ekranı (Mevcut Çalışan Ekran — `InventoryHttpPage.tsx` sayım görünümü)
 * Sayım Taslağı Açma -> Fiziksel miktarları sayıp girme -> Fark Analizi (`Sayılan - Sistem`) -> Yönetici onayıyla tek hareketle stoku eşitleme.

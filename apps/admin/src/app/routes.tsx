@@ -29,6 +29,7 @@ import { CarilerDemoPage, RecipesDemoPage, StockDemoPage } from "../features/dem
 import { CarilerHttpPage } from "../features/demo/CarilerHttpPage";
 import { InventoryHttpPage } from "../features/inventory/InventoryHttpPage";
 import { ReceivingPage } from "../features/inventory/ReceivingPage";
+import { WastePage } from "../features/inventory/WastePage";
 import { CashManagementPage } from "../features/cash/CashManagementPage";
 import { ExpenseManagementPage } from "../features/expenses/ExpenseManagementPage";
 
@@ -251,6 +252,10 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     content = inventorySource === "http" && cariSource === "http"
       ? <ReceivingPage ctx={ctx} canWrite={canWriteProcurement} />
       : <FutureFeaturePage section={sections.find(entry => entry.id === "inventory")!} title="Mal Kabul" slug="receiving" />;
+  } else if (section === "inventory" && item === "waste") {
+    content = inventorySource === "http"
+      ? <WastePage ctx={ctx} canWrite={canWriteInventoryItems} />
+      : <FutureFeaturePage section={sections.find(entry => entry.id === "inventory")!} title="Fire Kayıtları" slug="waste" />;
   } else if ((section === "customers" && ["customers", "accounts", "history"].includes(item)) ||
     (section === "inventory" && item === "suppliers")) {
     const kind = section === "inventory" ? "supplier" : item === "customers" || item === "history" ? "customer" : "all";

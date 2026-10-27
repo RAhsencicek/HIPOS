@@ -68,8 +68,42 @@ public sealed class InventoryMovementRow
     public string? PurchaseId { get; set; }
     public string? PurchaseCorrectionId { get; set; }
     public string? PurchaseReturnId { get; set; }
+    public string? WasteLogId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public string Actor { get; set; } = "";
+}
+
+public sealed class InventoryWasteLogRow
+{
+    public string Id { get; set; } = "";
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string WarehouseId { get; set; } = "";
+    public string IngredientId { get; set; } = "";
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "";
+    public string ReasonType { get; set; } = "";
+    public string Description { get; set; } = "";
+    public decimal? SnapshotUnitCostMinor { get; set; }
+    public long? TotalCostMinor { get; set; }
+    public string? CostMethod { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string ReportedBy { get; set; } = "";
+}
+
+public sealed class InventoryOpeningCostRow
+{
+    public string Id { get; set; } = "";
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string WarehouseId { get; set; } = "";
+    public string IngredientId { get; set; } = "";
+    public decimal QuantitySnapshot { get; set; }
+    public string Unit { get; set; } = "";
+    public decimal UnitCostMinor { get; set; }
+    public long TotalCostMinor { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string CreatedBy { get; set; } = "";
 }
 
 public sealed class InventoryPurchaseRow
@@ -209,6 +243,8 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
     public DbSet<InventoryPurchaseLineRow> PurchaseLines => Set<InventoryPurchaseLineRow>();
     public DbSet<InventoryPurchaseCorrectionRow> PurchaseCorrections => Set<InventoryPurchaseCorrectionRow>();
     public DbSet<InventoryPurchaseReturnRow> PurchaseReturns => Set<InventoryPurchaseReturnRow>();
+    public DbSet<InventoryWasteLogRow> WasteLogs => Set<InventoryWasteLogRow>();
+    public DbSet<InventoryOpeningCostRow> OpeningCosts => Set<InventoryOpeningCostRow>();
     public DbSet<InventoryAuditRow> Audit => Set<InventoryAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -290,7 +326,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.ToTable("movements", table =>
             {
                 table.HasCheckConstraint("ck_inventory_movement_nonzero", "delta <> 0");
-                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return')");
+                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return', 'waste_loss')");
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
@@ -306,6 +342,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.Property(row => row.PurchaseId).HasColumnName("purchase_id").HasMaxLength(80);
             entity.Property(row => row.PurchaseCorrectionId).HasColumnName("purchase_correction_id").HasMaxLength(80);
             entity.Property(row => row.PurchaseReturnId).HasColumnName("purchase_return_id").HasMaxLength(80);
+            entity.Property(row => row.WasteLogId).HasColumnName("waste_log_id").HasMaxLength(80);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(80);
             entity.HasOne<InventoryIngredientRow>().WithMany().HasForeignKey(row => row.IngredientId).OnDelete(DeleteBehavior.Restrict);
@@ -314,11 +351,62 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.HasOne<InventoryPurchaseRow>().WithMany().HasForeignKey(row => row.PurchaseId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<InventoryPurchaseCorrectionRow>().WithMany().HasForeignKey(row => row.PurchaseCorrectionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<InventoryPurchaseReturnRow>().WithMany().HasForeignKey(row => row.PurchaseReturnId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryWasteLogRow>().WithMany().HasForeignKey(row => row.WasteLogId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.WarehouseId, row.IngredientId, row.CreatedAt });
             entity.HasIndex(row => new { row.CountId, row.IngredientId }).IsUnique().HasFilter("count_id IS NOT NULL");
             entity.HasIndex(row => new { row.PurchaseId, row.IngredientId }).IsUnique().HasFilter("purchase_id IS NOT NULL");
             entity.HasIndex(row => row.PurchaseCorrectionId).IsUnique().HasFilter("purchase_correction_id IS NOT NULL");
             entity.HasIndex(row => row.PurchaseReturnId).IsUnique().HasFilter("purchase_return_id IS NOT NULL");
+            entity.HasIndex(row => row.WasteLogId).IsUnique().HasFilter("waste_log_id IS NOT NULL");
+        });
+        modelBuilder.Entity<InventoryWasteLogRow>(entity =>
+        {
+            entity.ToTable("waste_logs", table =>
+            {
+                table.HasCheckConstraint("ck_waste_log_quantity", "quantity > 0");
+                table.HasCheckConstraint("ck_waste_log_reason", "reason_type IN ('spoilage', 'expired', 'spill_breakage', 'burn', 'quality_control')");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.WarehouseId).HasColumnName("warehouse_id").HasMaxLength(80);
+            entity.Property(row => row.IngredientId).HasColumnName("ingredient_id").HasMaxLength(80);
+            entity.Property(row => row.Quantity).HasColumnName("quantity").HasPrecision(18, 3);
+            entity.Property(row => row.Unit).HasColumnName("unit").HasMaxLength(12);
+            entity.Property(row => row.ReasonType).HasColumnName("reason_type").HasMaxLength(32);
+            entity.Property(row => row.Description).HasColumnName("description").HasMaxLength(500);
+            entity.Property(row => row.SnapshotUnitCostMinor).HasColumnName("snapshot_unit_cost_minor").HasPrecision(18, 6);
+            entity.Property(row => row.TotalCostMinor).HasColumnName("total_cost_minor");
+            entity.Property(row => row.CostMethod).HasColumnName("cost_method").HasMaxLength(40);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.ReportedBy).HasColumnName("reported_by").HasMaxLength(80);
+            entity.HasOne<InventoryWarehouseRow>().WithMany().HasForeignKey(row => row.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryIngredientRow>().WithMany().HasForeignKey(row => row.IngredientId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.WarehouseId, row.CreatedAt });
+        });
+        modelBuilder.Entity<InventoryOpeningCostRow>(entity =>
+        {
+            entity.ToTable("opening_costs", table =>
+            {
+                table.HasCheckConstraint("ck_opening_cost_quantity", "quantity_snapshot > 0");
+                table.HasCheckConstraint("ck_opening_cost_unit_cost", "unit_cost_minor > 0 AND total_cost_minor > 0");
+            });
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.WarehouseId).HasColumnName("warehouse_id").HasMaxLength(80);
+            entity.Property(row => row.IngredientId).HasColumnName("ingredient_id").HasMaxLength(80);
+            entity.Property(row => row.QuantitySnapshot).HasColumnName("quantity_snapshot").HasPrecision(18, 3);
+            entity.Property(row => row.Unit).HasColumnName("unit").HasMaxLength(12);
+            entity.Property(row => row.UnitCostMinor).HasColumnName("unit_cost_minor").HasPrecision(18, 6);
+            entity.Property(row => row.TotalCostMinor).HasColumnName("total_cost_minor");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.CreatedBy).HasColumnName("created_by").HasMaxLength(80);
+            entity.HasOne<InventoryWarehouseRow>().WithMany().HasForeignKey(row => row.WarehouseId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<InventoryIngredientRow>().WithMany().HasForeignKey(row => row.IngredientId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.WarehouseId, row.IngredientId }).IsUnique();
         });
         modelBuilder.Entity<InventoryPurchaseRow>(entity =>
         {
