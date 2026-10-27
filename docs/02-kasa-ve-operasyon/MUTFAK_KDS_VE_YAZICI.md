@@ -20,7 +20,7 @@
 
 ## 2. Mutfak ve Hazırlık Durum Makinesi (KDS State Machine)
 
-22 Ekim 2026 kararı: sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı seçilmiştir. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer; `served` görev son servis edilenlerde görünür, kaydı ve audit geçmişi korunur. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
+Sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı kullanılır. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer. `served` görev mutfak ekranından kaldırılır; görevin kaydı ve denetim geçmişi korunur. Servis geçmişi yönetim panelinde henüz gösterilmez. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
 
 İlk istasyon yönlendirmesi de uygulanmıştır. Demo şubede ürün kategorileri `pizza → Fırın`, `sandwich → Sıcak Mutfak`, `drinks → Bar`, `dessert → Soğuk Mutfak` olarak eşlenir. Görev oluşturulurken eşleşme bulunamazsa `station_id` boş kalır ve ekran görevi `Atanmamış` kuyruğunda gösterir; sipariş hiçbir durumda sessizce kaybolmaz. Bu eşleştirmelerin yönetim ekranından değiştirilmesi henüz kapsamda değildir.
 

@@ -4,7 +4,7 @@
 > **Kapsam:** KDS Ekranı, Durum Makinesi, Gecikme Alarmları, İstasyon Filtreleme ve ESC/POS Termal Fiş Basımı
 > **Modül Durumu:** Kalıcı KDS çekirdeği çalışıyor · Bildirim, satış iptali bağlantısı, gerçek yetki, offline çalışma ve yazıcı entegrasyonu eksik
 > **PostgreSQL Şeması:** `kitchen` (`tasks`, `task_audit`)
-> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif, servise hazır ve son servis edilenler)
+> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif ve servise hazır görevler)
 > **API:** Var (görev listesi ve sürüm kontrollü durum güncelleme)
 > **Test:** PostgreSQL kabul paketinde KDS görev üretimi, istasyon, durum, idempotency, sürüm ve audit senaryoları var
 > **Üretime Hazır mı?:** Hayır (Garson bildirimi, satış iptali bağlantısı, gerçek auth, offline/sync ve termal yazıcı servisi eksiktir)
@@ -24,7 +24,7 @@
 - Hazırlık bilgisi satış satırını değiştirerek değil, `kitchen.tasks` içinde sipariş kalemine bağlı ayrı görevle tutulacaktır. Ayrıntılı mutfak kılavuzundaki görev modeli esastır.
 - Adisyon müşterinin toplam hesabıdır; aynı adisyona sonradan eklenen her sipariş kendi ürün satırları için yeni görevler oluşturur. Tamamlanmış görevler yeniden açılmaz.
 - Her görev bir sipariş kalemine bağlıdır; örneğin aynı kalemdeki 2 pizza, miktarı 2 olan tek görevdir. Kısmi miktar hazırlama bu adımın kapsamı değildir.
-- Hazırlık sırası `submitted` (Bekliyor) → `preparing` (Hazırlanıyor) → `ready` (Hazır) → `served` (Servis edildi). Hazır görev aktif hazırlık kuyruğundan ayrı “Servise hazır” bölümüne geçer; servis edilen görev son işlemler bölümünde görünür ve geçmişten silinmez.
+- Hazırlık sırası `submitted` (Bekliyor) → `preparing` (Hazırlanıyor) → `ready` (Hazır) → `served` (Servis edildi). Hazır görev aktif hazırlık kuyruğundan ayrı “Servise hazır” bölümüne geçer; servis edilen görev mutfak ekranından kaldırılır ve geçmişten silinmez. Servis geçmişi yönetim panelinde henüz gösterilmez.
 - Süre adisyonun açılışından değil, ilgili görevin sunucu tarafından kaydedilen başlangıcından hesaplanır. Saat 19.00'da servis edilen pizzanın ardından 20.00'de gelen içeceğin süresi 20.00'de başlar.
 - Görevler firma/şube kapsamı taşır. Mevcut satış kalemi kimliği `long` olduğu için görev bağlantısı da `bigint` olmalıdır; satış kimlikleri değiştirilmez.
 - Kalıcı entegrasyon adımında aynı sipariş kaleminden ikinci görev oluşması benzersizlikle engellenmeli; durum yazmaları sürüm, tekil istek ve denetim kaydıyla korunmalıdır.

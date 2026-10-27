@@ -171,10 +171,6 @@ export function KitchenApp() {
   const visibleTasks = tasks.filter((task) => stationFilter === "all" || task.stationCode === stationFilter);
   const activeTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
   const readyTasks = visibleTasks.filter((task) => task.status === "ready");
-  const servedTasks = visibleTasks
-    .filter((task) => task.status === "served")
-    .sort((left, right) => new Date(right.servedAt!).getTime() - new Date(left.servedAt!).getTime())
-    .slice(0, 6);
   const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
 
   function ticket(task: KitchenTask, ready = false) {
@@ -207,7 +203,6 @@ export function KitchenApp() {
     <section className="kitchen-grid">{activeTasks.map((task) => ticket(task))}</section>
     {readyTasks.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyTasks.length}</b></div><div className="kitchen-grid">{readyTasks.map((task) => ticket(task, true))}</div></section>}
     {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
-    {servedTasks.length > 0 && <section className="kitchen-section kitchen-history"><div className="kitchen-section-title"><span>SON SERVİS EDİLENLER</span><b>{servedTasks.length}</b></div><ul>{servedTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()}</small></span><time>{task.servedAt ? new Date(task.servedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
     <p className="ops-footer">Yazdır düğmesi cihazın tarayıcı baskı penceresini açar. Gerçek otomatik yazdırma için mutfak yazıcısının modeli ve sürücüsü ayrıca gerekir.</p>
   </main>;
 }
