@@ -312,16 +312,11 @@ public static class InventoryEndpoints
                 return Fail(context, "COUNT_IN_PROGRESS", 409, "Bu depoda sayım açık. Fire kaydı için önce sayımı tamamlayın veya iptal edin.");
             var current = await OnHand(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
             if (current < command.Quantity) return Fail(context, "NEGATIVE_STOCK", 409, "Fire miktarı mevcut stoktan fazla olamaz.");
-            var unitCost = await MovingAverageUnitCost(db, firmId, branchId, warehouse.Id, ingredient.Id, context.RequestAborted);
-            if (unitCost is null)
-                return Fail(context, "COST_NOT_AVAILABLE", 409, "Bu hammadde için onaylı net alış maliyeti yok. Önce maliyetli bir mal kabul kaydı oluşturun.");
-            var totalCost = checked((long)decimal.Round(unitCost.Value * command.Quantity, 0, MidpointRounding.AwayFromZero));
             var now = DateTimeOffset.UtcNow;
             var actor = DemoAccess.Resolve(context)!.Name;
             var waste = new InventoryWasteLogRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
                 WarehouseId = warehouse.Id, IngredientId = ingredient.Id, Quantity = command.Quantity, Unit = ingredient.Unit,
-                ReasonType = reasonType, Description = description, SnapshotUnitCostMinor = unitCost,
-                TotalCostMinor = totalCost, CostMethod = "moving_weighted_average_net", CreatedAt = now, ReportedBy = actor };
+                ReasonType = reasonType, Description = description, CreatedAt = now, ReportedBy = actor };
             var movement = new InventoryMovementRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
                 WarehouseId = warehouse.Id, IngredientId = ingredient.Id, Delta = -command.Quantity, Unit = ingredient.Unit,
                 Kind = "waste_loss", Description = description, WasteLogId = waste.Id, CreatedAt = now, Actor = actor };

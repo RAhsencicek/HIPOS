@@ -63,9 +63,6 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
   const [error, setError] = useState("");
   const [approvalError, setApprovalError] = useState("");
   const [message, setMessage] = useState("");
-  const [correctionLineId, setCorrectionLineId] = useState("");
-  const [correctionQuantity, setCorrectionQuantity] = useState("");
-  const [correctionReason, setCorrectionReason] = useState("");
   const [returnLineId, setReturnLineId] = useState("");
   const [returnQuantity, setReturnQuantity] = useState("");
   const [returnDocumentNumber, setReturnDocumentNumber] = useState("");
@@ -145,21 +142,6 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
     } catch (reason) { setApprovalError((reason as Error).message); }
     finally { setBusy(false); }
   };
-  const correctDelivery = async (purchase: Purchase) => {
-    const quantity = number(correctionQuantity);
-    if (busy || !correctionLineId || quantity <= 0 || correctionReason.trim().length < 3) return;
-    setBusy(true); setError(""); setApprovalError(""); setMessage("");
-    try {
-      const correction = await post<PurchaseCorrection>(`${inventoryPath}/purchases/${purchase.id}/corrections`, actor, {
-        requestId: crypto.randomUUID(), purchaseLineId: correctionLineId, quantity, reason: correctionReason.trim(),
-      });
-      setPurchases((current) => current.map((item) => item.id === purchase.id
-        ? { ...item, corrections: [correction, ...(item.corrections ?? [])] } : item));
-      setCorrectionQuantity(""); setCorrectionReason("");
-      setMessage(`${purchase.documentNumber} belgesine eksik teslim düzeltmesi işlendi; stok ve tedarikçi borcu birlikte azaltıldı.`);
-    } catch (reason) { setApprovalError((reason as Error).message); }
-    finally { setBusy(false); }
-  };
   const returnDelivery = async (purchase: Purchase) => {
     const quantity = number(returnQuantity);
     if (busy || !returnLineId || quantity <= 0 || !returnDocumentNumber.trim() || returnReason.trim().length < 3) return;
@@ -220,16 +202,6 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
         <dl className="receiving-detail-meta"><div><dt>Depo</dt><dd>{warehouses.find((item) => item.id === selectedPurchase.warehouseId)?.name ?? "—"}</dd></div><div><dt>Oluşturan</dt><dd>{selectedPurchase.createdBy}</dd></div><div><dt>Onaylayan</dt><dd>{selectedPurchase.approvedBy ?? "Henüz onaylanmadı"}</dd></div></dl>
         <div className="table-scroll"><table><thead><tr><th>HAMMADDE</th><th>MİKTAR</th><th>BİRİM FİYAT</th><th>İSKONTO</th><th>KDV</th><th>TOPLAM</th></tr></thead><tbody>{selectedPurchase.lines.map((line) => <tr key={line.id}><td data-label="Hammadde">{line.ingredientName}</td><td data-label="Miktar">{line.quantity} {line.unit}</td><td data-label="Birim fiyat">{money(line.unitPriceMinor)}</td><td data-label="İskonto">%{line.discountRateBps / 100}</td><td data-label="KDV">%{line.taxRateBps / 100} · {money(line.taxMinor)}</td><td data-label="Toplam"><strong>{money(line.totalMinor)}</strong></td></tr>)}</tbody></table></div>
         <div className="receiving-detail-totals"><span>Ara toplam <strong>{money(selectedPurchase.subtotalMinor)}</strong></span><span>İskonto <strong>-{money(selectedPurchase.discountMinor)}</strong></span><span>KDV <strong>{money(selectedPurchase.taxMinor)}</strong></span><span>Genel toplam <strong>{money(selectedPurchase.totalMinor)}</strong></span></div>
-        {selectedPurchase.status === "approved" && <div className="receiving-correction">
-          <div><span className="card-kicker">EKSİK TESLİM</span><h3>Düzeltme fişi</h3><p>Onaylı belge korunur; düzeltme stoktan ve tedarikçi borcundan aynı anda düşer.</p></div>
-          <div className="receiving-correction-form">
-            <label>Hammadde<select value={correctionLineId} disabled={!canWrite || busy} onChange={(event) => setCorrectionLineId(event.target.value)}><option value="">Satır seçin</option>{selectedPurchase.lines.map((line) => { const removed = [...(selectedPurchase.corrections ?? []), ...(selectedPurchase.returns ?? [])].filter((item) => item.purchaseLineId === line.id).reduce((sum, item) => sum + item.quantity, 0); const remaining = line.quantity - removed; return remaining > 0 && <option key={line.id} value={line.id}>{line.ingredientName} · en fazla {remaining} {line.unit}</option>; })}</select></label>
-            <label>Miktar<input type="number" min="0.001" step="0.001" value={correctionQuantity} disabled={!canWrite || busy} onChange={(event) => setCorrectionQuantity(event.target.value)} /></label>
-            <label>Açıklama<input value={correctionReason} maxLength={500} placeholder="Örn. 10 adet eksik teslim edildi" disabled={!canWrite || busy} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
-            <button className="soft-button" disabled={!canWrite || busy || !correctionLineId || number(correctionQuantity) <= 0 || correctionReason.trim().length < 3} onClick={() => void correctDelivery(selectedPurchase)}>Düzeltmeyi kaydet</button>
-          </div>
-          {(selectedPurchase.corrections ?? []).length > 0 && <div className="receiving-correction-history"><strong>Düzeltme geçmişi</strong>{selectedPurchase.corrections.map((item) => <span key={item.id}>{item.quantity} {item.unit} · -{money(item.totalMinor)} · {item.reason}</span>)}</div>}
-        </div>}
         {selectedPurchase.status === "approved" && <div className="receiving-correction receiving-return">
           <div><span className="card-kicker">TEDARİKÇİYE İADE</span><h3>İade irsaliyesi</h3><p>Depoya alınmış ürünün sonradan tedarikçiye gönderilmesini resmi belge numarasıyla kaydeder.</p></div>
           <div className="receiving-return-form">

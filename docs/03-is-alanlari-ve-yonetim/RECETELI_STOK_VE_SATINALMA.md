@@ -19,9 +19,9 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Çalışıyor** | Taslak, onay, eksik teslim düzeltmesi ve tedarikçi iadesi kalıcıdır |
-| **Fire kaydı** | **Çalışıyor** | Gerekçeli hammadde fire/zayi kaydı, bağlı stok çıkışı ve net alış maliyeti snapshot raporu kalıcıdır; gerçek PIN ve reçeteli ürün zayisi eksiktir |
-| **Maliyet hesabı** | **Kısmi** | Hammadde firelerinde hareketli ağırlıklı ortalama net alış maliyeti çalışır; genel stok değerleme ve kârlılık henüz yoktur |
+| **Satın alma / mal kabul** | **Çalışıyor** | Taslak ve onay ile tedarikçiye iade kalıcıdır; eksik teslim düzeltmesinin backend/geçmişi korunur, yeni form panelde yoktur |
+| **Fire kaydı** | **Çalışıyor** | Gerekçeli hammadde fire/zayi kaydı ve bağlı stok çıkışı kalıcıdır; gerçek PIN ve reçeteli ürün zayisi eksiktir |
+| **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır |
 
 ---
 
@@ -30,8 +30,8 @@
 Şu anki HIPOS sisteminde [`InventoryDbContext`](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs) içinde depolar, hammaddeler, reçeteler ve fiziksel sayım tabloları bulunmaktadır. Ancak:
 * Satışlar (`sales`) ile Stok (`inventory`) arasında **hiçbir otomatik bağlantı yoktur**.
 * POS'ta veya masada 100 porsiyon Pizza satılsa bile, depodaki un, domates sosu veya mozzarella stoğu **1 gram bile azalmamaktadır**.
-* Mal kabul, eksik teslim düzeltmesi ve tedarikçi iadesi kodlanmıştır; satın alma siparişi ve mal kabulün siparişle eşleştirilmesi henüz yoktur.
-* Fire ve zayi stoktan düşülebilir; gerçek şef PIN onayı ve parasal kayıp raporu henüz bağlanmamıştır.
+* Mal kabul ve tedarikçiye iade kodlanmıştır. Eksik teslim düzeltmesinin backend ve geçmiş kayıtları korunur ancak yeni düzeltme formu panelden kaldırılmıştır. Satın alma siparişi ve mal kabulün siparişle eşleştirilmesi henüz yoktur.
+* Fire ve zayi stoktan düşülebilir; gerçek şef PIN onayı yoktur. Fiyatlandırma, stok maliyeti ve parasal kayıp raporu ayrı modüle ertelenmiştir.
 
 ---
 

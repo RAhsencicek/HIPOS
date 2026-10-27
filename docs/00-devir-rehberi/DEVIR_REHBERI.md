@@ -87,7 +87,7 @@ Projeye başlayan geliştiricilere modül kapsamı için **7 modül şartnamesi*
 | **[Modül 2] Masa Servisi & Adisyon** | Ortak adisyon çekirdeği mevcut; panel/operasyon bağlantısı ve yaşam döngüsü eksik. | 👉 [MODUL_02_MASA_VE_ADISYON.md](MODUL_02_MASA_VE_ADISYON.md) | 1–2. adımlar |
 | **[Modül 3] Mutfak (KDS) & Yazıcı** | Salt okunur mutfak önizlemesi mevcut; KDS durumları ve yazıcı eksik. | 👉 [MODUL_03_MUTFAK_VE_KDS.md](MODUL_03_MUTFAK_VE_KDS.md) | 6. adım |
 | **[Modül 4] Ürün Kataloğu & Menü** | Katalog ve menü kalıcı MVP'si mevcut; modifiers ve QR yayınlama eksik. | 👉 [MODUL_04_KATALOG_VE_MENU.md](MODUL_04_KATALOG_VE_MENU.md) | Mevcut MVP; genişletmeler ana sıranın dışında |
-| **[Modül 5] Stok & Reçeteli Üretim** | Stok, reçete ve sayım mevcut; mal kabul ve otomatik tüketim eksik. | 👉 [MODUL_05_STOK_VE_RECETE.md](MODUL_05_STOK_VE_RECETE.md) | 4–5. adımlar |
+| **[Modül 5] Stok & Reçeteli Üretim** | Stok, reçete, sayım, mal kabul, tedarikçiye iade ve fire mevcut; otomatik tüketim eksik. | 👉 [MODUL_05_STOK_VE_RECETE.md](MODUL_05_STOK_VE_RECETE.md) | 5. adım ve kalan genişletmeler |
 | **[Modül 6] Cari Hesaplar & Giderler** | Manuel cari ve gider kayıtları kalıcı MVP'dir; otomatik operasyon bağlantıları eksik. | 👉 [MODUL_06_CARI_VE_GIDER.md](MODUL_06_CARI_VE_GIDER.md) | 2. ve 4. adımlarla kesişir |
 | **[Modül 7] Kimlik & Auth Omurgası** | Gerçek Auth ve yetkilendirme uygulanmamıştır. | 👉 [MODUL_07_KIMLIK_VE_AUTH.md](MODUL_07_KIMLIK_VE_AUTH.md) | 3. adım |
 
@@ -224,12 +224,15 @@ Hammaddelerin (un, et, peynir, kahve çekirdeği), reçetelerin ve depo sayımla
 #### B. ✅ Bugün Kodda Çalışanlar (Mevcut Durum)
 * **Stok ve Depo Yönetim Ekranı ([InventoryHttpPage.tsx:L1-L60](../../apps/admin/src/features/inventory/InventoryHttpPage.tsx#L1-L60)):** Depodaki mevcut miktarlar, kritik eşik uyarıları, reçete editörü, fiziksel sayım taslağı girişi ve yönetici onay kilitli düzeltme hareketi çalışmaktadır.
 * **Backend API ve Veri Modeli ([InventoryDbContext.cs:L6-L50](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs#L6-L50)):** `inventory.warehouses`, `inventory.ingredients`, `inventory.recipes`, `inventory.recipe_lines`, `inventory.movements`, `inventory.counts`, `inventory.count_lines` PostgreSQL'e bağlıdır.
+* **Mal kabul ve tedarikçiye iade ([ReceivingPage.tsx](../../apps/admin/src/features/inventory/ReceivingPage.tsx)):** Taslak belge, atomik stok/cari onayı ve özgün mal kabul satırına bağlı tedarikçi iadesi çalışır. Eksik teslim düzeltme geçmişi backend'de korunur; yeni düzeltme formu panelde gösterilmez.
+* **Fire ve zayi ([WastePage.tsx](../../apps/admin/src/features/inventory/WastePage.tsx)):** Gerekçeli hammadde kaybı kalıcı `waste_loss` hareketi oluşturur. Fiyat/maliyet girişi istemez ve maliyet bulunmaması kaydı engellemez.
 * **Test kapsamı:** [STOK_REÇETE_SAYIM_MANUEL_TEST.md](../04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md) rehberi ve [postgres.test.mjs](../../apps/api/Hipos.Api.Tests/postgres.test.mjs) stok ve sayım senaryolarını içerir.
 
 #### C. 🚧 Henüz Yapılmayanlar & Hedef Ekran Davranışları (Geliştirilecek Backlog)
 1. **Satış Anında Otomatik Reçete Tüketimi (`recipe_consumption`):** Adisyon kapandığında satılan ürünlerin reçetesindeki gramajları `inventory.movements` tablosundan otomatik düşen arka plan servisi.
-2. **Mal Kabul ve Alış İrsaliyesi Ekranı (Hedef Form):** Toptancıdan 50 kg un geldiğinde depoya stok girişi yapma ve irsaliye numarası bağlama.
-3. **Fire Kaydı Formu (Hedef Form):** Mutfakta bozulan veya dökülen ürünler için gerekçeli fire çıkışı oluşturma.
+2. **Satın Alma Talebi ve Siparişi:** Çalışan mal kabul akışını talep/sipariş belgesine bağlama.
+3. **Gerçek Yetkilendirme:** Fire ve kritik stok işlemlerinde demo aktörü yerine kullanıcı rolü ve şef PIN denetimi.
+4. **Fiyatlandırma ve Maliyet:** Stok maliyeti ve parasal zayi raporunu ayrı modül sözleşmesinde tasarlama; mevcut fire ekranı bu bilgiyi istemez.
 
 #### D. Şartname ve İlgili Dokümanlar
 * 🌟 **A'dan Z'ye Modül Devir Şartnamesi:** 👉 [MODUL_05_STOK_VE_RECETE.md](MODUL_05_STOK_VE_RECETE.md)

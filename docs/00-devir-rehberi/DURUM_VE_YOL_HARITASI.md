@@ -135,21 +135,26 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 
 | Kriter | Detay |
 |---|---|
-| **Veritabanı Şeması** | `inventory` şeması (`inventory.warehouses`, `inventory.ingredients`, `inventory.recipes`, `inventory.recipe_lines`, `inventory.movements`, `inventory.counts`, `inventory.count_lines`) |
+| **Veritabanı Şeması** | `inventory` şeması (depo, hammadde, reçete, hareket, sayım, mal kabul ve fire kayıtları) |
 | **İlgili EF Core Context** | [InventoryDbContext.cs:L6-L50](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs#L6-L50) |
-| **Ön Yüz Ekranı** | [InventoryHttpPage.tsx:L1-L60](../../apps/admin/src/features/inventory/InventoryHttpPage.tsx#L1-L60) |
+| **Ön Yüz Ekranı** | [InventoryHttpPage.tsx](../../apps/admin/src/features/inventory/InventoryHttpPage.tsx) · [ReceivingPage.tsx](../../apps/admin/src/features/inventory/ReceivingPage.tsx) · [WastePage.tsx](../../apps/admin/src/features/inventory/WastePage.tsx) |
 | **Kılavuz Doküman** | 👉 [Modül 5 Şartnamesi](MODUL_05_STOK_VE_RECETE.md) · [Reçeteli Stok ve Satın Alma](../03-is-alanlari-ve-yonetim/RECETELI_STOK_VE_SATINALMA.md) · [Stok Test Kılavuzu](../04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md) |
 
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
   - Hammadde listesi, kritik stok uyarıları, reçete tanımları ve fiziksel sayım onay kilitleri PostgreSQL'e bağlıdır.
+  - Mal kabul taslağı ve onayı çalışır; onay stok girişini ve tedarikçi borcunu atomik olarak oluşturur. Tedarikçiye iade ayrı ters kayıtla çalışır.
+  - Gerekçeli fire/zayi kaydı stoğu `waste_loss` hareketiyle düşürür. Fire ekranında fiyat veya maliyet bilgisi istenmez.
+  - Eksik teslim düzeltmesinin backend ve geçmiş kayıtları korunur; yeni düzeltme formu mal kabul panelinden kaldırılmıştır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
   - Satış yapıldığında hammadde stoktan otomatik düşmemektedir (reçete tüketim motoru yoktur).
-  - Toptancıdan gelen faturanın depoya mal kabul girişi ve irsaliye takibi yoktur.
-  - Mutfak fire/zayi kayıt ekranı yoktur.
+  - Satın alma talebi/siparişi ve mal kabulün siparişle eşleştirilmesi yoktur.
+  - Gerçek şef PIN onayı ve reçeteli ürün zayisi yoktur.
+  - Fiyatlandırma, stok maliyeti ve parasal zayi raporu ayrı modül kararına ertelenmiştir.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. Adisyon kapandığında reçetedeki gramajları stok hareketlerinden otomatik düşen `recipe_consumption` motoru.
-  2. Mal kabul / alış irsaliyesi ekranı.
-  3. Gerekçeli Fire Kaydı ekranı.
+  2. Gerçek kimlik/yetkilendirme tamamlandığında fire ve kritik stok işlemlerine rol/PIN denetimi bağlanması.
+  3. Satın alma talebi ve siparişiyle mal kabul eşleştirmesi.
+  4. Fiyatlandırma ve maliyet alanının ayrı sözleşmeyle tasarlanması.
 
 ---
 

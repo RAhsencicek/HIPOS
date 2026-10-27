@@ -5457,53 +5457,6 @@ td.strong {
   font-size: 13px;
 }
 
-.waste-cost-state {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid #e7e4ec;
-  border-radius: 10px;
-  background: #fbfaff;
-  color: #554c6c;
-  font-size: 13px;
-}
-
-.waste-cost-state>div {
-  display: flex;
-  gap: 10px;
-}
-
-.waste-cost-state input {
-  max-width: 240px;
-}
-
-.waste-cost-state small {
-  color: #777783;
-}
-
-.waste-cost-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
-  border-top: 1px solid #eeeef2;
-  border-bottom: 1px solid #eeeef2;
-}
-
-.waste-cost-summary div {
-  display: grid;
-  gap: 6px;
-  padding: 16px 20px;
-  border-right: 1px solid #eeeef2;
-}
-
-.waste-cost-summary span {
-  color: #777783;
-  font-size: 12px;
-}
-
-.waste-cost-summary strong {
-  font-size: 18px;
-}
 
 .receiving-header label {
   flex: 1 1 190px;
@@ -5763,7 +5716,6 @@ td.strong {
   }
 
   .waste-description,
-  .waste-cost-state,
   .waste-submit {
     grid-column: auto;
   }
@@ -5777,25 +5729,6 @@ td.strong {
     width: 100%;
   }
 
-  .waste-cost-state>div {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .waste-cost-state input,
-  .waste-cost-state button {
-    width: 100%;
-    max-width: none;
-  }
-
-  .waste-cost-summary {
-    grid-template-columns: 1fr;
-  }
-
-  .waste-cost-summary div {
-    border-right: 0;
-    border-bottom: 1px solid #eeeef2;
-  }
 
   .inventory-recipe-inputs {
     grid-template-columns: 1fr;

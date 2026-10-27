@@ -3,7 +3,7 @@
 Bu rehber yerel geliştirme içindir; seed verisi kurgusaldır. Migration ve inventory seed'ini [README'deki başlatma yönergesine](../../README.md#2-hızlı-başlatma-quickstart) göre uygulayın. API'yi PostgreSQL ayarlarıyla yeniden başlatın; paneli şu sağlayıcılarla açın:
 
 ```bash
-VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_INVENTORY_PROVIDER=http npm run dev
+VITE_FEATURE_PROVIDER=http VITE_CATALOG_PROVIDER=http VITE_CARI_PROVIDER=http VITE_INVENTORY_PROVIDER=http npm run dev
 ```
 
 Tek şube **Mahalle Fırını / Kadıköy** bağlamını seçin. **Ayarlar → Modüller ve Özellikler** bölümünde sırayla **Stok Takibi**, **Reçete** ve **Stok Sayımı** özelliklerini açın. Ana sayfa ve depo stok ekranının gerçek PostgreSQL'e bağlı olduğunu doğrulayın.
@@ -37,10 +37,26 @@ Tek şube **Mahalle Fırını / Kadıköy** bağlamını seçin. **Ayarlar → M
 5. API korumasını sınamak için test veritabanına sayım açıkken dışarıdan movement ekleyin. Onay `409 COUNT_STOCK_CHANGED` vermeli, hiçbir düzeltme hareketi oluşmamalı.
 6. Taslağı iptal edin. Snapshot ve audit korunmalı, stok değişmemeli; iptal sonrası normal stok girişi yeniden mümkün olmalı.
 
-## 5. Modül sınırı
+## 5. Mal kabul ve tedarikçiye iade
+
+1. **Mal Kabul** ekranında tedarikçi, depo, belge numarası/tarihi ve en az bir hammadde satırıyla taslak oluşturun. Taslak stok veya cari bakiyeyi değiştirmemeli.
+2. Taslağı onaylayın. Hammadde stoğu `receiving` hareketiyle artmalı ve tedarikçi carisinde `supplier_debt` oluşmalı. Aynı onay tekrarında ikinci hareket oluşmamalı.
+3. Açık sayım varken mal kabul onayını deneyin; `409 COUNT_IN_PROGRESS` dönmeli.
+4. Onaylı satır için tedarikçiye iade kaydedin. Stok `supplier_return` ile azalmalı, tedarikçi borcu bağlı ters cari hareketle düşmeli.
+5. Eksik teslim için yeni düzeltme formu panelde görünmemeli. Önceden oluşturulmuş düzeltmeler ve backend denetim geçmişi korunmalı.
+
+## 6. Fire ve zayi
+
+1. **Fire Kayıtları** ekranında hammadde, miktar, neden ve açıklama girerek kaydedin. Stok aynı miktarda `waste_loss` hareketiyle azalmalı.
+2. Fire miktarı mevcut stoktan büyükse kayıt reddedilmeli; açık sayım varken fire oluşturulamamalı.
+3. Aynı istek kimliği tekrarlandığında ikinci stok düşümü oluşmamalı.
+4. Ekranda birim maliyet, açılış maliyeti veya parasal zayi özeti görünmemeli. Maliyet bilgisi bulunmaması fire kaydını engellememeli.
+5. Gerçek şef PIN onayı henüz yoktur; ekrandaki demo aktörü üretim yetkilendirmesi sayılmamalı.
+
+## 7. Modül sınırı
 
 1. Sayım açıkken **Stok Takibi** veya **Stok Sayımı** kapatmayı deneyin. API `409 INVENTORY_COUNT_OPEN` vermeli; tercih açık kalmalı.
 2. Sayımı onaylayın veya iptal edin; sonra modülü kapatın. Geçmiş kayıtlar okunur kalmalı, yeni yazmalar reddedilmeli.
 3. Modül tercihi veri silmemeli ve migration çalıştırmamalı.
 
-Bu MVP tek şube/tek depo örneğidir; veri modeli depo kimliği taşır. Reçete satışta otomatik stok tüketmez; satın alma belgesi, barkod, transfer, alış maliyeti ve gerçek kullanıcı/rol yetkisi bu akışta yoktur. Sorun bildirirken ekran URL'si, depo/şube, beklenen/görülen miktar ve test adımını birlikte not edin.
+Bu MVP tek şube/tek depo örneğidir; veri modeli depo kimliği taşır. Reçete satışta otomatik stok tüketmez. Mal kabul ve tedarikçiye iade çalışır; satın alma talebi/siparişi, barkod, transfer, fiyatlandırma/maliyet modülü ve gerçek kullanıcı/rol yetkisi yoktur. Sorun bildirirken ekran URL'si, depo/şube, beklenen/görülen miktar ve test adımını birlikte not edin.
