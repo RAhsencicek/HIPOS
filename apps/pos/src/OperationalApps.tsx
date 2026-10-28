@@ -13,6 +13,7 @@ type Product = { id: string; name: string; status: string; isActive: boolean; ch
 type Waiter = { id: string; name: string; isActive: boolean };
 type Table = { id: string; number: number; name: string; isActive: boolean; assignment?: { waiterId: string | null; waiterName: string | null } | null };
 type KitchenTask = { id: string; orderId: string; orderLineId: number; productName: string; quantity: number;
+  notes?: string;
   status: "submitted" | "preparing" | "ready" | "served" | "cancelled"; version: number; submittedAt: string;
   preparedAt?: string; readyAt?: string; servedAt?: string; tableName?: string; waiterName?: string;
   cancelledAt?: string; cancellationReason?: string; cancelledBy?: string;
@@ -171,21 +172,51 @@ export function KitchenApp() {
   const visibleTasks = tasks.filter((task) => stationFilter === "all" || task.stationCode === stationFilter);
   const activeTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
   const readyTasks = visibleTasks.filter((task) => task.status === "ready");
+  const servedTasks = visibleTasks
+    .filter((task) => task.status === "served")
+    .sort((left, right) => new Date(right.servedAt!).getTime() - new Date(left.servedAt!).getTime())
+    .slice(0, 6);
   const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
+
+  function printTicket(task: KitchenTask) {
+    const printItems = tasks.filter((item) => item.orderId === task.orderId && item.stationCode === task.stationCode && item.status !== "cancelled");
+    return <div className="kitchen-print-ticket">
+      <div className="kitchen-print-double-rule" />
+      <h1>MUTFAK SİPARİŞİ</h1>
+      <div className="kitchen-print-double-rule" />
+      <div className="kitchen-print-meta">
+        <div><b>Masa:</b><span>{task.tableName ?? "—"}</span></div>
+        <div><b>Saat:</b><span>{new Date(task.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span></div>
+        <div><b>Garson:</b><span>{task.waiterName ?? "—"}</span></div>
+        <div><b>Fiş No:</b><span>#{task.orderId.slice(0, 8).toUpperCase()}</span></div>
+      </div>
+      <div className="kitchen-print-rule" />
+      <div className="kitchen-print-columns"><b>Adet</b><b>Ürün</b><b>Not</b></div>
+      <div className="kitchen-print-rule" />
+      <div className="kitchen-print-items">{printItems.map((item) => <div className="kitchen-print-item" key={item.id}>
+        <strong>{item.quantity}x</strong><span>{item.productName}</span><span>{item.notes ?? "—"}</span>
+      </div>)}</div>
+      <div className="kitchen-print-double-rule" />
+      <p className="kitchen-print-device-line">[BİP SESİ] - [OTOMATİK KAĞIT KESME]</p>
+    </div>;
+  }
 
   function ticket(task: KitchenTask, ready = false) {
     const age = taskAge(task);
     return <article className={`kitchen-ticket ${ready ? "kitchen-ready" : `kitchen-${age.level}`} ${selected?.id === task.id ? "print-target" : ""}`} key={task.id}>
-      <header><div><span>{task.tableName ?? "MASA SİPARİŞİ"}{task.waiterName ? ` · ${task.waiterName}` : ""}</span><h2>{task.orderId.slice(0, 8).toUpperCase()}</h2></div><time>{new Date(task.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time></header>
-      <div className="kitchen-station-label">{task.stationName}</div>
-      <div className="kitchen-ticket-status"><b>{task.status === "submitted" ? "BEKLİYOR" : task.status === "preparing" ? "HAZIRLANIYOR" : "SERVİSE HAZIR"}</b><span>{age.minutes} dk</span></div>
-      <ul><li><strong>{task.quantity}×</strong><span>{task.productName}</span></li></ul>
-      <div className="kitchen-actions">
-        <button className="kitchen-status-button" disabled={savingTaskId === task.id} onClick={() => void changeStatus(task)}>
-          {savingTaskId === task.id ? "Kaydediliyor…" : task.status === "submitted" ? "Hazırlamaya başla" : task.status === "preparing" ? "Hazır" : "Servis edildi"}
-        </button>
-        <button className="kitchen-print-button" onClick={() => { setSelected(task); window.setTimeout(() => window.print(), 50); }}>Fiş yazdır</button>
+      <div className="kitchen-screen-ticket-content">
+        <header><div><span>{task.tableName ?? "MASA SİPARİŞİ"}{task.waiterName ? ` · ${task.waiterName}` : ""}</span><h2>{task.orderId.slice(0, 8).toUpperCase()}</h2></div><time>{new Date(task.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time></header>
+        <div className="kitchen-station-label">{task.stationName}</div>
+        <div className="kitchen-ticket-status"><b>{task.status === "submitted" ? "BEKLİYOR" : task.status === "preparing" ? "HAZIRLANIYOR" : "SERVİSE HAZIR"}</b><span>{age.minutes} dk</span></div>
+        <ul><li><strong>{task.quantity}×</strong><span>{task.productName}</span></li></ul>
+        <div className="kitchen-actions">
+          <button className="kitchen-status-button" disabled={savingTaskId === task.id} onClick={() => void changeStatus(task)}>
+            {savingTaskId === task.id ? "Kaydediliyor…" : task.status === "submitted" ? "Hazırlamaya başla" : task.status === "preparing" ? "Hazır" : "Servis edildi"}
+          </button>
+          <button className="kitchen-print-button" onClick={() => setSelected(task)}>Fiş yazdır</button>
+        </div>
       </div>
+      <div aria-hidden="true">{printTicket(task)}</div>
     </article>;
   }
 
@@ -203,6 +234,14 @@ export function KitchenApp() {
     <section className="kitchen-grid">{activeTasks.map((task) => ticket(task))}</section>
     {readyTasks.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyTasks.length}</b></div><div className="kitchen-grid">{readyTasks.map((task) => ticket(task, true))}</div></section>}
     {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
+    {servedTasks.length > 0 && <section className="kitchen-section kitchen-history"><div className="kitchen-section-title"><span>SON SERVİS EDİLENLER</span><b>{servedTasks.length}</b></div><ul>{servedTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()}</small></span><time>{task.servedAt ? new Date(task.servedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
+    {selected && <div className="kitchen-print-preview" role="dialog" aria-modal="true" aria-label="Mutfak fişi önizlemesi">
+      <div className="kitchen-print-preview-panel">
+        <div className="kitchen-print-preview-header"><strong>80 mm fiş önizlemesi</strong><button onClick={() => setSelected(null)} aria-label="Önizlemeyi kapat">×</button></div>
+        <div className="kitchen-print-preview-paper">{printTicket(selected)}</div>
+        <div className="kitchen-print-preview-actions"><button onClick={() => setSelected(null)}>Kapat</button><button className="kitchen-print-confirm" onClick={() => window.print()}>Yazdır</button></div>
+      </div>
+    </div>}
     <p className="ops-footer">Yazdır düğmesi cihazın tarayıcı baskı penceresini açar. Gerçek otomatik yazdırma için mutfak yazıcısının modeli ve sürücüsü ayrıca gerekir.</p>
   </main>;
 }

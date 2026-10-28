@@ -11,6 +11,7 @@ public sealed class KitchenTask
     public Guid? StationId { get; private set; }
     public string ProductName { get; private set; } = "";
     public int Quantity { get; private set; }
+    public string? Notes { get; private set; }
     public string Status { get; private set; } = "submitted";
     public int Version { get; private set; } = 1;
     public DateTimeOffset SubmittedAt { get; private set; }
@@ -24,7 +25,7 @@ public sealed class KitchenTask
     private KitchenTask() { }
 
     public KitchenTask(Guid id, string firmId, string branchId, Guid orderId,
-        long orderLineId, string productName, int quantity, DateTimeOffset submittedAt)
+        long orderLineId, string productName, int quantity, DateTimeOffset submittedAt, string? notes = null)
     {
         if (id == Guid.Empty || orderId == Guid.Empty || orderLineId <= 0)
             throw new ArgumentException("Görev, sipariş ve sipariş kalemi kimlikleri geçerli olmalı.");
@@ -38,6 +39,8 @@ public sealed class KitchenTask
         OrderLineId = orderLineId;
         ProductName = productName;
         Quantity = quantity;
+        Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        if (Notes?.Length > 500) throw new ArgumentException("Sipariş notu en çok 500 karakter olabilir.");
         SubmittedAt = submittedAt.ToUniversalTime();
     }
 

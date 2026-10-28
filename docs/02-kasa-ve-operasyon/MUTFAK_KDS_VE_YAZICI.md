@@ -14,13 +14,14 @@
 * **Garson ve İptal Bağları Eksiktir:** Hazır bildirimi garson ekranına gitmez; satış/adisyon kalem iptali ve müdür PIN onayı mutfağa bağlı değildir.
 * **Gerçek Auth ve Offline Kuyruk Eksiktir:** Demo aktör kullanılır; cihaz bağlantısı kesildiğinde işlemleri saklayıp tekrar gönderen kuyruk yoktur.
 * **Yazıcı Altyapısı Yoktur:** Garson sipariş girdiğinde mutfaktaki termal bilet yazıcısından (ESC/POS) otomatik kağıt fiş basılamaz.
+* **Sipariş Notu Veri Altyapısı Vardır:** Satış kalemi isteğe bağlı `notes` kabul eder; not satış ve mutfak kayıtlarında korunur, mutfak API'sinde döner ve 80 mm fiş önizlemesinde gösterilir. Garson ekranındaki not giriş alanı henüz bağlı değildir.
 <!-- 23 Ekim 2026: Problem tanımındaki eksik mevcut-kod bilgisi eklendi; çözülmemiş bildirim, iptal, auth, offline ve yazıcı sorunları korundu. -->
 
 ---
 
 ## 2. Mutfak ve Hazırlık Durum Makinesi (KDS State Machine)
 
-Sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı kullanılır. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer. `served` görev mutfak ekranından kaldırılır; görevin kaydı ve denetim geçmişi korunur. Servis geçmişi yönetim panelinde henüz gösterilmez. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
+22 Ekim 2026 kararı: sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı seçilmiştir. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer; `served` görev son servis edilenlerde görünür, kaydı ve audit geçmişi korunur. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
 
 İlk istasyon yönlendirmesi de uygulanmıştır. Demo şubede ürün kategorileri `pizza → Fırın`, `sandwich → Sıcak Mutfak`, `drinks → Bar`, `dessert → Soğuk Mutfak` olarak eşlenir. Görev oluşturulurken eşleşme bulunamazsa `station_id` boş kalır ve ekran görevi `Atanmamış` kuyruğunda gösterir; sipariş hiçbir durumda sessizce kaybolmaz. Bu eşleştirmelerin yönetim ekranından değiştirilmesi henüz kapsamda değildir.
 

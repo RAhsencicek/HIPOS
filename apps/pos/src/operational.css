@@ -69,6 +69,29 @@ button, select { font: inherit; }
 .ops-shell .kitchen-status-button { background: #294d35; color: #fff; }
 .ops-shell .kitchen-status-button:disabled { opacity: .55; cursor: wait; }
 .ops-shell .kitchen-print-button { background: #eef1eb; color: #365941; }
+.kitchen-print-ticket { display: none; }
+.kitchen-print-preview { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; background: #18231dcc; overflow: auto; }
+.kitchen-print-preview-panel { width: min(100%, 390px); border-radius: 16px; padding: 14px; background: #ecece7; box-shadow: 0 20px 70px #0005; }
+.kitchen-print-preview-header, .kitchen-print-preview-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kitchen-print-preview-header { margin-bottom: 12px; color: #253c2c; }
+.ops-shell .kitchen-print-preview-header button { width: 34px; height: 34px; border: 0; border-radius: 999px; background: #fff; color: #253c2c; font-size: 22px; }
+.kitchen-print-preview-paper { width: 80mm; max-width: 100%; margin: 0 auto; background: #fff; box-shadow: 0 4px 18px #0002; }
+.kitchen-print-preview-paper .kitchen-print-ticket { display: block; box-sizing: border-box; width: 80mm; max-width: 100%; min-height: 110mm; padding: 5mm 4mm 8mm; color: #000; font-family: "Courier New", Consolas, monospace; font-size: 10.5pt; font-weight: 600; line-height: 1.25; }
+.kitchen-print-preview-paper .kitchen-print-ticket h1 { margin: 3mm 0; font-size: 16pt; line-height: 1.1; text-align: center; }
+.kitchen-print-preview-paper .kitchen-print-rule { margin: 2mm 0; border-top: .35mm dashed #111; }
+.kitchen-print-preview-paper .kitchen-print-double-rule { height: 1.5mm; border-top: .35mm solid #000; border-bottom: .35mm solid #000; }
+.kitchen-print-preview-paper .kitchen-print-meta { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2mm; margin: 3mm 0; font-size: 9pt; }
+.kitchen-print-preview-paper .kitchen-print-meta div { display: grid; grid-template-columns: auto 1fr; gap: 1mm; min-width: 0; }
+.kitchen-print-preview-paper .kitchen-print-meta span { overflow-wrap: anywhere; }
+.kitchen-print-preview-paper .kitchen-print-columns, .kitchen-print-preview-paper .kitchen-print-item { display: grid; grid-template-columns: 12mm minmax(0, 1fr) 24mm; gap: 2mm; }
+.kitchen-print-preview-paper .kitchen-print-columns { padding: 1mm 0; }
+.kitchen-print-preview-paper .kitchen-print-items { min-height: 24mm; }
+.kitchen-print-preview-paper .kitchen-print-item { padding: 1.5mm 0; font-size: 11pt; }
+.kitchen-print-preview-paper .kitchen-print-item span { overflow-wrap: anywhere; }
+.kitchen-print-preview-paper .kitchen-print-device-line { margin: 4mm 0 0; font-size: 9.5pt; font-weight: 700; text-align: center; }
+.kitchen-print-preview-actions { margin-top: 12px; }
+.ops-shell .kitchen-print-preview-actions button { flex: 1; min-height: 44px; border: 0; border-radius: 10px; background: #fff; color: #365941; font-weight: 800; }
+.ops-shell .kitchen-print-preview-actions .kitchen-print-confirm { background: #294d35; color: #fff; }
 .kitchen-empty { border: 1px dashed #cad2c7; border-radius: 15px; padding: 40px 18px; color: #758075; text-align: center; }
 .kitchen-section { margin-top: 24px; }
 .kitchen-section-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px; color: #40604a; font-size: 12px; font-weight: 850; letter-spacing: .08em; }
@@ -101,9 +124,24 @@ button, select { font: inherit; }
   .kitchen-ticket { padding: 14px; }
 }
 @media print {
-  body { background: #fff; }
+  @page { size: 80mm auto; margin: 0; }
+  html, body { width: 80mm; margin: 0; background: #fff; }
   body * { visibility: hidden !important; }
   .print-target, .print-target * { visibility: visible !important; }
-  .print-target { position: absolute; left: 0; top: 0; width: 78mm; margin: 0; border: 0; box-shadow: none; border-radius: 0; }
-  .print-target footer, .print-target button { display: none !important; }
+  .print-target { position: absolute; left: 0; top: 0; width: 80mm; margin: 0; padding: 0; border: 0; background: #fff; box-shadow: none; border-radius: 0; animation: none; }
+  .print-target .kitchen-screen-ticket-content { display: none !important; }
+  .kitchen-print-preview { display: none !important; }
+  .print-target .kitchen-print-ticket { display: block !important; box-sizing: border-box; width: 80mm; padding: 4mm; color: #000; font-family: "Courier New", Consolas, monospace; font-size: 11pt; line-height: 1.25; }
+  .kitchen-print-ticket h1 { margin: 3mm 0; font-size: 16pt; line-height: 1.1; text-align: center; }
+  .kitchen-print-rule { margin: 2mm 0; border-top: .35mm dashed #000; }
+  .kitchen-print-double-rule { height: 1.5mm; border-top: .35mm solid #000; border-bottom: .35mm solid #000; }
+  .kitchen-print-meta { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2mm; margin: 3mm 0; font-size: 9pt; }
+  .kitchen-print-meta div { display: grid; grid-template-columns: auto 1fr; gap: 1mm; min-width: 0; }
+  .kitchen-print-meta span { overflow-wrap: anywhere; }
+  .kitchen-print-columns, .kitchen-print-item { display: grid; grid-template-columns: 12mm minmax(0, 1fr) 24mm; gap: 2mm; }
+  .kitchen-print-columns { padding: 1mm 0; }
+  .kitchen-print-items { min-height: 24mm; }
+  .kitchen-print-item { padding: 1.5mm 0; font-size: 11pt; }
+  .kitchen-print-item span { overflow-wrap: anywhere; }
+  .kitchen-print-device-line { margin: 4mm 0 0; font-size: 9.5pt; font-weight: 700; text-align: center; }
 }

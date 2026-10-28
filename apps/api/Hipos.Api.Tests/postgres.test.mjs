@@ -362,6 +362,11 @@ test(
       if (process.env.HIPOS_MIGRATION_BACKFILL_ONLY === "1") return;
       await execFile(
         "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "SalesDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
         { cwd: repo, env },
       );
@@ -1488,7 +1493,7 @@ test(
          VALUES ('${firm}','${moda}','pizza','${kitchenStationId}');`]);
       const waiterOrderId = "88888888-8888-4888-8888-888888888851";
       const waiterOrderBody = { orderId: waiterOrderId, waiterId: waiter.data.id,
-        items: [{ productId: pizzaId, quantity: 3 }] };
+        items: [{ productId: pizzaId, quantity: 3, notes: "  Az pişmiş, bol peynirli  " }] };
       const waiterOrder = await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
         waiterOrderBody, "pos-moda");
       assert.equal(waiterOrder.status, 201);
@@ -1502,11 +1507,16 @@ test(
       assert.ok(kitchenTask, "Sonradan eklenen garson siparişi mutfak görevi oluşturmalı.");
       assert.equal(kitchenTask.productName, "Margherita Pizza");
       assert.equal(kitchenTask.quantity, 3);
+      assert.equal(kitchenTask.notes, "Az pişmiş, bol peynirli");
       assert.equal(kitchenTask.status, "submitted");
       assert.equal(kitchenTask.version, 1);
       assert.equal(kitchenTask.stationCode, "oven");
       assert.equal(kitchenTask.tableName, "Masa 12");
       assert.equal(kitchenTask.waiterName, "Demo Garson");
+      assert.equal((await request(`${modaService}/tables/${table.data.id}/orders`, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888857", waiterId: waiter.data.id,
+        items: [{ productId: pizzaId, quantity: 1, notes: "x".repeat(501) }],
+      }, "pos-moda")).data.code, "INVALID_ORDER");
 
       const preparingRequest = "88888888-8888-4888-8888-888888888852";
       const preparing = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {

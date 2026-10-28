@@ -88,6 +88,7 @@ public sealed class SalesOrderLineRow
     public string ProductName { get; set; } = "";
     public string Sku { get; set; } = "";
     public int Quantity { get; set; }
+    public string? Notes { get; set; }
     public long UnitPriceMinor { get; set; }
     public long LineTotalMinor { get; set; }
     public string Currency { get; set; } = "TRY";
@@ -181,6 +182,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.ProductName).HasColumnName("product_name").HasMaxLength(256);
             entity.Property(row => row.Sku).HasColumnName("sku").HasMaxLength(80);
             entity.Property(row => row.Quantity).HasColumnName("quantity");
+            entity.Property(row => row.Notes).HasColumnName("notes").HasMaxLength(500);
             entity.Property(row => row.UnitPriceMinor).HasColumnName("unit_price_minor");
             entity.Property(row => row.LineTotalMinor).HasColumnName("line_total_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
