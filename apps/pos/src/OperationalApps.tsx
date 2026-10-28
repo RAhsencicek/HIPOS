@@ -369,6 +369,41 @@ export function WaiterApp() {
     setRetryOrderId(null); closeCustomization();
   }
 
+  const [printingBill, setPrintingBill] = useState(false);
+  const [testPrinting, setTestPrinting] = useState<string | null>(null);
+
+  async function printBillForTable() {
+    if (!selectedTable?.assignment || printingBill) return;
+    setPrintingBill(true); setError(""); setNotice("");
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/service/tables/${encodeURIComponent(selectedTable.id)}/print-bill`,
+        "pos-single", { openCashDrawer: false }
+      );
+      setNotice(`${selectedTable.name} için hesap fişi basıldı (${res.transportUsed}).`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Hesap fişi yazdırılamadı.");
+    } finally {
+      setPrintingBill(false);
+    }
+  }
+
+  async function triggerTestPrint(target: "kitchen" | "cashier") {
+    if (testPrinting) return;
+    setTestPrinting(target); setError(""); setNotice("");
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/printing/test?target=${target}`,
+        "pos-single"
+      );
+      setNotice(`${target === "kitchen" ? "Mutfak" : "Kasa"} test fişi başarıyla gönderildi (${res.transportUsed}).`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Test fişi gönderilemedi.");
+    } finally {
+      setTestPrinting(null);
+    }
+  }
+
   async function sendOrder() {
     if (!selectedTable || !waiter || cartRows.length === 0 || saving) return;
     setSaving(true); setError(""); setNotice("");
@@ -378,8 +413,19 @@ export function WaiterApp() {
       const result = await request<{ order: { id: string }; table: string; waiter: string }>(
         `${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/orders`, "pos-single",
         { orderId, waiterId: waiter.id, items: cartRows.map((item) => ({ productId: item.id, quantity: item.quantity, note: item.note || null, options: item.options })) });
+      
+      let kitchenPrintNotice = "";
+      try {
+        const printRes = await request<{ success: boolean; transportUsed: string }>(
+          `/api/v1/firms/${firmId}/branches/${branchId}/sales/orders/${result.order.id}/print-kitchen`, "pos-single"
+        );
+        kitchenPrintNotice = ` 🖨️ Mutfak fişi yazdırıldı (${printRes.transportUsed})!`;
+      } catch {
+        kitchenPrintNotice = " (Mutfak yazıcısına ulaşılamadı)";
+      }
+
       setCart([]); setRetryOrderId(null); setLastOrderId(result.order.id);
-      setNotice(`${result.table} siparişi yönetim ekranına gönderildi. Mutfak kuyruğuna eklendi.`);
+      setNotice(`${result.table} siparişi mutfağa gönderildi.${kitchenPrintNotice}`);
       setRefreshTick((tick) => tick + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Sipariş gönderilemedi."); }
     finally { setSaving(false); }
@@ -562,7 +608,7 @@ export function WaiterApp() {
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions">{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
     </section>
@@ -603,6 +649,7 @@ export function WaiterApp() {
         <div className="waiter-context-actions">
           {getTableStatus(selectedTable) === "idle" && !selectedTable.assignment && !selectedTable.group && <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={openReservation}>Rezerve et</button>}
           {selectedTable.assignment && <button className={`waiter-status-action ${getTableStatus(selectedTable) === "bill_requested" ? "active" : ""}`} disabled={tableStatusSaving} onClick={() => void updateTableStatus(getTableStatus(selectedTable) === "bill_requested" ? "cancel-bill-request" : "request-bill")}>{tableStatusSaving ? "Kaydediliyor…" : getTableStatus(selectedTable) === "bill_requested" ? "Hesap isteğini kaldır" : "Hesap istendi"}</button>}
+          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }} disabled={printingBill} onClick={() => void printBillForTable()}>{printingBill ? "Basılıyor…" : "🧾 Hesap Fişi Yazdır"}</button>}
           <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={() => openTableAction(selectedTable.group ? "ungroup" : "group")}>{selectedTable.group ? "Grubu Ayır" : "Masa Grubu Oluştur"}</button>
         </div>
       </div>}

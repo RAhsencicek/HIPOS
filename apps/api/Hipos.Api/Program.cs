@@ -6,6 +6,7 @@ using Hipos.Api.Service;
 using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
 using Hipos.Api.Expenses;
+using Hipos.Api.Printing;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -49,6 +50,9 @@ if (storage == "postgres")
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
     builder.Services.AddScoped<CashProvisioningService>();
+    builder.Services.Configure<PrinterConfig>(builder.Configuration.GetSection("Printers"));
+    builder.Services.AddSingleton<PrinterTransport>();
+    builder.Services.AddScoped<PrintingService>();
 }
 else if (storage == "memory")
     builder.Services.AddSingleton<IFeatureStore, InMemoryFeatureStore>();
@@ -127,6 +131,7 @@ if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
+app.MapPrintingEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
