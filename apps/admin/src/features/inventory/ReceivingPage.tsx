@@ -192,12 +192,14 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
 
   const createAndApproveOrder = async () => {
     if (!inventoryPath || busy) return;
+    const supplierIdToUse = newOrderSupplierId || (suppliers[0]?.id ?? "");
+    const warehouseIdToUse = newOrderWarehouseId || (warehouses[0]?.id ?? "");
     const orderLines = newOrderLines.map((line) => ({
-      ingredientId: line.ingredientId,
+      ingredientId: line.ingredientId || (ingredients[0]?.id ?? ""),
       quantity: number(line.quantity),
     })).filter((line) => line.ingredientId && line.quantity > 0);
 
-    if (!newOrderNumber.trim() || !newOrderSupplierId || !newOrderWarehouseId || orderLines.length === 0) {
+    if (!newOrderNumber.trim() || !supplierIdToUse || !warehouseIdToUse || orderLines.length === 0) {
       setError("Lütfen sipariş numarası, tedarikçi, depo ve geçerli hammadde satırlarını doldurun.");
       return;
     }
@@ -208,8 +210,8 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
       // 1. Siparişi Taslak Olarak Aç
       await post<PurchaseOrder>(`${inventoryPath}/purchase-orders`, actor, {
         requestId: orderId,
-        warehouseId: newOrderWarehouseId,
-        supplierCariId: newOrderSupplierId,
+        warehouseId: warehouseIdToUse,
+        supplierCariId: supplierIdToUse,
         orderNumber: newOrderNumber.trim(),
         orderDate: newOrderDate,
         lines: orderLines,
@@ -592,12 +594,14 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
             <label>Sipariş No<input value={newOrderNumber} onChange={(e) => setNewOrderNumber(e.target.value)} maxLength={100} /></label>
             <label>Sipariş Tarihi<input type="date" value={newOrderDate} onChange={(e) => setNewOrderDate(e.target.value)} /></label>
             <label>Tedarikçi
-              <select value={newOrderSupplierId} onChange={(e) => setNewOrderSupplierId(e.target.value)}>
+              <select value={newOrderSupplierId || (suppliers[0]?.id ?? "")} onChange={(e) => setNewOrderSupplierId(e.target.value)}>
+                {suppliers.length === 0 && <option value="">Tedarikçi bulunamadı</option>}
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
             <label>Depo
-              <select value={newOrderWarehouseId} onChange={(e) => setNewOrderWarehouseId(e.target.value)}>
+              <select value={newOrderWarehouseId || (warehouses[0]?.id ?? "")} onChange={(e) => setNewOrderWarehouseId(e.target.value)}>
+                {warehouses.length === 0 && <option value="">Depo bulunamadı</option>}
                 {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
             </label>
