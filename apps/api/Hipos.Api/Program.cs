@@ -50,7 +50,9 @@ if (storage == "postgres")
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
     builder.Services.AddScoped<CashProvisioningService>();
-    builder.Services.Configure<PrinterConfig>(builder.Configuration.GetSection("Printers"));
+    var printerConfig = new PrinterConfig();
+    builder.Configuration.GetSection("Printers").Bind(printerConfig);
+    builder.Services.AddSingleton(printerConfig);
     builder.Services.AddSingleton<PrinterTransport>();
     builder.Services.AddScoped<PrintingService>();
 }

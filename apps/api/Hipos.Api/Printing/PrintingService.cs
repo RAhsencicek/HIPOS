@@ -10,10 +10,24 @@ public sealed class PrintingService(
     SalesDbContext salesDb,
     ServiceDbContext serviceDb,
     PrinterTransport transport,
-    IOptions<PrinterConfig> options,
+    PrinterConfig config,
     ILogger<PrintingService> logger)
 {
-    private readonly PrinterConfig _config = options.Value ?? new PrinterConfig();
+    private readonly PrinterConfig _config = config;
+
+    public PrinterConfig GetConfig() => _config;
+
+    public void UpdateConfig(UpdatePrinterConfigRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.KitchenIp))
+        {
+            _config.KitchenPrinter.IpAddress = request.KitchenIp.Trim();
+            _config.KitchenPrinter.FallbackToUsb = false;
+        }
+        if (request.KitchenPort is > 0) _config.KitchenPrinter.Port = request.KitchenPort.Value;
+        if (!string.IsNullOrWhiteSpace(request.CashierIp)) _config.CashierPrinter.IpAddress = request.CashierIp.Trim();
+        if (request.CashierPort is > 0) _config.CashierPrinter.Port = request.CashierPort.Value;
+    }
 
     public async Task<PrintResult> PrintKitchenOrderAsync(
         string firmId,

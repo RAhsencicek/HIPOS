@@ -79,5 +79,15 @@ public static class PrintingEndpoints
             var result = await printing.TestPrintAsync(targetDevice, ct);
             return Results.Ok(new { success = result.Success, target = targetDevice, result.TransportUsed, result.Error });
         });
+
+        // 5. Yazıcı Yapılandırması (Ağ IP'lerini dinamik ayarlama)
+        group.MapGet("/printing/config", (PrintingService printing) =>
+            Results.Ok(printing.GetConfig()));
+
+        group.MapPost("/printing/config", (UpdatePrinterConfigRequest request, PrintingService printing) =>
+        {
+            printing.UpdateConfig(request);
+            return Results.Ok(printing.GetConfig());
+        });
     }
 }

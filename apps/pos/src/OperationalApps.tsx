@@ -410,9 +410,19 @@ export function WaiterApp() {
     try {
       const orderId = retryOrderId ?? createRequestId();
       setRetryOrderId(orderId);
+      const itemsPayload = cartRows.map((item) => {
+        const optionNotes = (item.options ?? []).map((o) => `${o.groupName}: ${o.optionName}`).filter(Boolean).join(", ");
+        const combinedNote = [item.note, optionNotes].filter(Boolean).join(" · ");
+        return {
+          productId: item.id,
+          quantity: item.quantity,
+          note: combinedNote || null,
+          options: null,
+        };
+      });
       const result = await request<{ order: { id: string }; table: string; waiter: string }>(
         `${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/orders`, "pos-single",
-        { orderId, waiterId: waiter.id, items: cartRows.map((item) => ({ productId: item.id, quantity: item.quantity, note: item.note || null, options: item.options })) });
+        { orderId, waiterId: waiter.id, items: itemsPayload });
       
       let kitchenPrintNotice = "";
       try {

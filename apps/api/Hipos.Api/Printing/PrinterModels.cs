@@ -49,4 +49,6 @@ public sealed class PrinterTargetConfig
     public bool FallbackToUsb { get; set; } = true;
 }
 
+public sealed record UpdatePrinterConfigRequest(string? KitchenIp, int? KitchenPort, string? CashierIp, int? CashierPort);
+
 public sealed record PrintResult(bool Success, string Target, string TransportUsed, string? Error = null);
