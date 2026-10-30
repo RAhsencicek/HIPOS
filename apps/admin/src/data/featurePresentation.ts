@@ -30,6 +30,7 @@ const demoRoutes = new Set([
   "customers/customers", "customers/accounts", "customers/history",
   "inventory/summary", "inventory/critical", "inventory/ingredients",
   "inventory/recipes", "inventory/counts", "inventory/suppliers", "inventory/movements",
+  "inventory/receiving", "inventory/waste",
   "reports/sales", "reports/branches",
   "settings/modules",
 ]);
