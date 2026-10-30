@@ -19,8 +19,8 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Çalışıyor** | Taslak ve onay ile tedarikçiye iade kalıcıdır; eksik teslim düzeltmesinin backend/geçmişi korunur, yeni form panelde yoktur |
-| **Fire kaydı** | **Çalışıyor** | Gerekçeli hammadde fire/zayi kaydı ve bağlı stok çıkışı kalıcıdır; gerçek PIN ve reçeteli ürün zayisi eksiktir |
+| **Satın alma / mal kabul** | **Çalışıyor** | Fiyatsız sipariş taslağı/onayı ve siparişe bağlı tek seferlik tam mal kabul kalıcıdır; kısmi teslim desteklenmez. Tedarikçiye iade de çalışır |
+| **Fire kaydı** | **Çalışıyor** | Hammadde firesi ile aktif reçete sürümünü kayda sabitleyen, bütün bileşenleri atomik düşen reçeteli ürün zayisi kalıcıdır; gerçek PIN eksiktir |
 | **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır |
 
 ---
@@ -30,8 +30,8 @@
 Şu anki HIPOS sisteminde [`InventoryDbContext`](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs) içinde depolar, hammaddeler, reçeteler ve fiziksel sayım tabloları bulunmaktadır. Ancak:
 * Satışlar (`sales`) ile Stok (`inventory`) arasında **hiçbir otomatik bağlantı yoktur**.
 * POS'ta veya masada 100 porsiyon Pizza satılsa bile, depodaki un, domates sosu veya mozzarella stoğu **1 gram bile azalmamaktadır**.
-* Mal kabul ve tedarikçiye iade kodlanmıştır. Eksik teslim düzeltmesinin backend ve geçmiş kayıtları korunur ancak yeni düzeltme formu panelden kaldırılmıştır. Satın alma siparişi ve mal kabulün siparişle eşleştirilmesi henüz yoktur.
-* Fire ve zayi stoktan düşülebilir; gerçek şef PIN onayı yoktur. Fiyatlandırma, stok maliyeti ve parasal kayıp raporu ayrı modüle ertelenmiştir.
+* Mal kabul ve tedarikçiye iade kodlanmıştır. Fiyat içermeyen satın alma siparişi taslak ve onay akışıyla oluşturulur; onaylı sipariş yalnız bir kez, sipariş miktarlarının tamamıyla mal kabule bağlanabilir. Kısmi veya fazla teslim kabul edilmez. Eksik teslim düzeltmesinin backend ve geçmiş kayıtları korunur ancak yeni düzeltme formu panelden kaldırılmıştır.
+* Hammadde fire/zayisi ve reçeteli ürün zayisi stoktan düşülebilir. Reçeteli zayide kayıt anındaki aktif reçete sürümü ve bileşenleri sabitlenir; bir bileşen yetersizse hiçbir hareket yazılmaz. Gerçek şef PIN onayı yoktur. Fiyatlandırma, stok maliyeti ve parasal kayıp raporu ayrı modüle ertelenmiştir.
 
 ---
 

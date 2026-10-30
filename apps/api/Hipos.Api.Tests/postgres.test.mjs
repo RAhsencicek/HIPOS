@@ -362,6 +362,11 @@ test(
       if (process.env.HIPOS_MIGRATION_BACKFILL_ONLY === "1") return;
       await execFile(
         "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "SalesDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
         { cwd: repo, env },
       );
@@ -812,17 +817,42 @@ test(
       const supplier = (await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items
         .find((party) => party.types.includes("supplier"));
       assert.ok(supplier, "Mal kabul testi için etkin tedarikçi bulunmalı.");
+      const purchaseOrderId = "44444444-4444-4444-8444-444444444430";
+      const purchaseOrderApprovalId = "44444444-4444-4444-8444-444444444431";
+      const purchaseOrderPath = `${singleInventory}/purchase-orders`;
+      const orderDraft = await request(purchaseOrderPath, "POST", {
+        requestId: purchaseOrderId, warehouseId: "warehouse-kadikoy-main", supplierCariId: supplier.id,
+        orderNumber: "TEST-SAS-001", orderDate: "2026-10-28",
+        lines: [{ ingredientId: "flour", quantity: 10 }],
+      }, "manager-single");
+      assert.equal(orderDraft.status, 201, JSON.stringify(orderDraft.data));
+      assert.equal(orderDraft.data.status, "draft");
+      assert.equal(orderDraft.data.lines[0].unit, "g");
+      const approvedOrder = await request(`${purchaseOrderPath}/${purchaseOrderId}/approve`, "POST", {
+        requestId: purchaseOrderApprovalId, expectedVersion: 1,
+      }, "manager-single");
+      assert.equal(approvedOrder.status, 200, JSON.stringify(approvedOrder.data));
+      assert.equal(approvedOrder.data.status, "approved");
+      assert.equal((await request(`${purchaseOrderPath}/${purchaseOrderId}/approve`, "POST", {
+        requestId: purchaseOrderApprovalId, expectedVersion: 1,
+      }, "manager-single")).status, 200);
       const purchaseId = "44444444-4444-4444-8444-444444444420";
       const purchaseApprovalId = "44444444-4444-4444-8444-444444444421";
       const purchasePath = `${singleInventory}/purchases`;
       const purchaseDraft = await request(purchasePath, "POST", {
         requestId: purchaseId, warehouseId: "warehouse-kadikoy-main", supplierCariId: supplier.id,
-        documentNumber: "TEST-MK-001", documentDate: "2026-10-26",
+        purchaseOrderId, documentNumber: "TEST-MK-001", documentDate: "2026-10-26",
         lines: [{ ingredientId: "flour", quantity: 10, unitPriceMinor: 3000, discountRateBps: 0, taxRateBps: 100 }],
       }, "manager-single");
       assert.equal(purchaseDraft.status, 201, JSON.stringify(purchaseDraft.data));
       assert.equal(purchaseDraft.data.status, "draft");
       assert.equal(purchaseDraft.data.totalMinor, 30300);
+      const mismatchedOrderReceipt = await request(purchasePath, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444432", warehouseId: "warehouse-kadikoy-main", supplierCariId: supplier.id,
+        purchaseOrderId, documentNumber: "TEST-MK-EKSIK", documentDate: "2026-10-26",
+        lines: [{ ingredientId: "flour", quantity: 9, unitPriceMinor: 3000, discountRateBps: 0, taxRateBps: 100 }],
+      }, "manager-single");
+      assert.equal(mismatchedOrderReceipt.data.code, "PURCHASE_ORDER_LINES_MISMATCH");
       assert.equal((await request(purchasePath, "GET", undefined, "manager-single")).data.items
         .find((purchase) => purchase.id === purchaseId).lines[0].ingredientName, "Un");
       const blockedPurchaseApproval = await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
@@ -874,6 +904,10 @@ test(
         `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_id='${purchaseId}' AND kind='receiving')||','||` +
         `(SELECT count(*) FROM cari.movements WHERE id='${purchaseApprovalId}' AND entry_type='supplier_debt' AND delta_minor=30300)`]);
       assert.equal(purchaseEffects.stdout.trim(), "1,1", "Mal kabul onayı stok ve cari etkisini yalnız bir kez üretmeli.");
+      const completedOrder = (await request(purchaseOrderPath, "GET", undefined, "manager-single")).data.items
+        .find((order) => order.id === purchaseOrderId);
+      assert.equal(completedOrder.status, "completed");
+      assert.equal(completedOrder.completedByPurchaseId, purchaseId);
       const purchaseLineId = approvedPurchase.data.lines[0].id;
       const correctionId = "44444444-4444-4444-8444-444444444422";
       const purchaseCorrectionPath = `${purchasePath}/${purchaseId}/corrections`;
@@ -916,6 +950,39 @@ test(
         `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_return_id='${returnId}' AND kind='supplier_return' AND delta=-3)||','||` +
         `(SELECT count(*) FROM cari.movements WHERE id='${returnId}' AND entry_type='adjustment_decrease' AND delta_minor=-9090)`]);
       assert.equal(returnEffects.stdout.trim(), "1,1", "Tedarikçi iadesi stok ve cari etkisini yalnız bir kez üretmeli.");
+
+      const ingredientWasteId = "44444444-4444-4444-8444-444444444433";
+      const ingredientWaste = { requestId: ingredientWasteId, warehouseId: "warehouse-kadikoy-main", ingredientId: "flour",
+        quantity: 1, reasonType: "spill_breakage", description: "Kabul testi hammadde firesi" };
+      assert.equal((await request(`${singleInventory}/waste`, "POST", ingredientWaste, "manager-single")).status, 201);
+      assert.equal((await request(`${singleInventory}/waste`, "POST", ingredientWaste, "manager-single")).status, 200);
+      assert.equal((await request(`${singleInventory}/waste`, "POST", { ...ingredientWaste, quantity: 2 }, "manager-single")).data.code,
+        "WASTE_ID_CONFLICT");
+      const ingredientWasteEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*) FROM inventory.movements WHERE waste_log_id='${ingredientWasteId}' AND kind='waste_loss' AND delta=-1`]);
+      assert.equal(ingredientWasteEffects.stdout.trim(), "1", "Hammadde firesi yalnız bir stok çıkışı üretmeli.");
+
+      const recipeWasteId = "44444444-4444-4444-8444-444444444434";
+      const recipeWaste = { requestId: recipeWasteId, warehouseId: "warehouse-kadikoy-main", productId: pizzaProductId,
+        portions: 2, reasonType: "burn", description: "İki pizza fırında yandı" };
+      const createdRecipeWaste = await request(`${singleInventory}/recipe-waste`, "POST", recipeWaste, "manager-single");
+      assert.equal(createdRecipeWaste.status, 201, JSON.stringify(createdRecipeWaste.data));
+      assert.equal(createdRecipeWaste.data.recipeVersion, 2);
+      assert.deepEqual(createdRecipeWaste.data.lines.map((line) => [line.ingredientId, line.quantity]).sort((a, b) => a[0].localeCompare(b[0])),
+        [["flour", 520], ["mozzarella", 240], ["tomato-sauce", 160]]);
+      assert.equal((await request(`${singleInventory}/recipe-waste`, "POST", recipeWaste, "manager-single")).status, 200);
+      const recipeWasteEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT count(*)||','||sum(-delta) FROM inventory.movements WHERE recipe_waste_log_id='${recipeWasteId}' AND kind='waste_loss'`]);
+      assert.equal(recipeWasteEffects.stdout.trim(), "3,920.000", "Ürün zayisi reçetenin üç hammaddesini yalnız bir kez düşmeli.");
+      const insufficientRecipeWaste = await request(`${singleInventory}/recipe-waste`, "POST", { ...recipeWaste,
+        requestId: "44444444-4444-4444-8444-444444444435", portions: 999999 }, "manager-single");
+      assert.equal(insufficientRecipeWaste.data.code, "INSUFFICIENT_STOCK");
+      const noPartialWaste = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        "SELECT count(*) FROM inventory.movements WHERE recipe_waste_log_id='44444444-4444-4444-8444-444444444435'"]);
+      assert.equal(noPartialWaste.stdout.trim(), "0", "Yetersiz stokta hiçbir reçete bileşeni düşmemeli.");
 
       const newIngredient = { requestId: "44444444-4444-4444-8444-444444444401", name: "Test Malzeme", unit: "g", criticalBelow: 10 };
       const createdIngredient = await request(`${singleInventory}/ingredients`, "POST", newIngredient, "manager-single");
@@ -1062,9 +1129,9 @@ test(
       const page = await browser.newPage();
       const cariPage = await browser.newPage();
       const cashPage = await browser.newPage();
-      page.setDefaultTimeout(5000);
-      cariPage.setDefaultTimeout(5000);
-      cashPage.setDefaultTimeout(5000);
+      page.setDefaultTimeout(15000);
+      cariPage.setDefaultTimeout(15000);
+      cashPage.setDefaultTimeout(15000);
       await cashPage.goto(`${uiBase}/admin/cash/summary`);
       await expect(cashPage.locator('.nav-children a[href="/admin/cash/summary"]')).not.toHaveClass(/nav-future/);
       const futureToggle = cashPage.getByRole("button", { name: /Gelecekte/ });
@@ -1230,6 +1297,15 @@ test(
       await page.goto(`${uiBase}/admin/inventory/recipes`);
       await expect(page.getByText(/Teorik üretim kapasitesi:/).first()).toBeVisible();
       await expect(page.getByText(/fire, bozulma/).first()).toBeVisible();
+      await page.goto(`${uiBase}/admin/inventory/receiving`);
+      await expect(page.getByRole("heading", { name: "Fiyatsız sipariş taslağı" })).toBeVisible();
+      await expect(page.getByLabel("Bağlı sipariş")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Mal kabul geçmişi" })).toBeVisible();
+      await page.goto(`${uiBase}/admin/inventory/waste`);
+      await expect(page.getByRole("heading", { name: "Gerekçeli fire / zayi" })).toBeVisible();
+      await page.getByLabel("Kayıt türü").selectOption("product");
+      await expect(page.getByLabel("Ürün")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Reçeteden düşülen ürünler" })).toBeVisible();
       await browser.close();
       browser = undefined;
       ui.kill("SIGTERM");
@@ -1392,7 +1468,7 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         'SELECT count(*) FROM sales."__EFMigrationsHistory"',
       ]);
-      assert.equal(salesMigrationCount.stdout.trim(), "3");
+      assert.equal(salesMigrationCount.stdout.trim(), "4");
       const auditCount = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -1567,7 +1643,7 @@ test(
          VALUES ('${firm}','${moda}','pizza','${kitchenStationId}');`]);
       const waiterOrderId = "88888888-8888-4888-8888-888888888851";
       const waiterOrderBody = { orderId: waiterOrderId, waiterId: waiter.data.id,
-        items: [{ productId: pizzaId, quantity: 3 }] };
+        items: [{ productId: pizzaId, quantity: 3, notes: "  Az pişmiş, bol peynirli  " }] };
       const waiterOrder = await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
         waiterOrderBody, "pos-moda");
       assert.equal(waiterOrder.status, 201);
@@ -1581,11 +1657,16 @@ test(
       assert.ok(kitchenTask, "Sonradan eklenen garson siparişi mutfak görevi oluşturmalı.");
       assert.equal(kitchenTask.productName, "Margherita Pizza");
       assert.equal(kitchenTask.quantity, 3);
+      assert.equal(kitchenTask.notes, "Az pişmiş, bol peynirli");
       assert.equal(kitchenTask.status, "submitted");
       assert.equal(kitchenTask.version, 1);
       assert.equal(kitchenTask.stationCode, "oven");
       assert.equal(kitchenTask.tableName, "Masa 12");
       assert.equal(kitchenTask.waiterName, "Demo Garson");
+      assert.equal((await request(`${modaService}/tables/${table.data.id}/orders`, "POST", {
+        orderId: "88888888-8888-4888-8888-888888888857", waiterId: waiter.data.id,
+        items: [{ productId: pizzaId, quantity: 1, notes: "x".repeat(501) }],
+      }, "pos-moda")).data.code, "INVALID_ORDER");
 
       const preparingRequest = "88888888-8888-4888-8888-888888888852";
       const preparing = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {

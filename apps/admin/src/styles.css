@@ -5457,6 +5457,19 @@ td.strong {
   font-size: 13px;
 }
 
+.waste-recipe-preview {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 14px;
+  border: 1px solid #e7e4ec;
+  border-radius: 10px;
+  background: #fbfaff;
+  color: #554c6c;
+  font-size: 13px;
+}
+
 
 .receiving-header label {
   flex: 1 1 190px;
@@ -5528,7 +5541,7 @@ td.strong {
 
 .receiving-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 1px;
   overflow: hidden;
   margin-top: 16px;
@@ -5740,7 +5753,7 @@ td.strong {
   }
 
   .receiving-summary {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .receiving-header {
@@ -5761,75 +5774,205 @@ td.strong {
     min-height: 46px;
   }
 
-  .receiving-lines .card-heading {
+  .receiving-lines .card-heading,
+  .receiving-history .card-heading {
     align-items: flex-start;
     gap: 14px;
   }
 
-  .receiving-lines .table-scroll {
-    overflow: visible;
+  .receiving-lines .table-scroll,
+  .receiving-history .table-scroll,
+  .receiving-detail .table-scroll {
+    overflow-x: visible !important;
     padding: 0 14px 16px;
+    width: 100% !important;
+    box-sizing: border-box;
   }
 
   .receiving-lines table,
   .receiving-lines tbody,
   .receiving-lines tr,
-  .receiving-lines td {
+  .receiving-lines td,
+  .receiving-history table,
+  .receiving-history tbody,
+  .receiving-history tr,
+  .receiving-history td,
+  .receiving-detail .table-scroll table,
+  .receiving-detail .table-scroll tbody,
+  .receiving-detail .table-scroll tr,
+  .receiving-detail .table-scroll td {
     display: block;
-    width: 100%;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
   }
 
-  .receiving-lines thead {
-    display: none;
+  .receiving-lines thead,
+  .receiving-history thead,
+  .receiving-detail .table-scroll thead {
+    display: none !important;
   }
 
-  .receiving-lines tbody tr {
+  .receiving-lines tbody tr,
+  .receiving-history tbody tr,
+  .receiving-detail .table-scroll tbody tr {
     margin-top: 14px;
-    padding: 14px;
-    border: 1px solid #e7e4ec;
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
     background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   }
 
-  .receiving-lines tbody td {
-    display: grid;
-    grid-template-columns: minmax(105px, 0.8fr) minmax(0, 1.2fr);
-    align-items: center;
-    gap: 12px;
-    padding: 8px 0;
-    border: 0;
+  /* Mal Kabul Geçmişi Mobil Kart Stilleri */
+  .receiving-history tbody td,
+  .receiving-detail .table-scroll tbody td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 9px 0 !important;
+    border: 0 !important;
+    border-bottom: 1px dashed #f1f5f9 !important;
+    height: auto !important;
+    min-height: auto !important;
     text-align: right;
+    box-sizing: border-box;
+  }
+
+  .receiving-history tbody td:last-child,
+  .receiving-detail .table-scroll tbody td:last-child {
+    border-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .receiving-history tbody td[data-label]::before,
+  .receiving-detail .table-scroll tbody td[data-label]::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: left;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .receiving-history tbody td .receiving-cell-value,
+  .receiving-detail .table-scroll tbody td .receiving-cell-value {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    font-size: 13px;
+    color: #1e293b;
+    word-break: break-word;
+  }
+
+  .receiving-history tbody td.receiving-line-action {
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 8px;
+    padding-top: 10px !important;
+    width: 100% !important;
+  }
+
+  /* Mal Kabul Satırları Formu Mobil Stilleri */
+  .receiving-lines tbody td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 9px 0 !important;
+    border: 0 !important;
+    border-bottom: 1px dashed #f1f5f9 !important;
+    height: auto !important;
+    min-height: auto !important;
+    text-align: right;
+    box-sizing: border-box;
+  }
+
+  .receiving-lines tbody td:last-child {
+    border-bottom: 0 !important;
+    padding-bottom: 0 !important;
   }
 
   .receiving-lines tbody td[data-label]::before {
     content: attr(data-label);
-    color: #777783;
+    color: #64748b;
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     text-align: left;
     text-transform: uppercase;
+    flex-shrink: 0;
   }
 
-  .receiving-lines td input,
-  .receiving-lines td select,
-  .receiving-lines td:first-child select {
-    width: 100%;
-    min-width: 0;
+  .receiving-lines tbody td.cell-ingredient {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 6px;
+  }
+
+  .receiving-lines tbody td.cell-ingredient select {
+    width: 100% !important;
     min-height: 42px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    font-size: 13px;
+    background: #fff;
   }
 
-  .receiving-quantity {
-    justify-content: flex-end;
+  .receiving-lines tbody td.cell-quantity,
+  .receiving-lines tbody td.cell-price,
+  .receiving-lines tbody td.cell-total {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
   }
 
-  .receiving-quantity input {
-    flex: 1;
+  .receiving-lines tbody td.cell-quantity .receiving-quantity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+  }
+
+  .receiving-lines tbody td.cell-quantity input {
+    width: 85px !important;
+    min-height: 38px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    text-align: right;
+    font-size: 13px;
+    padding: 4px 8px;
+    background: #fff;
+  }
+
+  .receiving-lines tbody td.cell-price input {
+    width: 110px !important;
+    min-height: 38px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    text-align: right;
+    font-size: 13px;
+    padding: 4px 8px;
+    background: #fff;
+  }
+
+  .receiving-lines tbody td.cell-total strong {
+    font-size: 14px;
+    color: #0f172a;
   }
 
   .receiving-lines tbody td.receiving-line-action {
-    display: flex;
-    justify-content: flex-end;
+    display: flex !important;
+    justify-content: flex-end !important;
+    padding-top: 6px !important;
+    width: 100% !important;
   }
 
   .receiving-quick {

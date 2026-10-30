@@ -144,16 +144,18 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - Hammadde listesi, kritik stok uyarıları, reçete tanımları ve fiziksel sayım onay kilitleri PostgreSQL'e bağlıdır.
   - Mal kabul taslağı ve onayı çalışır; onay stok girişini ve tedarikçi borcunu atomik olarak oluşturur. Tedarikçiye iade ayrı ters kayıtla çalışır.
   - Gerekçeli fire/zayi kaydı stoğu `waste_loss` hareketiyle düşürür. Fire ekranında fiyat veya maliyet bilgisi istenmez.
-  - Eksik teslim düzeltmesinin backend ve geçmiş kayıtları korunur; yeni düzeltme formu mal kabul panelinden kaldırılmıştır.
+  - Reçeteli ürün zayisi aktif reçete sürümünü snapshot alır ve tüm bileşenleri atomik olarak stoktan düşürür.
+  - Fiyat içermeyen satın alma siparişi taslak/onay akışı, onaylı siparişin aynı miktarlarla tek seferde mal kabule bağlanması ve tamamlanması çalışır.
+  - Onaylı mal kabul belgesinde eksik teslim düzeltmesi (`purchase_correction`) ve tedarikçiye iade (`supplier_return`) formları arayüzden çalıştırılabilir.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
   - Satış yapıldığında hammadde stoktan otomatik düşmemektedir (reçete tüketim motoru yoktur).
-  - Satın alma talebi/siparişi ve mal kabulün siparişle eşleştirilmesi yoktur.
-  - Gerçek şef PIN onayı ve reçeteli ürün zayisi yoktur.
+  - Satın alma talebi yoktur; siparişte kısmi teslim bilinçli olarak desteklenmez.
+  - Gerçek şef PIN onayı yoktur.
   - Fiyatlandırma, stok maliyeti ve parasal zayi raporu ayrı modül kararına ertelenmiştir.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. Adisyon kapandığında reçetedeki gramajları stok hareketlerinden otomatik düşen `recipe_consumption` motoru.
   2. Gerçek kimlik/yetkilendirme tamamlandığında fire ve kritik stok işlemlerine rol/PIN denetimi bağlanması.
-  3. Satın alma talebi ve siparişiyle mal kabul eşleştirmesi.
+  3. Kritik stoktan satın alma talebi oluşturma ve onaylı talebi siparişe dönüştürme.
   4. Fiyatlandırma ve maliyet alanının ayrı sözleşmeyle tasarlanması.
 
 ---

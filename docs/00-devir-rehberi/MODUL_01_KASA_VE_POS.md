@@ -94,7 +94,7 @@ graph TD
 ### 3. Faz: Gün İçi Yönetici Müdahaleleri (Manager Interventions)
 * **Kasaya Bozuk Para Takviyesi (`cash_float_in`):** Gün içinde 5 TL, 10 TL, 20 TL gibi bozuk paralar bittiğinde, yönetici çekmeceye takviye yapar. Bu tutar **satış cirosuna karışmaz**, avans takviyesi olarak izlenir.
 * **Kasadan Hasılat Teslim Alma (`safe_drop`):** Yoğun saatlerde çekmecede 30.000 - 50.000 TL gibi yüksek nakit biriktiğinde güvenlik riski doğar. Yönetici kasadan 30.000 TL teslim alıp çelik kasaya kaldırır.
-* **Tedarikçiye Kasadan Ödeme (Tediye / Cari Kapama):** Dükkana et toptancısı veya manav geldiğinde fatura nakit ödenmek istenirse; yönetici ekranda hangi kasada ne kadar nakit olduğunu görür. İlgili kasayı seçip `3.500 TL` nakit çıkışı yapar. Bu işlem hem kasadan nakit düşer, hem de tedarikçinin Cari borcunu anında kapatır.
+* **Tedarikçiye Kasadan Ödeme (Tediye / Cari Kapama):** Dükkana et toptancısı veya manav geldiğinde fatura nakit ödenmek istenirse; yönetici ekranda hangi kasada ne kadar nakit olduğunu görür. İlgili kasayı seçip `3.500 TL` nakit çıkışı yapar. Bu işlem hem kasadan nakit düşer, hem de tedarikçinin Cari borcunu anında kapatır. *(Not: Bu akış, Modül 5 Mal Kabul onay modalında da doğrudan desteklenmektedir; onay anında açık kasalar ve çekmecedeki nakitler listelenir, tek veya parçalı seçimle `manual_out` nakit çıkışı ve `supplier_payment` cari hareketi atomik işlenir).*
 * **Kasalar Arası Transfer:** Bahçe kasasında nakit bittiğinde Ana Kasadan Bahçe Kasasına para aktarımı yapılır.
 
 ### 4. Faz: Çoklu Kasa & Kasada Kim Var?

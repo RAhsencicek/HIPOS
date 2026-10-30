@@ -16,8 +16,8 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Çalışıyor** | Taslak ve onay ile tedarikçiye iade kalıcıdır; eksik teslim düzeltmesinin backend/geçmişi korunur, yeni form panelde yoktur |
-| **Fire kaydı** | **Çalışıyor** | Gerekçeli kayıt ve `waste_loss` stok çıkışı kalıcıdır; gerçek şef PIN onayı yoktur |
+| **Satın alma / mal kabul** | **Çalışıyor** | Fiyatsız sipariş taslak/onayı tek teslimle mal kabule bağlanır; mal kabul stok+cari etkisi, eksik teslim düzeltmesi ve tedarikçiye iade kalıcıdır |
+| **Fire kaydı** | **Çalışıyor** | Hammadde ve reçeteli ürün zayisi kalıcı, idempotent ve atomik `waste_loss` çıkışları oluşturur; gerçek şef PIN onayı yoktur |
 | **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır; fire kaydını engellemez |
 
 ---
@@ -43,6 +43,8 @@ Durum: 8 Ekim 2026. Bu belge mevcut reçete/stok/sayım MVP'sinin üzerine gelec
 - Fire/zayi kaydı hammadde, miktar, kontrollü neden türü ve açıklama taşır. Kayıt ile bağlı negatif `waste_loss` hareketi aynı işlemde oluşur; açık sayım ve yetersiz stok kaydı engeller. Aynı istek kimliğinin tekrarı çift stok düşümü üretmez.
 - Fire kaydı mevcut demo yönetici aktörünü denetim izine yazar. Şef PIN doğrulaması gerçek auth bulunmadığı için bu dilimde uygulanmış gibi gösterilmez.
 - Fire/zayi kaydı fiyat veya maliyet bilgisi gerektirmez. Daha önce eklenmiş maliyet alanları veri kaybı yaratmamak için şemada korunur; yeni fiyatlandırma/maliyet modülü kararı verilene kadar fire ekranında gösterilmez ve yeni kaydı engellemez.
+- Reçeteli ürün zayisi kayıt anındaki en güncel reçete sürümünü, ürün adını, porsiyon sayısını ve bileşen miktarlarını snapshot alır. Bütün bileşenler aynı işlemde düşer; birim uyuşmazlığı veya tek bir hammaddede yetersiz stok varsa hiçbir hareket yazılmaz. Aynı istek kimliği ikinci düşüm üretmez.
+- Satın alma siparişi fiyat taşımaz; tedarikçi, depo, sipariş numarası/tarihi ve hammadde miktarlarını taşır. Durumları `draft`, `approved`, `completed`dır. Onaylı sipariş yalnız aynı tedarikçi, depo, hammadde kümesi ve miktarlarla tek bir mal kabul taslağına bağlanabilir; kısmi/fazla teslim reddedilir. Gerçekleşen fiyat, iskonto ve KDV mal kabul belgesinde girilir.
 
 ## PostgreSQL sahipliği
 
@@ -92,12 +94,16 @@ Modül tercihleri bağımsız kalır: `inventory.items`, `inventory.recipes`, `i
 
 ## Bu dilimin dışında
 
-Satın alma siparişi, mal kabulün tedarik siparişine bağlanması, depo transferi, barkod, birim dönüşüm tablosu, satıştan otomatik stok tüketimi ve üretim emri yoktur. Fire kaydında gerçek şef PIN onayı ve reçeteli ürün zayisi henüz yoktur; fiyatlandırma/maliyet ayrı modüle ertelenmiştir. `manual_in` yalnızca manuel envanter girişidir; aşağıdaki mal kabul akışı ayrı `receiving` hareketi üretir ve ödeme belgesi değildir.
+Satın alma talebi (öneri havuzundan otomatik talep), şubeler arası depo transferi, barkod okutma, birim dönüşüm tablosu, satıştan otomatik stok tüketimi ve üretim emri bu dilimin dışındadır. Fire kaydında gerçek şef PIN onayı auth modülünü bekler; fiyatlandırma/maliyet ayrı modüle ertelenmiştir. `manual_in` yalnızca manuel envanter girişidir; mal kabul akışı ayrı `receiving` hareketi üretir.
 
-## Mal kabul ilk kalıcı dilimi (26 Ekim 2026)
+## Mal kabul ve satın alma kalıcı dilimi (30 Ekim 2026)
 
 - Mal kabul belgesi önce `draft` durumunda oluşturulur; taslak stok ve cari bakiyeyi değiştirmez.
 - Satırlar miktar, hammadde birimi, KDV hariç birim fiyat, iskonto oranı ve KDV oranı snapshot'ını taşır. Parasal değerler kuruş, oranlar baz puan olarak saklanır; yuvarlama satır bazında yapılır.
-- Onay; `procurement.requests`, `inventory.items` ve `cari.management` açıkken, stok girişleriyle `supplier_debt` cari hareketini tek PostgreSQL transaction'ında oluşturur.
-- Açık depo sayımı varken onay `COUNT_IN_PROGRESS` ile reddedilir. Tekrarlanan aynı onay isteği yeni hareket üretmez.
-- Onaylanmış belge değiştirilemez. Eksik teslim düzeltmesi ve tedarikçiye iade, orijinal belgeye bağlı ayrı ters kayıtlar olarak uygulanır.
+- Satın alma siparişi (`purchase_orders`) fiyat içermez; tedarikçi, depo, sipariş numarası/tarihi ve hammadde miktarlarıyla `draft → approved → completed` akışında çalışır. Mal kabul formu onaylı bir siparişe bağlandığında tüm kalem ve miktarlar birebir aktarılır ve tedarikçi/depo kilitlenir; kısmi veya fazla teslimat `PURCHASE_ORDER_LINES_MISMATCH` ile engellenir. Mal kabul sayfasında sağ üstteki `+ Yeni Satın Alma Siparişi` modalı ile hızlı sipariş oluşturulup anında onaylanabilir.
+- Mal kabul onayında kullanıcıya **Onay ve Ödeme Modalı** sunulur (`paymentMode`):
+  1. `on_account` (Cariye Borç Olarak Yaz — Varsayılan): Stok girişleriyle (`receiving`) birlikte tedarikçinin cari hesabına tam tutar borç (`supplier_debt`) tek PostgreSQL transaction'ında işlenir.
+  2. `immediate_cash` (Hemen Kasadan Nakit Öde): Kullanıcı şubedeki açık kasa vardiyalarını (`cash.shifts`) ve çekmecedeki güncel nakit bakiyelerini görerek tek veya birden çok kasadan parçalı nakit dağıtımı yapabilir. Onay anında stok girişi (`receiving`), tedarikçi borcu (`supplier_debt`), ilgili kasalardan nakit çıkışı (`cash.movements` tür `manual_out`, kategori `expense`) ve cari borcu kapatan tediye hareketi (`cari.movements` tür `supplier_payment`) aynı veritabanı transaction'ında atomik olarak kaydedilir. Kısmi ödeme yapıldığında kalan bakiye tedarikçinin cari hesabında borç kalır; kasadaki nakitten fazla çıkış `INSUFFICIENT_CASH` ile reddedilir.
+- Açık depo sayımı varken mal kabul onayı `COUNT_IN_PROGRESS` ile reddedilir. Tekrarlanan aynı onay isteği yeni hareket üretmez (idempotent).
+- Onaylanan belge değiştirilemez. Eksik teslim düzeltmesi (`purchase_correction` ve `adjustment_decrease`) ile depoya alınmış ürünün fiziken geri gönderilmesi (`supplier_return` ve `adjustment_decrease`) orijinal belge satırına bağlı ters kayıtlar olarak uygulanır ve panelde sunulur.
+- Mobil responsive uyum: Mal kabul satırları ve mal kabul geçmişi tabloları mobil ekranlarda (`max-width: 700px`) taşma yapmayan, hammadde seçimini tam genişlikte açan, etiket ve değerleri hizalı kart düzeninde sunulur.

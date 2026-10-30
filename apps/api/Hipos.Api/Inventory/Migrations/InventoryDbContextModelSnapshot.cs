@@ -375,6 +375,11 @@ namespace Hipos.Api.Inventory.Migrations
                         .HasColumnType("character varying(80)")
                         .HasColumnName("purchase_return_id");
 
+                    b.Property<string>("RecipeWasteLogId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("recipe_waste_log_id");
+
                     b.Property<string>("Unit")
                         .IsRequired()
                         .HasMaxLength(12)
@@ -417,6 +422,10 @@ namespace Hipos.Api.Inventory.Migrations
                     b.HasIndex("PurchaseId", "IngredientId")
                         .IsUnique()
                         .HasFilter("purchase_id IS NOT NULL");
+
+                    b.HasIndex("RecipeWasteLogId", "IngredientId")
+                        .IsUnique()
+                        .HasFilter("recipe_waste_log_id IS NOT NULL");
 
                     b.HasIndex("FirmId", "BranchId", "WarehouseId", "IngredientId", "CreatedAt");
 
@@ -680,6 +689,153 @@ namespace Hipos.Api.Inventory.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseOrderLineRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("IngredientId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<string>("PurchaseOrderId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_order_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IngredientId");
+
+                    b.HasIndex("PurchaseOrderId", "IngredientId")
+                        .IsUnique();
+
+                    b.ToTable("purchase_order_lines", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_order_line_quantity", "quantity > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseOrderRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApprovalRequestId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("approval_request_id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("CompletedByPurchaseId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("completed_by_purchase_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<DateOnly>("OrderDate")
+                        .HasColumnType("date")
+                        .HasColumnName("order_date");
+
+                    b.Property<string>("OrderNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("order_number");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("SupplierCariId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("supplier_cari_id");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.Property<string>("WarehouseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovalRequestId")
+                        .IsUnique()
+                        .HasFilter("approval_request_id IS NOT NULL");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("FirmId", "BranchId", "OrderNumber")
+                        .IsUnique();
+
+                    b.ToTable("purchase_orders", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_purchase_order_status", "status IN ('draft', 'approved', 'completed')");
+
+                            t.HasCheckConstraint("ck_purchase_order_version", "version > 0");
+                        });
+                });
+
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseReturnRow", b =>
                 {
                     b.Property<string>("Id")
@@ -848,6 +1004,11 @@ namespace Hipos.Api.Inventory.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("firm_id");
 
+                    b.Property<string>("PurchaseOrderId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("purchase_order_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -888,6 +1049,10 @@ namespace Hipos.Api.Inventory.Migrations
                     b.HasIndex("ApprovalRequestId")
                         .IsUnique()
                         .HasFilter("approval_request_id IS NOT NULL");
+
+                    b.HasIndex("PurchaseOrderId")
+                        .IsUnique()
+                        .HasFilter("purchase_order_id IS NOT NULL");
 
                     b.HasIndex("WarehouseId");
 
@@ -992,6 +1157,129 @@ namespace Hipos.Api.Inventory.Migrations
                     b.ToTable("recipes", "inventory", t =>
                         {
                             t.HasCheckConstraint("ck_recipe_version", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeWasteLineRow", b =>
+                {
+                    b.Property<string>("RecipeWasteLogId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("recipe_waste_log_id");
+
+                    b.Property<string>("IngredientId")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("unit");
+
+                    b.HasKey("RecipeWasteLogId", "IngredientId");
+
+                    b.HasIndex("IngredientId");
+
+                    b.ToTable("recipe_waste_lines", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_recipe_waste_line_quantity", "quantity > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeWasteLogRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<decimal>("Portions")
+                        .HasPrecision(18, 3)
+                        .HasColumnType("numeric(18,3)")
+                        .HasColumnName("portions");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("product_name");
+
+                    b.Property<string>("ReasonType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("reason_type");
+
+                    b.Property<string>("RecipeId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("recipe_id");
+
+                    b.Property<int>("RecipeVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("recipe_version");
+
+                    b.Property<string>("ReportedBy")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("reported_by");
+
+                    b.Property<string>("WarehouseId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("warehouse_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipeId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("FirmId", "BranchId", "WarehouseId", "CreatedAt");
+
+                    b.ToTable("recipe_waste_logs", "inventory", t =>
+                        {
+                            t.HasCheckConstraint("ck_recipe_waste_portions", "portions > 0");
+
+                            t.HasCheckConstraint("ck_recipe_waste_reason", "reason_type IN ('spoilage', 'expired', 'spill_breakage', 'burn', 'quality_control')");
+
+                            t.HasCheckConstraint("ck_recipe_waste_version", "recipe_version > 0");
                         });
                 });
 
@@ -1204,6 +1492,11 @@ namespace Hipos.Api.Inventory.Migrations
                         .HasForeignKey("PurchaseReturnId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Hipos.Api.Inventory.InventoryRecipeWasteLogRow", null)
+                        .WithMany()
+                        .HasForeignKey("RecipeWasteLogId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -1261,6 +1554,30 @@ namespace Hipos.Api.Inventory.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseOrderLineRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseOrderRow", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseOrderRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseReturnRow", b =>
                 {
                     b.HasOne("Hipos.Api.Inventory.InventoryPurchaseRow", null)
@@ -1278,6 +1595,11 @@ namespace Hipos.Api.Inventory.Migrations
 
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseRow", b =>
                 {
+                    b.HasOne("Hipos.Api.Inventory.InventoryPurchaseOrderRow", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -1309,6 +1631,36 @@ namespace Hipos.Api.Inventory.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeWasteLineRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryRecipeWasteLogRow", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("RecipeWasteLogId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeWasteLogRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Inventory.InventoryRecipeRow", null)
+                        .WithMany()
+                        .HasForeignKey("RecipeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Inventory.InventoryWarehouseRow", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryWasteLogRow", b =>
                 {
                     b.HasOne("Hipos.Api.Inventory.InventoryIngredientRow", null)
@@ -1329,6 +1681,11 @@ namespace Hipos.Api.Inventory.Migrations
                     b.Navigation("Lines");
                 });
 
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseOrderRow", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryPurchaseRow", b =>
                 {
                     b.Navigation("Corrections");
@@ -1339,6 +1696,11 @@ namespace Hipos.Api.Inventory.Migrations
                 });
 
             modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeRow", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Inventory.InventoryRecipeWasteLogRow", b =>
                 {
                     b.Navigation("Lines");
                 });
