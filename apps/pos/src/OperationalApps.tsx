@@ -1176,7 +1176,7 @@ export function WaiterApp() {
         tableId && (tableAction === "split" || tableAction === "discount" || tableAction === "payment")
           ? request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(tableId)}`, "pos-single")
           : Promise.resolve(null),
-        tableId ? request<{ items: Order[] }>(ordersPath, "pos-single") : Promise.resolve(null),
+        tableId ? request<{ items: Order[] }>(ordersPath, "manager-single") : Promise.resolve(null),
       ]);
       if (serial !== reloadSerial.current) return;
       const currentId = tableId;
@@ -1386,17 +1386,156 @@ export function WaiterApp() {
     setRetryOrderId(null); closeCustomization();
   }
 
+  const [printingBill, setPrintingBill] = useState(false);
+  const [settlingTable, setSettlingTable] = useState<"NAKIT" | "KART" | null>(null);
+  const [testPrinting, setTestPrinting] = useState<string | null>(null);
+
+  async function printBillForTable() {
+    if (!selectedTable?.assignment || printingBill) return;
+    setPrintingBill(true); setError(""); setNotice("");
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/service/tables/${encodeURIComponent(selectedTable.id)}/print-bill`,
+        "pos-single", { openCashDrawer: false }
+      );
+      setNotice(`${selectedTable.name} için ara hesap fişi basıldı (${res.transportUsed}).`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Hesap fişi yazdırılamadı.");
+    } finally {
+      setPrintingBill(false);
+    }
+  }
+
+  async function settleTable(paymentMethod: "NAKIT" | "KART") {
+    if (!selectedTable?.assignment || settlingTable) return;
+    setSettlingTable(paymentMethod); setError(""); setNotice("");
+    try {
+      const res = await request<{ success: boolean; tableId: string; paymentMethod: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/service/tables/${encodeURIComponent(selectedTable.id)}/settle`,
+        "pos-single",
+        { paymentMethod }
+      );
+      setNotice(`✅ ${selectedTable.name} hesabı kapatıldı (${paymentMethod === "NAKIT" ? "Nakit" : "Kredi Kartı"}), kasa fişi basıldı (${res.transportUsed}) ve masa boşaltıldı!`);
+      // Masayı hemen yerel listede de boşa düşür
+      setTables((current) => current.map((table) => table.id === selectedTable.id ? {
+        ...table,
+        status: "idle",
+        assignment: undefined,
+        group: undefined,
+        reservedFor: null,
+        reservationGuestName: null
+      } : table));
+      setTableId("");
+      setCart([]);
+      setRetryOrderId(null);
+      setKitchenItems([]);
+      setRefreshTick((tick) => tick + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Hesap kapatılamadı.");
+    } finally {
+      setSettlingTable(null);
+    }
+  }
+
+  const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
+  const [printerConfig, setPrinterConfig] = useState({
+    kitchenIp: "192.168.1.116",
+    kitchenPort: 9100,
+    kitchenType: "Network",
+    cashierType: "Usb"
+  });
+  const [printerSaving, setPrinterSaving] = useState(false);
+
+  async function openPrinterSettings() {
+    setPrinterSettingsOpen(true);
+    try {
+      const res = await request<{
+        kitchenPrinter: { ipAddress: string; port: number; type: string };
+        cashierPrinter: { type: string };
+      }>(`/api/v1/firms/${firmId}/branches/${branchId}/printing/config`, "pos-single");
+      if (res?.kitchenPrinter) {
+        setPrinterConfig({
+          kitchenIp: res.kitchenPrinter.ipAddress ?? "192.168.1.116",
+          kitchenPort: res.kitchenPrinter.port ?? 9100,
+          kitchenType: res.kitchenPrinter.type ?? "Network",
+          cashierType: res.cashierPrinter?.type ?? "Usb"
+        });
+      }
+    } catch {}
+  }
+
+  async function savePrinterConfig() {
+    setPrinterSaving(true); setError("");
+    try {
+      await request(
+        `/api/v1/firms/${firmId}/branches/${branchId}/printing/config`,
+        "pos-single",
+        {
+          kitchenIp: printerConfig.kitchenIp,
+          kitchenPort: Number(printerConfig.kitchenPort) || 9100,
+          kitchenType: printerConfig.kitchenType,
+          cashierType: printerConfig.cashierType,
+          kitchenFallbackToUsb: false,
+          cashierFallbackToUsb: true
+        }
+      );
+      setNotice("✅ Yazıcı ayarları başarıyla kaydedildi!");
+      setPrinterSettingsOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Yazıcı ayarları kaydedilemedi.");
+    } finally {
+      setPrinterSaving(false);
+    }
+  }
+
+  async function triggerTestPrint(target: "kitchen" | "cashier") {
+    if (testPrinting) return;
+    setTestPrinting(target); setError(""); setNotice("");
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/printing/test?target=${target}`,
+        "pos-single", {}
+      );
+      setNotice(`${target === "kitchen" ? "Mutfak" : "Kasa"} test fişi başarıyla gönderildi (${res.transportUsed}).`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Test fişi gönderilemedi.");
+    } finally {
+      setTestPrinting(null);
+    }
+  }
+
   async function sendOrder() {
     if (!selectedTable || !waiter || cartRows.length === 0 || saving) return;
     setSaving(true); setError(""); setNotice("");
     try {
       const orderId = retryOrderId ?? createRequestId();
       setRetryOrderId(orderId);
+      const itemsPayload = cartRows.map((item) => {
+        const optionNotes = (item.options ?? []).map((o) => `${o.groupName}: ${o.optionName}`).filter(Boolean).join(", ");
+        const combinedNote = [item.note, optionNotes].filter(Boolean).join(" · ");
+        return {
+          productId: item.id,
+          quantity: item.quantity,
+          note: combinedNote || null,
+          options: null,
+        };
+      });
       const result = await request<{ order: { id: string }; table: string; waiter: string }>(
         `${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/orders`, "pos-single",
-        { orderId, waiterId: waiter.id, items: cartRows.map((item) => ({ productId: item.id, quantity: item.quantity, note: item.note || null, options: item.options.map(option => ({ groupId: option.groupId, optionId: option.optionId, quantity: option.quantity })) })) });
+        { orderId, waiterId: waiter.id, items: itemsPayload });
+      
+      let kitchenPrintNotice = "";
+      try {
+        const printRes = await request<{ success: boolean; transportUsed: string }>(
+          `/api/v1/firms/${firmId}/branches/${branchId}/sales/orders/${result.order.id}/print-kitchen`, "pos-single", {}
+        );
+        kitchenPrintNotice = ` 🖨️ Mutfak fişi yazdırıldı (${printRes.transportUsed})!`;
+      } catch {
+        kitchenPrintNotice = " (Mutfak yazıcısına ulaşılamadı)";
+      }
+
       setCart([]); setRetryOrderId(null); setLastOrderId(result.order.id);
-      setNotice(`${result.table} siparişi yönetim ekranına gönderildi. Mutfak kuyruğuna eklendi.`);
+      setNotice(`${result.table} siparişi mutfağa gönderildi.${kitchenPrintNotice}`);
       setRefreshTick((tick) => tick + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Sipariş gönderilemedi."); }
     finally { setSaving(false); }
@@ -1653,7 +1792,7 @@ export function WaiterApp() {
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions">{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
     </section>
@@ -1690,6 +1829,52 @@ export function WaiterApp() {
         <footer><button type="button" className="waiter-cancel-custom" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={tableActionsBlocked || !reservationGuestName.trim() || !reservationDate}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaydet"}</button></footer>
       </form>}
     </dialog>
+    <dialog open={printerSettingsOpen} className="waiter-reservation-dialog" aria-labelledby="printer-settings-title" onClose={() => setPrinterSettingsOpen(false)}>
+      {printerSettingsOpen && <form className="waiter-custom-modal" onSubmit={(e) => { e.preventDefault(); void savePrinterConfig(); }}>
+        <header>
+          <div>
+            <span className="ops-eyebrow">DONANIM & YAZICI MİMARİSİ</span>
+            <h2 id="printer-settings-title">Yazıcı Yapılandırması</h2>
+          </div>
+          <button type="button" className="waiter-modal-close" onClick={() => setPrinterSettingsOpen(false)} aria-label="Kapat">×</button>
+        </header>
+
+        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🍳 Mutfak Yazıcısı (Ağ / Windows PC)</h3>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Windows bilgisayara bağlı termal yazıcı veya doğrudan ağ yazıcısı.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
+            <label className="waiter-note-field">IP Adresi
+              <input value={printerConfig.kitchenIp} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenIp: e.target.value }))} placeholder="192.168.1.116" />
+            </label>
+            <label className="waiter-note-field">Port
+              <input type="number" value={printerConfig.kitchenPort} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenPort: Number(e.target.value) || 9100 }))} placeholder="9100" />
+            </label>
+          </div>
+          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#e0f2fe", borderColor: "#bae6fd" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>
+            {testPrinting === "kitchen" ? "Deneniyor…" : "🧪 Mutfak Test Fişi Gönder"}
+          </button>
+        </section>
+
+        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🧾 Kasa / Adisyon Yazıcısı (Mac)</h3>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Kasa bilgisayarına (Mac) USB veya ağ ile bağlı termal fiş yazıcısı.</p>
+          <label className="waiter-select">Bağlantı Türü
+            <select value={printerConfig.cashierType} onChange={(e) => setPrinterConfig(c => ({ ...c, cashierType: e.target.value }))}>
+              <option value="Usb">Yerel USB (Gprinter / KodPOS)</option>
+              <option value="Network">Ağ / TCP Soket (Port 9100)</option>
+            </select>
+          </label>
+          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>
+            {testPrinting === "cashier" ? "Deneniyor…" : "🧪 Kasa Test Fişi Gönder"}
+          </button>
+        </section>
+
+        <footer>
+          <button type="button" className="waiter-cancel-custom" onClick={() => setPrinterSettingsOpen(false)}>Kapat</button>
+          <button type="submit" className="ops-primary" disabled={printerSaving}>{printerSaving ? "Kaydediliyor…" : "Ayarları Kaydet"}</button>
+        </footer>
+      </form>}
+    </dialog>
     {selectedTable && <section className="waiter-order-page" aria-live="polite">
       <div className="waiter-order-heading"><div><span className="ops-eyebrow">MASA DETAYI</span><h1>{selectedTable.group ? selectedTable.group.tableNames.join(" + ") : selectedTable.name}</h1>{selectedTable.group && <p className="waiter-group-info">{selectedTable.group.guestCount} kişi · Ana masa: {selectedTable.name} · Ortak adisyon</p>}</div><span className={`waiter-table-status ${getTableStatus(selectedTable) === "bill_requested" ? "bill-requested" : getTableStatus(selectedTable) === "reserved" ? "reserved" : selectedTable.assignment || selectedTable.group ? "occupied" : "empty"}`}>{getTableStatus(selectedTable) === "bill_requested" ? "Hesap istendi" : selectedTable.group ? "Masa grubu" : getTableStatus(selectedTable) === "reserved" ? "Rezerve" : selectedTable.assignment ? "Dolu" : "Boş"}</span></div>
       {getTableStatus(selectedTable) === "reserved" && !selectedTable.assignment && <section className="waiter-reservation-summary" aria-label="Rezervasyon bilgisi"><div><strong>{selectedTable.reservationGuestName ?? "Masa rezerve"}</strong><span>{selectedTable.reservedFor ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "full", timeStyle: "short" }).format(new Date(selectedTable.reservedFor)) : "Rezervasyon saati belirtilmemiş"}</span></div><div className="waiter-state-actions"><button className="waiter-back" disabled={tableActionsBlocked} onClick={openReservation}>Düzenle</button><button className="waiter-state-danger" disabled={tableActionsBlocked} onClick={() => void updateTableStatus("reservation/cancel")}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaldır"}</button></div></section>}
@@ -1698,6 +1883,9 @@ export function WaiterApp() {
         <div className="waiter-context-actions">
           {getTableStatus(selectedTable) === "idle" && !selectedTable.assignment && !selectedTable.group && <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={openReservation}>Rezerve et</button>}
           {selectedTable.assignment && <button className={`waiter-status-action ${getTableStatus(selectedTable) === "bill_requested" ? "active" : ""}`} disabled={tableStatusSaving} onClick={() => void updateTableStatus(getTableStatus(selectedTable) === "bill_requested" ? "cancel-bill-request" : "request-bill")}>{tableStatusSaving ? "Kaydediliyor…" : getTableStatus(selectedTable) === "bill_requested" ? "Hesap isteğini kaldır" : "Hesap istendi"}</button>}
+          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>{printingBill ? "Basılıyor…" : "🧾 Ara Hesap Fişi"}</button>}
+          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>{settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit İle Kapat"}</button>}
+          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>{settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart İle Kapat"}</button>}
           <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={() => openTableAction(selectedTable.group ? "ungroup" : "group")}>{selectedTable.group ? "Grubu Ayır" : "Masa Grubu Oluştur"}</button>
         </div>
       </div>}
@@ -1739,6 +1927,17 @@ export function WaiterApp() {
         {selectedTable.assignment && <div><span>Mevcut adisyon</span><strong>{money(selectedTable.assignment.totalMinor)}</strong></div>}
         <div className={`new-order${selectedTable.assignment ? "" : " waiter-order-total-only"}`}><span>{selectedTable.assignment ? "Yeni sipariş" : "Sipariş toplamı"}</span><strong>{money(total)}</strong></div>
       </section>}
+      {selectedTable.assignment && <div className="waiter-checkout-bar" style={{ display: "flex", gap: "10px", marginTop: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <button type="button" className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>
+          {printingBill ? "Baskı alınıyor…" : "🧾 Ara Hesap Fişi Bas"}
+        </button>
+        <button type="button" className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>
+          {settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit Ödeme & Masayı Kapat"}
+        </button>
+        <button type="button" className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>
+          {settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart Ödeme & Masayı Kapat"}
+        </button>
+      </div>}
       {getTableStatus(selectedTable) !== "reserved" && !waiter && <p className="ops-message">Sipariş eklemek için önce garson seçin.</p>}
       {assignedToOtherWaiter && <p className="ops-message">Bu masa {selectedTable.assignment?.waiterName ?? "başka bir garsona"} tarafından yönetiliyor. Sipariş eklemek için o garsonu seçin.</p>}
       {!loading && menuSections.length === 0 && !error && <p className="ops-message">Bu şubede POS’ta kullanılabilir aktif menü bulunmuyor.</p>}
