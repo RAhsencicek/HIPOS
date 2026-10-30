@@ -14,19 +14,74 @@ public sealed class PrintingService(
     ILogger<PrintingService> logger)
 {
     private readonly PrinterConfig _config = config;
+    private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "printer_settings.json");
+    private static readonly object FileLock = new();
 
-    public PrinterConfig GetConfig() => _config;
+    private void EnsureLoaded()
+    {
+        lock (FileLock)
+        {
+            if (File.Exists(SettingsFilePath))
+            {
+                try
+                {
+                    var json = File.ReadAllText(SettingsFilePath);
+                    var loaded = JsonSerializer.Deserialize<PrinterConfig>(json);
+                    if (loaded is not null)
+                    {
+                        if (loaded.KitchenPrinter is not null) _config.KitchenPrinter = loaded.KitchenPrinter;
+                        if (loaded.CashierPrinter is not null) _config.CashierPrinter = loaded.CashierPrinter;
+                        _config.AutoPrintKitchenOnOrder = loaded.AutoPrintKitchenOnOrder;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Yazıcı ayarları dosyası okunamadı: {Path}", SettingsFilePath);
+                }
+            }
+        }
+    }
+
+    public PrinterConfig GetConfig()
+    {
+        EnsureLoaded();
+        return _config;
+    }
 
     public void UpdateConfig(UpdatePrinterConfigRequest request)
     {
+        EnsureLoaded();
         if (!string.IsNullOrWhiteSpace(request.KitchenIp))
-        {
             _config.KitchenPrinter.IpAddress = request.KitchenIp.Trim();
-            _config.KitchenPrinter.FallbackToUsb = false;
+        if (request.KitchenPort is > 0)
+            _config.KitchenPrinter.Port = request.KitchenPort.Value;
+        if (!string.IsNullOrWhiteSpace(request.KitchenType))
+            _config.KitchenPrinter.Type = request.KitchenType.Trim();
+        if (request.KitchenFallbackToUsb.HasValue)
+            _config.KitchenPrinter.FallbackToUsb = request.KitchenFallbackToUsb.Value;
+
+        if (!string.IsNullOrWhiteSpace(request.CashierIp))
+            _config.CashierPrinter.IpAddress = request.CashierIp.Trim();
+        if (request.CashierPort is > 0)
+            _config.CashierPrinter.Port = request.CashierPort.Value;
+        if (!string.IsNullOrWhiteSpace(request.CashierType))
+            _config.CashierPrinter.Type = request.CashierType.Trim();
+        if (request.CashierFallbackToUsb.HasValue)
+            _config.CashierPrinter.FallbackToUsb = request.CashierFallbackToUsb.Value;
+
+        lock (FileLock)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(_config, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(SettingsFilePath, json);
+                logger.LogInformation("Yazıcı ayarları başarıyla kaydedildi: {Path}", SettingsFilePath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Yazıcı ayarları kaydedilemedi: {Path}", SettingsFilePath);
+            }
         }
-        if (request.KitchenPort is > 0) _config.KitchenPrinter.Port = request.KitchenPort.Value;
-        if (!string.IsNullOrWhiteSpace(request.CashierIp)) _config.CashierPrinter.IpAddress = request.CashierIp.Trim();
-        if (request.CashierPort is > 0) _config.CashierPrinter.Port = request.CashierPort.Value;
     }
 
     public async Task<PrintResult> PrintKitchenOrderAsync(

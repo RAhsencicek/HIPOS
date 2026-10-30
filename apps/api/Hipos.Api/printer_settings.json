@@ -1,0 +1,17 @@
+{
+  "CashierPrinter": {
+    "Name": "Kasa Yazıcısı (Mac USB)",
+    "Type": "Usb",
+    "IpAddress": "127.0.0.1",
+    "Port": 9100,
+    "FallbackToUsb": true
+  },
+  "KitchenPrinter": {
+    "Name": "Mutfak Yazıcısı (Windows PC)",
+    "Type": "Network",
+    "IpAddress": "192.168.1.116",
+    "Port": 9100,
+    "FallbackToUsb": false
+  },
+  "AutoPrintKitchenOnOrder": true
+}

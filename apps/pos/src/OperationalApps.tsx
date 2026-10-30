@@ -420,6 +420,57 @@ export function WaiterApp() {
     }
   }
 
+  const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
+  const [printerConfig, setPrinterConfig] = useState({
+    kitchenIp: "192.168.1.116",
+    kitchenPort: 9100,
+    kitchenType: "Network",
+    cashierType: "Usb"
+  });
+  const [printerSaving, setPrinterSaving] = useState(false);
+
+  async function openPrinterSettings() {
+    setPrinterSettingsOpen(true);
+    try {
+      const res = await request<{
+        kitchenPrinter: { ipAddress: string; port: number; type: string };
+        cashierPrinter: { type: string };
+      }>(`/api/v1/firms/${firmId}/branches/${branchId}/printing/config`, "pos-single");
+      if (res?.kitchenPrinter) {
+        setPrinterConfig({
+          kitchenIp: res.kitchenPrinter.ipAddress ?? "192.168.1.116",
+          kitchenPort: res.kitchenPrinter.port ?? 9100,
+          kitchenType: res.kitchenPrinter.type ?? "Network",
+          cashierType: res.cashierPrinter?.type ?? "Usb"
+        });
+      }
+    } catch {}
+  }
+
+  async function savePrinterConfig() {
+    setPrinterSaving(true); setError("");
+    try {
+      await request(
+        `/api/v1/firms/${firmId}/branches/${branchId}/printing/config`,
+        "pos-single",
+        {
+          kitchenIp: printerConfig.kitchenIp,
+          kitchenPort: Number(printerConfig.kitchenPort) || 9100,
+          kitchenType: printerConfig.kitchenType,
+          cashierType: printerConfig.cashierType,
+          kitchenFallbackToUsb: false,
+          cashierFallbackToUsb: true
+        }
+      );
+      setNotice("✅ Yazıcı ayarları başarıyla kaydedildi!");
+      setPrinterSettingsOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Yazıcı ayarları kaydedilemedi.");
+    } finally {
+      setPrinterSaving(false);
+    }
+  }
+
   async function triggerTestPrint(target: "kitchen" | "cashier") {
     if (testPrinting) return;
     setTestPrinting(target); setError(""); setNotice("");
@@ -650,7 +701,7 @@ export function WaiterApp() {
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
     </section>
@@ -681,6 +732,52 @@ export function WaiterApp() {
         {reservationDate && !Number.isNaN(new Date(reservationDate).getTime()) && <p className="waiter-reservation-preview">{new Intl.DateTimeFormat("tr-TR", { dateStyle: "full", timeStyle: "short" }).format(new Date(reservationDate))}</p>}
         {tableStatusError && <p className="ops-error" role="alert">{tableStatusError}</p>}
         <footer><button type="button" className="waiter-cancel-custom" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={tableActionsBlocked || !reservationGuestName.trim() || !reservationDate}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaydet"}</button></footer>
+      </form>}
+    </dialog>
+    <dialog open={printerSettingsOpen} className="waiter-reservation-dialog" aria-labelledby="printer-settings-title" onClose={() => setPrinterSettingsOpen(false)}>
+      {printerSettingsOpen && <form className="waiter-custom-modal" onSubmit={(e) => { e.preventDefault(); void savePrinterConfig(); }}>
+        <header>
+          <div>
+            <span className="ops-eyebrow">DONANIM & YAZICI MİMARİSİ</span>
+            <h2 id="printer-settings-title">Yazıcı Yapılandırması</h2>
+          </div>
+          <button type="button" className="waiter-modal-close" onClick={() => setPrinterSettingsOpen(false)} aria-label="Kapat">×</button>
+        </header>
+
+        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🍳 Mutfak Yazıcısı (Ağ / Windows PC)</h3>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Windows bilgisayara bağlı termal yazıcı veya doğrudan ağ yazıcısı.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
+            <label className="waiter-note-field">IP Adresi
+              <input value={printerConfig.kitchenIp} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenIp: e.target.value }))} placeholder="192.168.1.116" />
+            </label>
+            <label className="waiter-note-field">Port
+              <input type="number" value={printerConfig.kitchenPort} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenPort: Number(e.target.value) || 9100 }))} placeholder="9100" />
+            </label>
+          </div>
+          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#e0f2fe", borderColor: "#bae6fd" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>
+            {testPrinting === "kitchen" ? "Deneniyor…" : "🧪 Mutfak Test Fişi Gönder"}
+          </button>
+        </section>
+
+        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🧾 Kasa / Adisyon Yazıcısı (Mac)</h3>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Kasa bilgisayarına (Mac) USB veya ağ ile bağlı termal fiş yazıcısı.</p>
+          <label className="waiter-select">Bağlantı Türü
+            <select value={printerConfig.cashierType} onChange={(e) => setPrinterConfig(c => ({ ...c, cashierType: e.target.value }))}>
+              <option value="Usb">Yerel USB (Gprinter / KodPOS)</option>
+              <option value="Network">Ağ / TCP Soket (Port 9100)</option>
+            </select>
+          </label>
+          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>
+            {testPrinting === "cashier" ? "Deneniyor…" : "🧪 Kasa Test Fişi Gönder"}
+          </button>
+        </section>
+
+        <footer>
+          <button type="button" className="waiter-cancel-custom" onClick={() => setPrinterSettingsOpen(false)}>Kapat</button>
+          <button type="submit" className="ops-primary" disabled={printerSaving}>{printerSaving ? "Kaydediliyor…" : "Ayarları Kaydet"}</button>
+        </footer>
       </form>}
     </dialog>
     {selectedTable && <section className="waiter-order-page" aria-live="polite">
