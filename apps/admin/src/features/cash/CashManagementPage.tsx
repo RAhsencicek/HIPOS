@@ -7,9 +7,10 @@ import { DemoNotice, MetricCard, PageHeading, StatusPill } from "../../shared/ui
 type Register = { id: string; code: string; name: string; providerMode: string; isActive: boolean };
 type Shift = { id: string; registerId: string; status: "open" | "closed"; openingCashMinor: number;
   expectedCashMinor: number | null; countedCashMinor: number | null; differenceMinor: number | null;
-  openedBy: string; openedAt: string; closedBy: string | null; closedAt: string | null; closeNote: string | null; version: number; openingNote?: string | null };
+  openedBy: string; openedAt: string; closedBy: string | null; closedAt: string | null; closeNote: string | null; version: number; openingNote?: string | null;
+  denominations?: { denominationMinor: number; quantity: number; totalMinor: number }[] };
 type Movement = { id: string; registerId: string; shiftId: string; kind: string; category: string;
-  amountMinor: number; currency: string; description: string; source: string; actor: string; createdAt: string;
+  amountMinor: number; currency: string; description: string; source: string; actor: string; createdAt: string; tenderMethod?: string | null;
   originalMovementId: string | null; correctionType: string | null; correctionReason: string | null };
 type OpenShift = { shift: Shift; cashInMinor: number; cashOutMinor: number; movementCount: number; recentMovements: Movement[] };
 type Overview = { source: string; simulated: boolean; registers: Register[]; openShifts: OpenShift[] };
@@ -18,6 +19,7 @@ type MovementPage = { items: Movement[]; total: number };
 type View = "summary" | "movements" | "shifts" | "opening-closing";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const cashDenominations = [20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5, 1];
 const money = (value: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(value / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 const amountMinor = (value: string) => {
@@ -32,6 +34,7 @@ const titleFor: Record<View, string> = {
   summary: "Kasa özeti", movements: "Kasa hareketleri", shifts: "Kasa vardiyaları", "opening-closing": "Vardiya açılış / kapanış",
 };
 const movementTitle = (movement: Movement) => movement.kind === "opening_float" ? "Açılış nakdi"
+  : movement.kind === "pos_sale" ? `Garson tahsilatı · ${movement.tenderMethod === "card" ? "Kart" : "Nakit"}`
   : movement.kind === "manual_in" ? movement.category === "cash_sale" ? "Nakit satış girişi" : "Nakit girişi"
   : movement.category === "cash_drop" ? "Kasadan teslim" : "Nakit çıkışı";
 
@@ -49,6 +52,7 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
   const [movementAmount, setMovementAmount] = useState("");
   const [movementDescription, setMovementDescription] = useState("");
   const [countedCash, setCountedCash] = useState("");
+  const [denominationCounts, setDenominationCounts] = useState<Record<number, number>>({});
   const [closeNote, setCloseNote] = useState("");
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [correctionReason, setCorrectionReason] = useState("");
@@ -129,12 +133,16 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
     if (!scope || !active) return;
     const countedCashMinor = amountMinor(countedCash);
     if (!Number.isSafeInteger(countedCashMinor)) { setError("Fiziksel sayımı geçerli TL tutarı olarak girin."); return; }
+    const denominations = cashDenominations.filter((denominationMinor) => (denominationCounts[denominationMinor] ?? 0) > 0)
+      .map((denominationMinor) => ({ denominationMinor, quantity: denominationCounts[denominationMinor] }));
+    const denominationTotal = denominations.reduce((sum, item) => sum + item.denominationMinor * item.quantity, 0);
+    if (denominationTotal !== countedCashMinor) { setError("Kupür dökümü toplamı kasada sayılan tutarla aynı olmalı."); return; }
     await run(async () => {
       await api(`${scope}/shifts/${encodeURIComponent(active.shift.id)}/close`, "POST", {
         requestId: crypto.randomUUID(), expectedVersion: active.shift.version,
-        countedCashMinor, note: closeNote.trim() || null,
+        countedCashMinor, note: closeNote.trim() || null, denominations,
       });
-      setCountedCash(""); setCloseNote("");
+      setCountedCash(""); setDenominationCounts({}); setCloseNote("");
     }, "Vardiya kapatıldı; sayım farkı ve açıklaması saklandı.");
   }
 
@@ -158,15 +166,15 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
 
   return <>
     <PageHeading eyebrow="KASA · POSTGRESQL" title={titleFor[view]}
-      description="Tek şube için manuel nakit vardiyası. POS, kart tahsilatı ve mali muhasebe bağlantısı bu sürümde yoktur."
+      description="Vardiya nakit bakiyesi ile garson ekranından gelen tahsilat hareketlerini buradan izleyin. Gerçek mali POS bağlantısı henüz yoktur."
       action={<button className="secondary-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={15} /> Yenile</button>} />
-    <DemoNotice>Nakit giriş ve çıkışlarını bu ekrandan elle kaydedebilirsiniz. Başlangıç vardiyaları örnek kayıtlardır. Ödeme denemeleri kasa bakiyesini değiştirmez.</DemoNotice>
+    <DemoNotice>Garson ekranındaki başarılı tahsilatlar otomatik hareket olarak görünür. Nakit tahsilatı beklenen kasa nakdini artırır; kart tahsilatı hareketlerde görünür, nakit bakiyesine eklenmez. Bu sürümde ödeme sonucu simüle edilir.</DemoNotice>
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {loading ? <div className="card empty-list">Kasa kayıtları yükleniyor…</div> : !overview?.registers.length ?
       <div className="card empty-list"><strong>Bu şube için kasa kaydı bulunamadı</strong><span>İlk sürümde demo kurulumuyla tek kasa eklenir; yeni işletme onboarding adımında kasa oluşturulmalıdır.</span></div> : <>
       <div className="inventory-toolbar"><span><Wallet size={16} /> {overview.registers[0].name} · {overview.registers[0].code}</span>
-        <StatusPill tone="blue">Elle takip · POS bağlı değil</StatusPill></div>
+        <StatusPill tone="blue">Manuel kasa · simüle tahsilat bağlı</StatusPill></div>
       {displayView === "summary" && <>
         <div className="metric-grid">
           <MetricCard title="Vardiya" value={active ? "Açık" : "Kapalı"} foot={active ? `Açan: ${active.shift.openedBy}` : "Yeni vardiya açabilirsiniz"} icon={<Banknote size={18} />} />
@@ -211,13 +219,21 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
           {shifts.length ? <div className="cash-shift-list">{shifts.map((shift) => <article key={shift.id}>
             <div><StatusPill tone={shift.status === "open" ? "green" : shift.differenceMinor ? "orange" : "neutral"}>{shift.status === "open" ? "Açık vardiya" : "Kapandı"}</StatusPill><strong>{dateTime(shift.openedAt)}</strong><span>Açan {shift.openedBy}{shift.closedAt ? ` · Kapatan ${shift.closedBy ?? "—"}` : ""}</span>{shift.openingNote && <span>Açılış notu: {shift.openingNote}</span>}</div>
             <div><small>Beklenen</small><b>{money(shift.expectedCashMinor ?? active?.shift.expectedCashMinor ?? shift.openingCashMinor)}</b></div>
-            {shift.status === "closed" && <div><small>Sayılan · fark</small><b>{money(shift.countedCashMinor ?? 0)} · {money(shift.differenceMinor ?? 0)}</b></div>}
+            {shift.status === "closed" && <div><small>Sayılan · fark</small><b>{money(shift.countedCashMinor ?? 0)} · {money(shift.differenceMinor ?? 0)}</b>
+              {!!shift.denominations?.length && <span>Kupür dökümü: {shift.denominations.map((item) => `${money(item.denominationMinor)} × ${item.quantity}`).join(" · ")}</span>}</div>}
             {shift.closeNote && <p>{shift.closeNote}</p>}
           </article>)}</div> : <div className="empty-list">Henüz kasa vardiyası bulunmuyor.</div>}
         </section>
         {active ? <form className="card cash-panel" onSubmit={(event) => void closeShift(event)}><span className="eyebrow">VARDİYA KAPANIŞI</span><h2>Fiziksel nakit sayımı</h2>
-          <p>Beklenen tutar <strong>{money(currentExpected)}</strong>. Kapanış sayımı stok hareketi yaratmaz; farkı ayrı saklar.</p>
-          <label>Kasada sayılan (TL)<input inputMode="decimal" value={countedCash} onChange={(event) => setCountedCash(event.target.value)} placeholder="0,00" /></label>
+          <p>Beklenen tutar <strong>{money(currentExpected)}</strong>. Bu şubede açık adisyon varken vardiya kapatılamaz; önce masa ve hızlı satış adisyonlarını kapatın.</p>
+          <fieldset className="cash-denomination-grid"><legend>Kupür sayımı</legend>{cashDenominations.map((denomination) => <label key={denomination}>{money(denomination)}<input type="number" min="0" max="1000000" step="1" inputMode="numeric" value={denominationCounts[denomination] ?? ""} onChange={(event) => {
+            const quantity = Math.max(0, Math.min(1000000, Math.floor(Number(event.target.value) || 0)));
+            const next = { ...denominationCounts, [denomination]: quantity };
+            setDenominationCounts(next);
+            const total = cashDenominations.reduce((sum, unit) => sum + unit * (next[unit] ?? 0), 0);
+            setCountedCash(`${Math.floor(total / 100)},${String(total % 100).padStart(2, "0")}`);
+          }} /></label>)}</fieldset>
+          <label>Kasada sayılan (TL)<input inputMode="decimal" value={countedCash} readOnly aria-readonly="true" /></label>
           <label>Fark açıklaması (fark varsa zorunlu)<textarea rows={3} value={closeNote} onChange={(event) => setCloseNote(event.target.value)} placeholder="Sayım farkı nedenini açıklayın" /></label>
           <button className="primary-button" disabled={busy}>Say ve vardiyayı kapat</button>
         </form> : <form className="card cash-open-form" onSubmit={(event) => void openShift(event)}><span className="eyebrow">VARDİYA AÇILIŞI</span><h2>Yeni kasa vardiyası başlat</h2>
@@ -236,8 +252,8 @@ function CashMovementList({ items, onCorrect }: { items: Movement[]; onCorrect?:
     <span className={`cash-movement-icon ${item.kind === "manual_out" ? "out" : "in"}`}>{item.kind === "manual_out" ? <ArrowUpRight size={16} /> : <ArrowDownLeft size={16} />}</span>
     <div><strong>{item.correctionType === "reversal" ? "Ters kayıt düzeltmesi" : movementTitle(item)}</strong>
       <span>{item.correctionType === "reversal" ? item.correctionReason : item.description}</span>
-      <small>{dateTime(item.createdAt)} · {item.actor} · Elle girildi{item.originalMovementId ? ` · Orijinal: ${item.originalMovementId.slice(0, 8)}` : ""}</small></div>
-    <b className={item.kind === "manual_out" ? "cash-negative" : "cash-positive"}>{item.kind === "manual_out" ? "−" : "+"}{money(item.amountMinor)}</b>
+      <small>{dateTime(item.createdAt)} · {item.actor} · {item.source === "pos" ? "Satıştan otomatik" : "Elle girildi"}{item.originalMovementId ? ` · Orijinal: ${item.originalMovementId.slice(0, 8)}` : ""}</small></div>
+    <b className={item.kind === "pos_sale" && item.tenderMethod === "card" ? "" : item.kind === "manual_out" ? "cash-negative" : "cash-positive"}>{item.kind === "pos_sale" && item.tenderMethod === "card" ? "Kart · " : item.kind === "manual_out" ? "−" : "+"}{money(item.amountMinor)}</b>
     {onCorrect && item.source === "manual" && !item.originalMovementId &&
       (item.kind === "manual_in" || item.kind === "manual_out") && <button className="secondary-button cash-reverse-button"
         onClick={() => onCorrect(item)} aria-label={`${movementTitle(item)} hareketini düzelt`}><RotateCcw size={14} /> Düzelt</button>}

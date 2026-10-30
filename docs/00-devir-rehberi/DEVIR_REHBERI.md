@@ -31,7 +31,7 @@
 >   - Gerçek banka POS / Ödeme sağlayıcısı entegrasyonu
 >   - Beko/Token ÖKC mali cihaz sertifikasyonu ve donanım bağlantısı
 >   - İnternet kesildiğinde çift taraflı çalışan gerçek LAN outbox senkronizasyonu
->   - Satışın kasaya otomatik çift deftersiz akması ve parçalı tahsilat
+>   - Gerçek POS'tan doğrulanmış satış olaylarının kasaya akması ve gerçek ödeme/tahsilat entegrasyonu (Development garson tahsilatının kasa simülasyonuna yazılması artık vardır)
 >   - Operasyonel KDS durum makinesi ve terminal yazıcı servisi
 
 ---

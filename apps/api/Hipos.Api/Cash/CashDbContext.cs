@@ -36,6 +36,18 @@ public sealed class CashShiftRow
     public int Version { get; set; } = 1;
     public CashRegisterRow Register { get; set; } = null!;
     public List<CashMovementRow> Movements { get; set; } = [];
+    public List<CashShiftDenominationRow> Denominations { get; set; } = [];
+}
+
+public sealed class CashShiftDenominationRow
+{
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid RegisterId { get; set; }
+    public Guid ShiftId { get; set; }
+    public int DenominationMinor { get; set; }
+    public int Quantity { get; set; }
+    public CashShiftRow Shift { get; set; } = null!;
 }
 
 public sealed class CashMovementRow
@@ -47,6 +59,7 @@ public sealed class CashMovementRow
     public Guid ShiftId { get; set; }
     public string Kind { get; set; } = "";
     public string Category { get; set; } = "";
+    public string? TenderMethod { get; set; }
     public long AmountMinor { get; set; }
     public string Currency { get; set; } = "TRY";
     public string Description { get; set; } = "";
@@ -85,6 +98,7 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
     public DbSet<CashRegisterRow> Registers => Set<CashRegisterRow>();
     public DbSet<CashShiftRow> Shifts => Set<CashShiftRow>();
     public DbSet<CashMovementRow> Movements => Set<CashMovementRow>();
+    public DbSet<CashShiftDenominationRow> ShiftDenominations => Set<CashShiftDenominationRow>();
     public DbSet<CashAuditRow> Audit => Set<CashAuditRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -147,11 +161,13 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
         {
             entity.ToTable("movements", table =>
             {
-                table.HasCheckConstraint("ck_cash_movement_kind", "kind IN ('opening_float', 'manual_in', 'manual_out')");
+                table.HasCheckConstraint("ck_cash_movement_kind", "kind IN ('opening_float', 'manual_in', 'manual_out', 'pos_sale')");
                 table.HasCheckConstraint("ck_cash_movement_category", "category IN ('opening', 'cash_sale', 'expense', 'cash_drop', 'other')");
                 table.HasCheckConstraint("ck_cash_movement_amount_positive", "amount_minor > 0 OR (kind = 'opening_float' AND amount_minor = 0)");
                 table.HasCheckConstraint("ck_cash_movement_currency", "currency = 'TRY'");
                 table.HasCheckConstraint("ck_cash_movement_source", "source IN ('manual', 'pos')");
+                table.HasCheckConstraint("ck_cash_movement_tender_method", "tender_method IS NULL OR tender_method IN ('cash', 'card')");
+                table.HasCheckConstraint("ck_cash_movement_pos_sale", "kind <> 'pos_sale' OR (source = 'pos' AND category = 'cash_sale' AND tender_method IN ('cash', 'card'))");
                 table.HasCheckConstraint("ck_cash_movement_external_identity",
                     "(source = 'manual' AND provider IS NULL AND external_reference IS NULL AND provider_event_id IS NULL) OR (source = 'pos' AND provider IS NOT NULL AND provider_event_id IS NOT NULL)");
                 table.HasCheckConstraint("ck_cash_movement_correction",
@@ -165,6 +181,7 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.Property(row => row.ShiftId).HasColumnName("shift_id");
             entity.Property(row => row.Kind).HasColumnName("kind").HasMaxLength(24);
             entity.Property(row => row.Category).HasColumnName("category").HasMaxLength(24);
+            entity.Property(row => row.TenderMethod).HasColumnName("tender_method").HasMaxLength(16);
             entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.Description).HasColumnName("description").HasMaxLength(500);
@@ -189,6 +206,26 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.HasOne(row => row.OriginalMovement).WithMany(movement => movement.Corrections)
                 .HasForeignKey(row => new { row.FirmId, row.BranchId, row.RegisterId, row.OriginalMovementId })
                 .HasPrincipalKey(movement => new { movement.FirmId, movement.BranchId, movement.RegisterId, movement.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CashShiftDenominationRow>(entity =>
+        {
+            entity.ToTable("shift_denominations", table =>
+            {
+                table.HasCheckConstraint("ck_cash_shift_denomination_value",
+                    "denomination_minor IN (20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5, 1)");
+                table.HasCheckConstraint("ck_cash_shift_denomination_quantity", "quantity BETWEEN 0 AND 1000000");
+            });
+            entity.HasKey(row => new { row.ShiftId, row.DenominationMinor });
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.RegisterId).HasColumnName("register_id");
+            entity.Property(row => row.ShiftId).HasColumnName("shift_id");
+            entity.Property(row => row.DenominationMinor).HasColumnName("denomination_minor");
+            entity.Property(row => row.Quantity).HasColumnName("quantity");
+            entity.HasOne(row => row.Shift).WithMany(shift => shift.Denominations)
+                .HasForeignKey(row => new { row.FirmId, row.BranchId, row.RegisterId, row.ShiftId })
+                .HasPrincipalKey(shift => new { shift.FirmId, shift.BranchId, shift.RegisterId, shift.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<CashAuditRow>(entity =>

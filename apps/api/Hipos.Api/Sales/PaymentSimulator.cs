@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Hipos.Api.Features;
 using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,7 @@ namespace Hipos.Api.Sales;
 
 // Yalnız Development: burada dış sağlayıcı çağrısı ve gerçek para hareketi yoktur.
 public sealed record StartSimulatedPayment(
-    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion);
+    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false);
 public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion);
 public sealed record PaymentAttemptInfo(
     string Id, string OrderId, long AmountMinor, string Currency, string Method,
@@ -20,8 +21,11 @@ public sealed record PaymentCommandResult(
         new(null, null, new FeatureFailure(code, status, detail), false);
 }
 
-public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate, PaidCheckTableSettlement settlement)
+public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate, PaidCheckTableSettlement settlement,
+    FeatureRuntimeCapabilities runtime)
 {
+    private sealed record CashShiftLink(Guid Id, Guid RegisterId);
+
     public async Task<PaymentCommandResult> StartAsync(
         string firmId, string branchId, Guid orderId, StartSimulatedPayment command,
         string actor, CancellationToken cancellationToken, bool requireCheckCapability = false)
@@ -32,6 +36,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             return PaymentCommandResult.Rejected("INVALID_PAYMENT", 400, "Örnek ödeme alanları geçersiz.");
         if (command.ExpectedOrderVersion < 1)
             return PaymentCommandResult.Rejected("INVALID_VERSION", 400, "expectedOrderVersion pozitif olmalı.");
+        if (command.PostToCash && !runtime.CashReady)
+            return PaymentCommandResult.Rejected("CASH_STORAGE_UNAVAILABLE", 503, "Kasa veritabanı hazır değil; kasa migration'larını uygulayıp API'yi yeniden başlatın.");
 
         var existing = await db.PaymentAttempts.AsNoTracking()
             .FirstOrDefaultAsync(row => row.Id == command.AttemptId, cancellationToken);
@@ -47,6 +53,19 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
                 transaction.GetDbTransaction(), firmId, branchId, "sales.checks", cancellationToken);
             if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+        }
+        CashShiftLink? cashShift = null;
+        if (command.PostToCash)
+        {
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "cash.management", cancellationToken);
+            if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+            var shiftResult = await LockOpenCashShiftAsync(firmId, branchId, transaction.GetDbTransaction(), cancellationToken);
+            if (shiftResult.Count == 0)
+                return PaymentCommandResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın.");
+            if (shiftResult.Count > 1)
+                return PaymentCommandResult.Rejected("CASH_SHIFT_AMBIGUOUS", 409, "Birden fazla açık kasa vardiyası var. Tahsilattan önce yalnız kullanılacak kasanın vardiyasını açık bırakın.");
+            cashShift = shiftResult[0];
         }
         var order = await LockOrderAsync(firmId, branchId, orderId, cancellationToken);
         if (order is null)
@@ -87,6 +106,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (attempt.Status == "succeeded" && command.PostToCash && cashShift is not null)
+                await AddCashMovementAsync(cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
             if (attempt.Status == "succeeded")
                 await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -100,6 +121,86 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             return PaymentCommandResult.Rejected("PAYMENT_ID_CONFLICT", 409, "Ödeme girişimi kimliği zaten kullanılıyor.");
         }
         return new PaymentCommandResult(ToInfo(attempt), SalesOrders.ToDetail(order), null, true);
+    }
+
+    private async Task<IReadOnlyList<CashShiftLink>> LockOpenCashShiftAsync(string firmId, string branchId,
+        DbTransaction transaction, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT s.id, s.register_id
+            FROM cash.shifts s
+            INNER JOIN cash.registers r ON r.id = s.register_id AND r.firm_id = s.firm_id AND r.branch_id = s.branch_id
+            WHERE s.firm_id = @firm_id AND s.branch_id = @branch_id AND s.status = 'open' AND r.is_active = TRUE
+            ORDER BY s.opened_at, s.id
+            FOR UPDATE OF s
+            """;
+        var firmParameter = command.CreateParameter(); firmParameter.ParameterName = "firm_id"; firmParameter.Value = firmId;
+        var branchParameter = command.CreateParameter(); branchParameter.ParameterName = "branch_id"; branchParameter.Value = branchId;
+        command.Parameters.Add(firmParameter); command.Parameters.Add(branchParameter);
+        var shifts = new List<CashShiftLink>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) shifts.Add(new CashShiftLink(reader.GetGuid(0), reader.GetGuid(1)));
+        return shifts;
+    }
+
+    private async Task AddCashMovementAsync(CashShiftLink shift, PaymentAttemptRow attempt, string actor,
+        DateTimeOffset now, DbTransaction transaction, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        await using (var movement = connection.CreateCommand())
+        {
+            movement.Transaction = transaction;
+            movement.CommandText = """
+                INSERT INTO cash.movements
+                    (id, firm_id, branch_id, register_id, shift_id, kind, category, tender_method, amount_minor,
+                     currency, description, source, provider, external_reference, provider_event_id, actor, created_at)
+                VALUES
+                    (@id, @firm_id, @branch_id, @register_id, @shift_id, 'pos_sale', 'cash_sale', @method, @amount,
+                     'TRY', @description, 'pos', 'hipos-simulator', @external_reference, @event_id, @actor, @created_at)
+                """;
+            AddParameter(movement, "id", attempt.Id); AddParameter(movement, "firm_id", attempt.FirmId);
+            AddParameter(movement, "branch_id", attempt.BranchId); AddParameter(movement, "register_id", shift.RegisterId);
+            AddParameter(movement, "shift_id", shift.Id); AddParameter(movement, "method", attempt.Method);
+            AddParameter(movement, "amount", attempt.AmountMinor);
+            AddParameter(movement, "description", $"Garson tahsilatı · {(attempt.Method == "cash" ? "Nakit" : "Kart")} · Adisyon {attempt.CheckId.ToString()[..8]}");
+            AddParameter(movement, "external_reference", $"{attempt.CheckId}:{attempt.OrderId}");
+            AddParameter(movement, "event_id", attempt.Id.ToString()); AddParameter(movement, "actor", actor);
+            AddParameter(movement, "created_at", now);
+            await movement.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var shiftUpdate = connection.CreateCommand())
+        {
+            shiftUpdate.Transaction = transaction;
+            shiftUpdate.CommandText = "UPDATE cash.shifts SET version = version + 1 WHERE id = @shift_id AND firm_id = @firm_id AND branch_id = @branch_id AND status = 'open'";
+            AddParameter(shiftUpdate, "shift_id", shift.Id); AddParameter(shiftUpdate, "firm_id", attempt.FirmId);
+            AddParameter(shiftUpdate, "branch_id", attempt.BranchId);
+            await shiftUpdate.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using (var audit = connection.CreateCommand())
+        {
+            audit.Transaction = transaction;
+            audit.CommandText = """
+                INSERT INTO cash.audit (firm_id, branch_id, register_id, shift_id, request_id, entity_type, entity_id, action, actor, detail, occurred_at)
+                VALUES (@firm_id, @branch_id, @register_id, @shift_id, @request_id, 'movement', @entity_id, 'sale_payment_linked', @actor,
+                    @detail, @occurred_at)
+                """;
+            AddParameter(audit, "firm_id", attempt.FirmId); AddParameter(audit, "branch_id", attempt.BranchId);
+            AddParameter(audit, "register_id", shift.RegisterId); AddParameter(audit, "shift_id", shift.Id);
+            AddParameter(audit, "request_id", attempt.Id); AddParameter(audit, "entity_id", attempt.Id);
+            AddParameter(audit, "actor", actor);
+            AddParameter(audit, "detail", $"pos_sale;method={attempt.Method};amountMinor={attempt.AmountMinor};checkId={attempt.CheckId};orderId={attempt.OrderId}");
+            AddParameter(audit, "occurred_at", now);
+            await audit.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter(); parameter.ParameterName = name; parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     public async Task<PaymentCommandResult> ResolveAsync(
@@ -221,21 +322,28 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
     {
         var orders = await db.Orders.AsNoTracking().Where(row => row.CheckId == order.CheckId &&
                 row.FirmId == order.FirmId && row.BranchId == order.BranchId)
-            .OrderBy(row => row.Id).Select(row => new { row.Id, row.TotalMinor }).ToArrayAsync(cancellationToken);
+            .OrderBy(row => row.Id).ToArrayAsync(cancellationToken);
         var adjustments = await db.CheckAdjustments.AsNoTracking().Where(row => row.CheckId == order.CheckId &&
                 row.FirmId == order.FirmId && row.BranchId == order.BranchId)
             .ToArrayAsync(cancellationToken);
-        var reductionsByOrder = adjustments.Where(row => (row.Action is "comp" or "void") && row.OrderId != null)
+        var result = CalculatePayableOrderTotals(orders, adjustments);
+        return result.TryGetValue(order.Id, out var payable) ? payable : 0;
+    }
+
+    public static Dictionary<Guid, long> CalculatePayableOrderTotals(IEnumerable<SalesOrderRow> orders, IEnumerable<SalesCheckAdjustmentRow> adjustments)
+    {
+        var adjustmentRows = adjustments.ToArray();
+        var reductionsByOrder = adjustmentRows.Where(row => (row.Action is "comp" or "void") && row.OrderId != null)
             .GroupBy(row => row.OrderId!.Value).ToDictionary(group => group.Key, group => group.Sum(row => row.AmountMinor));
-        var remaining = orders.Select(row => new
+        var remaining = orders.OrderBy(row => row.Id).Select(row => new
         {
             row.Id,
             Base = Math.Max(0, row.TotalMinor - (reductionsByOrder.TryGetValue(row.Id, out var reduction) ? reduction : 0)),
         }).ToArray();
-        var discount = adjustments.Where(row => row.Action == "discount").Sum(row => row.AmountMinor);
+        var discount = adjustmentRows.Where(row => row.Action == "discount").Sum(row => row.AmountMinor);
         var available = remaining.Sum(row => row.Base);
         var appliedDiscount = Math.Min(discount, available);
-        if (available == 0) return 0;
+        if (available == 0) return remaining.ToDictionary(row => row.Id, _ => 0L);
         var result = remaining.ToDictionary(row => row.Id, row => row.Base);
         var allocated = 0L;
         foreach (var row in remaining)
@@ -251,7 +359,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             result[row.Id]--;
             left--;
         }
-        return result.TryGetValue(order.Id, out var payable) ? payable : 0;
+        return result;
     }
 
     private static void UpdateOrderPaymentStatus(SalesOrderRow order, long payableTotal)

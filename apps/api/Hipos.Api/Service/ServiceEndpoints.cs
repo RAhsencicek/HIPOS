@@ -466,10 +466,6 @@ public static class ServiceEndpoints
             if (!tableChecks.Any(row => row.Id == targetAssignment.CheckId && row.TableId == targetTableId) ||
                 sourceIds.Any(id => !tableChecks.Any(row => row.Id == assignments[id].CheckId && row.TableId == id)))
                 return Fail(context, "CHECK_ASSIGNMENT_CONFLICT", 409, "Masa-adisyon bağlantısı güncel değil; masaları yenileyin.");
-            var mergeCheckIds = sourceCheckIds.Append(targetAssignment.CheckId).ToArray();
-            if (await salesDb.CheckAdjustments.AnyAsync(row => mergeCheckIds.Contains(row.CheckId) &&
-                row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted))
-                return Fail(context, "CHECK_HAS_ADJUSTMENTS", 409, "İndirim veya ikram bulunan adisyonlar masa birleştirme işlemine alınamaz.");
             var now = DateTimeOffset.UtcNow;
             var actor = DemoAccess.Resolve(context)!.Name;
             var mergeFailure = await sales.MergeChecksAsync(db.Database.GetDbConnection(),

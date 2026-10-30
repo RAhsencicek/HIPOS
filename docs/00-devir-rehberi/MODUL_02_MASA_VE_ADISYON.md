@@ -28,14 +28,14 @@
 * **Kısmen Hazır / Bekleyenler:**
   - Garson ekranında yüzde/sabit adisyon indirimi ile gerekçeli miktar bazlı ikram/kalem iptali API'ye kaydedilir. Her kayıt actor, gerekçe ve zaman bilgisiyle denetim izi taşır. Yönetici onayı yalnız `Development` ortamında test amacıyla atlanır; diğer ortamlarda onaysız işlem reddedilir. Gerçek kimlik doğrulama/PIN onayı yönetim ekranı aşamasında tamamlanacaktır.
   - Ücret etkili ürün modifier seçenekleri Modül 4 kapsamındadır; mevcut garson seçenekleri demo amaçlı ve ücretsizdir.
-  - Development simüle ödeme akışında adisyonun tam tahsilat sonrası kapanması, bağlı masanın boşaltılması ve fiziksel masa grubunun son açık adisyon ödendiğinde kapatılması uygulanmıştır. Migration uygulanıp API yeniden başlatılmalıdır.
-  - Gerçek kasa/POS tahsilatı ve ödeme hareketinin kasa kaydıyla ilişkilendirilmesi henüz yoktur; garson ekranı ödeme almaz, tahsilat sonucunu gösterir.
+  - Development simüle ödeme akışında garson ekranı adisyon seçerek nakit/kart yöntemiyle serbest tutarlı kısmi veya tam tahsilat başlatabilir. Kısmi tahsilatta adisyon açık ve kalan tutar ödenebilir kalır; bakiye sıfırlandığında adisyon kapanır. Ödeme API'si ortak adisyonun ödeme geçmişini kullanır.
+  - Başarılı garson tahsilatı aynı PostgreSQL transaction'ında açık kasa vardiyasına bağlanır; nakit beklenen çekmece tutarını artırır ve kart hareket olarak görünür ama nakit toplamına katılmaz. Vardiya yoksa veya birden fazlaysa ödeme reddedilir. Bu akış Development simülasyonudur; gerçek para/POS tahsilatı ve üretim yetkilendirmesi yoktur.
 
 ---
 
 ## 🎯 1. Modülün Amacı Nedir?
 
-Bu modül; garson sipariş girişi, masa taşıma/birleştirme, adisyon bölme ve gerekçeli indirim/ikram kayıtlarını ortak adisyon çekirdeğine bağlar. Simüle tahsilat tamamlandığında adisyon kapanır; açık hesap kalmamışsa masa veya fiziksel masa grubu boşaltılır. Gerçek ödeme/kasa entegrasyonu ve yönetici onayı henüz tamamlanmamıştır.
+Bu modül; garson sipariş girişi, masa taşıma/birleştirme, adisyon bölme, gerekçeli indirim/ikram ve simüle tutarlı tahsilatı ortak adisyon çekirdeğine bağlar. Başarılı garson tahsilatı açık kasa vardiyasına da yazılır. Simüle tahsilat tamamlandığında adisyon kapanır; açık hesap kalmamışsa masa veya fiziksel masa grubu boşaltılır. Gerçek ödeme/ÖKC entegrasyonu ve yönetici onayı henüz tamamlanmamıştır.
 
 Kısacası: **Restoran salonunun ve masadaki açık hesapların (adisyonların) kalbidir.**
 

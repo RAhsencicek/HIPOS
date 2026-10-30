@@ -12,14 +12,14 @@ namespace Hipos.Api.Sales;
 public sealed record CreateSalesCheck(Guid RequestId, Guid FirstOrderId, IReadOnlyList<PosOrderItem> Items,
     string? CustomerId, string? TableId, string? WaiterId);
 public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long AmountMinor, string Method,
-    string SimulatedOutcome, int ExpectedOrderVersion);
+    string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false);
 public sealed record SplitCheckLine(long OrderLineId, int Quantity);
 public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
 public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
 public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, string Action, string? ValueType,
     int? Value, long? OrderLineId, int Quantity, string Reason);
 public sealed record CheckAdjustmentView(Guid RequestId, string Action, string? ValueType, int? Value,
-    long? OrderLineId, int Quantity, long AmountMinor, string Reason, string Actor, string ApprovalMode, DateTimeOffset CreatedAt);
+    long? OrderLineId, int Quantity, long AmountMinor, string Reason, string Actor, string ApprovalMode, DateTimeOffset CreatedAt, Guid? OriginalCheckId = null);
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
     string Method, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId, string Status,
@@ -81,7 +81,7 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("/{checkId:guid}/split", async (string firmId, string branchId, Guid checkId,
-            SplitSalesCheck command, HttpContext context, SalesDbContext db) =>
+            SplitSalesCheck command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -106,6 +106,9 @@ public static class SalesCheckEndpoints
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             try
             {
+                var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                    firmId, branchId, "sales.checks", context.RequestAborted);
+                if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
                 await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM sales.checks WHERE id={checkId} AND firm_id={firmId} AND branch_id={branchId} FOR UPDATE", context.RequestAborted);
                 var concurrentReplay = await db.CheckSplits.AsNoTracking().SingleOrDefaultAsync(row => row.RequestId == command.RequestId &&
                     row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
@@ -224,10 +227,11 @@ public static class SalesCheckEndpoints
             if (!allowUnapprovedAdjustments)
                 return Fail(context, "MANAGER_APPROVAL_REQUIRED", 403,
                     "İndirim, ikram veya iptal için yönetici onayı gerekli. Onaysız test yalnız Development ortamında kullanılabilir.");
+            var reason = command.Reason?.Trim() ?? "";
             if (command.RequestId == Guid.Empty || command.ExpectedVersion < 1 ||
                 command.Action is not ("discount" or "comp" or "void") ||
-                string.IsNullOrWhiteSpace(command.Reason) || command.Reason.Trim().Length > 500)
-                return Fail(context, "INVALID_ADJUSTMENT", 400, "İşlem, adisyon sürümü ve gerekçe geçerli olmalı.");
+                command.Action != "void" && string.IsNullOrWhiteSpace(reason) || reason.Length > 500)
+                return Fail(context, "INVALID_ADJUSTMENT", 400, "İşlem, adisyon sürümü ve varsa gerekçe geçerli olmalı.");
             var isDiscount = command.Action == "discount";
             if (isDiscount && (command.ValueType is not ("percentage" or "fixed") || command.Value is null ||
                     command.OrderLineId is not null || command.Quantity != 0 ||
@@ -238,12 +242,12 @@ public static class SalesCheckEndpoints
                 return Fail(context, "INVALID_ADJUSTMENT", 400, "İndirim oranı/tutarı veya ürün miktarı geçersiz.");
 
             var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(command with
-            { Reason = command.Reason.Trim() }))));
+            { Reason = reason }))));
             var prior = await db.CheckAdjustments.AsNoTracking().SingleOrDefaultAsync(row => row.RequestId == command.RequestId,
                 context.RequestAborted);
             if (prior is not null)
             {
-                if (prior.FirmId != firmId || prior.BranchId != branchId || prior.CheckId != checkId || prior.Fingerprint != fingerprint)
+                if (prior.FirmId != firmId || prior.BranchId != branchId || (prior.CheckId != checkId && prior.OriginalCheckId != checkId) || prior.Fingerprint != fingerprint)
                     return Fail(context, "ADJUSTMENT_REQUEST_CONFLICT", 409, "İstek kimliği farklı bir adisyon işlemi için kullanılmış.");
                 return Results.Ok(new { repeated = true, adjustment = ToAdjustmentView(prior), check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
             }
@@ -260,7 +264,7 @@ public static class SalesCheckEndpoints
                 context.RequestAborted);
             if (concurrentPrior is not null)
             {
-                if (concurrentPrior.FirmId != firmId || concurrentPrior.BranchId != branchId || concurrentPrior.CheckId != checkId || concurrentPrior.Fingerprint != fingerprint)
+                if (concurrentPrior.FirmId != firmId || concurrentPrior.BranchId != branchId || (concurrentPrior.CheckId != checkId && concurrentPrior.OriginalCheckId != checkId) || concurrentPrior.Fingerprint != fingerprint)
                     return Fail(context, "ADJUSTMENT_REQUEST_CONFLICT", 409, "İstek kimliği farklı bir adisyon işlemi için kullanılmış.");
                 return Results.Ok(new { repeated = true, adjustment = ToAdjustmentView(concurrentPrior), check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
             }
@@ -310,14 +314,14 @@ public static class SalesCheckEndpoints
             var row = new SalesCheckAdjustmentRow { RequestId = command.RequestId, CheckId = checkId, FirmId = firmId,
                 BranchId = branchId, OrderId = orderForLine?.Id, OrderLineId = line?.Id, Action = command.Action,
                 ValueType = command.ValueType, Value = command.Value, Quantity = command.Quantity, AmountMinor = amount,
-                Reason = command.Reason.Trim(), Actor = actor, ApprovalMode = "development_bypass", Fingerprint = fingerprint, CreatedAt = now };
+                Reason = reason, Actor = actor, ApprovalMode = "development_bypass", Fingerprint = fingerprint, CreatedAt = now };
             db.CheckAdjustments.Add(row);
             if (command.Action == "void" && line is not null && orderForLine is not null)
             {
                 var kitchenLines = System.Text.Json.JsonSerializer.Deserialize<SalesKitchenLine[]>(orderForLine.KitchenItemsJson) ?? [];
                 orderForLine.KitchenItemsJson = System.Text.Json.JsonSerializer.Serialize(kitchenLines.Append(
                     new SalesKitchenLine(line.ProductId.ToString(), $"❌ İPTAL BİLDİRİMİ · {line.ProductName}",
-                        command.Quantity, $"Mutfağa iptal bildirimi · Gerekçe: {command.Reason.Trim()}",
+                        command.Quantity, reason.Length == 0 ? "Mutfağa iptal bildirimi" : $"Mutfağa iptal bildirimi · Gerekçe: {reason}",
                         System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(line.OptionsJson) ?? [])));
                 orderForLine.Version++;
             }
@@ -378,7 +382,7 @@ public static class SalesCheckEndpoints
             if (!orderExists) return Fail(context, "ORDER_NOT_FOUND", 404, "Sipariş bu adisyona bağlı değil.");
             var payment = await payments.StartAsync(firmId, branchId, command.OrderId,
                 new StartSimulatedPayment(command.AttemptId, command.AmountMinor, command.Method,
-                    command.SimulatedOutcome, command.ExpectedOrderVersion), DemoAccess.Resolve(context)!.Name,
+                    command.SimulatedOutcome, command.ExpectedOrderVersion, command.PostToCash), DemoAccess.Resolve(context)!.Name,
                 context.RequestAborted, requireCheckCapability: true);
             if (payment.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
@@ -473,9 +477,13 @@ public static class SalesCheckEndpoints
         var paymentStatus = attempts.Any(row => row.Status == "unknown") ? "unknown" :
             attempts.Any(row => row.Status == "pending") ? "pending" :
             paid >= total && total > 0 ? "paid" : paid > 0 ? "partially_paid" : "unpaid";
+        var payableByOrder = PaymentSimulator.CalculatePayableOrderTotals(orders, adjustments);
         return new SalesCheckDetail(check.Id.ToString(), check.FirmId, check.BranchId, check.Status, check.CustomerId,
             check.TableId, check.WaiterId, check.MergedIntoCheckId?.ToString(), check.Currency, total, paid, Math.Max(0, total - paid), paymentStatus,
-            check.CreatedAt, check.Version, orders.Select(SalesOrders.ToDetail).ToArray(),
+            check.CreatedAt, check.Version, orders.Select(order => {
+                var detail = SalesOrders.ToDetail(order);
+                return detail with { RemainingMinor = Math.Max(0, payableByOrder.GetValueOrDefault(order.Id) - detail.PaidMinor) };
+            }).ToArray(),
             attempts.Select(row => new CheckPaymentView(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor,
                 row.Currency, row.Method, row.Status, row.Version, row.CreatedAt, row.UpdatedAt)).ToArray(),
             gross, adjustmentMinor, adjustments.Select(ToAdjustmentView).ToArray());
@@ -483,7 +491,7 @@ public static class SalesCheckEndpoints
 
     private static CheckAdjustmentView ToAdjustmentView(SalesCheckAdjustmentRow row) =>
         new(row.RequestId, row.Action, row.ValueType, row.Value, row.OrderLineId, row.Quantity, row.AmountMinor,
-            row.Reason, row.Actor, row.ApprovalMode, row.CreatedAt);
+            row.Reason, row.Actor, row.ApprovalMode, row.CreatedAt, row.OriginalCheckId);
 
     private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write)
     {

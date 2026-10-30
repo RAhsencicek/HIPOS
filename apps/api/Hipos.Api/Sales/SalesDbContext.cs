@@ -84,6 +84,7 @@ public sealed class SalesCheckAdjustmentRow
 {
     public Guid RequestId { get; set; }
     public Guid CheckId { get; set; }
+    public Guid? OriginalCheckId { get; set; }
     public string FirmId { get; set; } = "";
     public string BranchId { get; set; } = "";
     public Guid? OrderId { get; set; }
@@ -318,6 +319,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
                 table.HasCheckConstraint("ck_check_adjustment_scope", "(action = 'discount' AND order_id IS NULL AND order_line_id IS NULL AND value_type IS NOT NULL AND value IS NOT NULL AND quantity = 0) OR (action IN ('comp','void') AND order_id IS NOT NULL AND order_line_id IS NOT NULL AND quantity > 0 AND value_type IS NULL AND value IS NULL)");
             });
             entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.OriginalCheckId).HasColumnName("original_check_id");
             entity.Property(row => row.RequestId).HasColumnName("request_id");
             entity.Property(row => row.CheckId).HasColumnName("check_id");
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);

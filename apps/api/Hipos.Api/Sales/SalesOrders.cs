@@ -84,6 +84,12 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 ("firm", firmId), ("branch", branchId), ("actor", actor), ("at", now));
 
             await ExecuteAsync(connection, transaction, """
+                UPDATE sales.check_adjustments SET original_check_id=COALESCE(original_check_id,check_id), check_id=@target
+                WHERE check_id=@source AND firm_id=@firm AND branch_id=@branch
+                """, cancellationToken, ("target", targetCheckId), ("source", source.CheckId),
+                ("firm", firmId), ("branch", branchId));
+
+            await ExecuteAsync(connection, transaction, """
                 UPDATE sales.checks SET status='merged', table_id=NULL, waiter_id=NULL,
                     merged_into_check_id=@target, version=version+1
                 WHERE id=@source AND firm_id=@firm AND branch_id=@branch AND status='open'

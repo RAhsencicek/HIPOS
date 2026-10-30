@@ -440,18 +440,19 @@ button, select { font: inherit; }
 .cashier-totals span { display: flex; justify-content: space-between; gap: 12px; color: #687168; font-size: 13px; }
 .cashier-totals b { color: #293f30; }
 .cashier-totals .cashier-remaining, .cashier-totals .cashier-remaining b { color: #9a5b22; font-size: 15px; font-weight: 800; }
-.cashier-detail-shell { width: min(100% - 32px, 1600px); }
+.cashier-detail-shell { width: min(100% - 32px, 1600px); padding-top: 0; }
 .cashier-detail-shell .ops-header { padding: 4px 0 14px; }
 .cashier-details { margin-top: 0; color: #15213a; }
 .cashier-group-note { padding: 10px 14px; border-radius: 10px; background: #eaf0fa; font-size: 13px; }
 .cashier-detail-grid { display: grid; grid-template-columns: .98fr 1.08fr 1.05fr; gap: 14px; align-items: stretch; }
 .cashier-detail-panel { min-width: 0; min-height: 690px; display: flex; flex-direction: column; background: #fff; border: 1px solid #dce3ee; border-radius: 15px; box-shadow: 0 2px 8px #2034590a; overflow: hidden; }
-.cashier-bill-header { display: flex; align-items: center; gap: 14px; padding: 18px; background: #f7f9fc; border-bottom: 1px solid #e2e8f1; }
+.cashier-bill-header { display: flex; align-items: flex-start; gap: 14px; padding: 12px 18px; background: #f7f9fc; border-bottom: 1px solid #e2e8f1; }
+.cashier-bill-header .cashier-bill-heading-copy { display: grid; flex: 1 1 auto; gap: 3px; min-width: 0; }
 .cashier-bill-header h1 { margin: 0 0 5px; font-size: 19px; }
-.cashier-bill-header div > span { color: #788ba7; font-size: 13px; }
+.cashier-bill-header .cashier-bill-heading-copy > span { overflow-wrap: anywhere; color: #788ba7; font-size: 13px; line-height: 1.35; }
 .cashier-table-number { display: grid; place-items: center; flex: 0 0 54px; height: 54px; border-radius: 11px; background: #553bea; color: white; font-weight: 800; font-size: 22px; line-height: 1; }
 .cashier-table-number small { font-size: 10px; letter-spacing: .06em; align-self: end; }
-.cashier-open-badge { margin-left: auto; white-space: nowrap; border-radius: 6px; padding: 6px 8px; background: #fff3cf; color: #92590a; font-size: 11px; font-weight: 750; }
+.cashier-open-badge { flex: 0 0 auto; align-self: flex-start; margin-left: auto; white-space: nowrap; border-radius: 6px; padding: 6px 8px; background: #fff3cf; color: #92590a; font-size: 11px; font-weight: 750; }
 .cashier-check-select { display: grid; gap: 5px; padding: 14px 18px 0; color: #6e809a; font-size: 12px; font-weight: 700; }
 .cashier-check-select select { padding: 10px; border: 1px solid #dce3ee; border-radius: 8px; background: #fff; color: #15213a; }
 .cashier-bill-items { flex: 1; padding: 12px 18px; }
@@ -467,7 +468,7 @@ button, select { font: inherit; }
 .cashier-bill-footer > div b { color: #14213b; }
 .cashier-bill-footer .cashier-simulated, .cashier-bill-footer .cashier-simulated b { color: #00845e !important; }
 .cashier-balance { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px; border: 1px solid #f4cf6b; border-radius: 10px; background: #fffae9; }
-.cashier-bill > .cashier-balance { margin: 12px 18px 0; }
+.cashier-bill > .cashier-balance { margin: 10px 18px 0; padding: 11px 14px; }
 .cashier-balance span { display: grid; gap: 5px; color: #98500b; font-size: 11px; }
 .cashier-balance small { font-size: 12px; }
 .cashier-balance b { color: #8b370e !important; font-size: clamp(20px, 2.2vw, 29px); white-space: nowrap; }
@@ -535,15 +536,16 @@ button, select { font: inherit; }
 .cashier-shift-form .waiter-note-field input, .cashier-shift-form .waiter-note-field textarea { min-height: 48px; }
 .cashier-shift-form > p { color: #607066; font-size: 14px; line-height: 1.5; }
 .cashier-shift-form .cashier-shift-demo { font-size: 12px; }
-.cashier-check-list { padding: 16px 18px 4px; }
+.cashier-check-list { padding: 12px 18px 8px; }
 .cashier-check-list-heading, .cashier-table-total, .cashier-table-remaining { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.cashier-check-list-heading { margin-bottom: 12px; color: #6c7f99; font-size: 11px; letter-spacing: .04em; }
-.cashier-check-list-heading span { color: #8294aa; font-size: 12px; letter-spacing: normal; }
-.cashier-table-total, .cashier-table-remaining { padding: 9px 12px; background: #f2f6f3; color: #365542; font-size: 13px; }
-.cashier-table-total { border-radius: 9px 9px 0 0; }
-.cashier-table-remaining { border-radius: 0 0 9px 9px; border-top: 1px solid #dfe9e1; }
+.cashier-check-list-heading { margin-bottom: 8px; color: #6c7f99; font-size: 11px; letter-spacing: .04em; }
+.cashier-check-list-heading span { border-radius: 999px; padding: 3px 8px; background: #eef2f7; color: #64758d; font-size: 11px; font-weight: 700; letter-spacing: normal; }
+.cashier-table-total, .cashier-table-remaining { min-height: 52px; padding: 8px 12px; color: #365542; font-size: 13px; }
+.cashier-table-total { border: 1px solid #e1e9e3; border-radius: 9px 9px 0 0; background: #f8faf8; }
+.cashier-table-remaining { border: 1px solid #dce9de; border-top: 0; border-radius: 0 0 9px 9px; background: #eef6ef; }
 .cashier-table-total span, .cashier-table-remaining span { display: grid; gap: 3px; }
 .cashier-table-total small, .cashier-table-remaining small { color: #748a79; font-size: 10px; }
+.cashier-table-total > strong, .cashier-table-remaining > strong { color: #294d35; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cashier-check-list-items { display: grid; gap: 7px; margin-top: 10px; }
 .ops-shell .cashier-check-option { width: 100%; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid #dce5ed; border-radius: 9px; background: #fff; color: #182a3c; text-align: left; touch-action: manipulation; }
 .ops-shell .cashier-check-option.selected { border-color: #42905c; background: #edf7ef; box-shadow: inset 3px 0 #42905c; }
@@ -578,7 +580,7 @@ button, select { font: inherit; }
 .cashier-keypad-panel .cashier-disabled-hint { margin-top: 6px; }
 @media (max-width: 650px) { .cashier-keypad { grid-template-rows: repeat(4, 58px); } }
 @media (min-width: 951px) and (max-height: 700px) {
-  .cashier-detail-shell { padding-top: 4px; }
+  .cashier-detail-shell { padding-top: 0; }
   .cashier-detail-shell .ops-header { padding: 0 2px 5px; }
   .cashier-detail-shell .waiter-brand img { width: 94px; }
   .cashier-detail-shell .cashier-shift-strip { margin-bottom: 7px; padding: 6px 10px; }
@@ -1484,6 +1486,36 @@ button, select { font: inherit; }
   font-weight: 650;
   font-size: 11.5px;
   border: 1px solid #fecaca;
+}
+
+.morning-opening-summary {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #065f46;
+  font-size: 12px;
+}
+
+.morning-opening-summary > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.morning-opening-summary p {
+  margin: 0;
+  max-width: 65%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.morning-opening-summary small {
+  color: #047857;
 }
 
 .morning-shift-footer {

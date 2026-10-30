@@ -48,7 +48,7 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - Satış ve adisyon kapamaları kasaya otomatik yansımamaktadır (çift defter sorunu).
   - Parçalı ödeme (Nakit + Kart + Cari + Yemek Kartı) altyapısı yoktur.
   - Çoklu kasa (Ana Kasa, Bar vb.) ve kasiyer PIN ile kasa seçimi yoktur.
-  - Kasiyer vardiya kapatma ekranında isteğe bağlı kupür girişi sayılan toplamı hesaplar; masa özeti uyarısı gösterilir. Kupür kırılımı ayrıca saklanmaz ve uyarı sunucuda kapanış kilidi değildir. Gün sonu Z-Raporu ve hasılat teslim tutanağı (Safe Drop) yoktur.
+  - Kasiyer vardiya kapatma ekranında isteğe bağlı kupür girişi sayılan toplamı hesaplar; kupür kırılımı ayrıca saklanmaz. Şubede açık adisyon varsa vardiya kapanışı sunucu tarafından reddedilir. Gün sonu Z-Raporu ve hasılat teslim tutanağı (Safe Drop) yoktur.
   - Hızlı satışta açık masasız adisyonlar listelenip sürdürülebilir; sonuçlanmamış oluşturma isteği aynı terminalde saklanarak aynı kimlikle tekrar edilir. Liste şubedeki ilk 100 açık masasız adisyonla sınırlıdır ve yalnız hızlı satışa ait kayıtları ayırmaz.
   - Açılış notu vardiyada saklanır; hesap fişi tarayıcı üzerinden mali olmayan çıktı olarak yazdırılır. Tam simüle tahsilat sonrasında yazdırma penceresi açılır; gerçek ÖKC ve otomatik donanım baskısı yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**

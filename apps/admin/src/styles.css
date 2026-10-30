@@ -6792,6 +6792,30 @@ td.strong {
   box-sizing: border-box;
 }
 
+.cash-panel .cash-denomination-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #e7e7eb;
+  border-radius: 10px;
+}
+
+.cash-panel .cash-denomination-grid legend {
+  padding: 0 5px;
+  color: #596273;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cash-panel .cash-denomination-grid label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 11px;
+}
+
 .cash-open-form {
   max-width: 660px;
   margin: 18px 0;

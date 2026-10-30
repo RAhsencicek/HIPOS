@@ -2,6 +2,8 @@
 
 Durum: İlk yerel PostgreSQL/API/panel diliminin kabul sözleşmesi ve uygulama kaydı. Tarih: 13 Ekim 2026. Bu sözleşme yalnız **manuel kasa vardiyası ve nakit defteri** içindir; yeni nesil satış/POS ekranı değildir. API Production ortamında da başlatılabilir, ancak `X-Demo-Actor` taklit edilebilir ve gerçek kullanıcı kimliği olmadığı için bu dilim müşteri trafiğine güvenli değildir. Yeni kasa ürün hedefi [Kasa/POS Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md) içindedir.
 
+30 Ekim 2026 güncellemesi: Garson ekranındaki başarılı **simüle** tahsilat, [Kasa/POS Operasyon Sözleşmesi](KASA_POS_VE_OPERASYON_SOZLESMESI.md) kapsamındaki geliştirme bağlantısıyla açık vardiyanın defterine yazılır. Bu ilave, aşağıdaki eski manuel MVP kapsamını tarihsel olarak korur; gerçek banka/ÖKC tahsilatı değildir.
+
 Bu dilim, tek şubeli bir restoranın POS entegrasyonu olmadan kasa vardiyasını ve nakit hareketlerini kaydedebilmesini sağlar. Ürün **POS, banka bağlantısı, mali muhasebe veya e-belge sistemi değildir**. Bu sınır kullanıcı arayüzünde de açıkça belirtilmelidir.
 
 ## Ekran durumu ve renk sözleşmesi
@@ -28,13 +30,13 @@ Gelecekteki onboarding orkestrasyonu şube kaydının kalıcı olmasından sonra
 - Yeni şube için idempotent varsayılan kasa provisioning'i.
 - Hareket ve vardiya geçmişini şube kapsamında okuma; aktör ve zaman denetimi.
 
-İlk sürümde olmayanlar: POS'tan ödeme alma, kart/yemek kartı tahsilatı, sipariş/adisyon kapatma, otomatik satış toplamı, otomatik cari veya muhasebe kaydı, banka/POS mutabakatı, iade/karma ödeme, çoklu kasa, kasiyer yetkilendirmesi ve kupür bazlı sayım. Kurgusal ödeme simülatörü kasa hareketi üretmez.
+İlk manuel kasa sürümünde olmayanlar: gerçek POS'tan ödeme alma, kart/yemek kartı üzerinden gerçek tahsilat, otomatik cari veya muhasebe kaydı, banka/POS mutabakatı, iade/karma ödeme, çoklu kasa ve gerçek kasiyer yetkilendirmesi. Garson ekranına ait başarılı nakit/kart simülasyonları, güncel operasyon sözleşmesindeki kurala göre açık vardiyaya kasa hareketi yazar; genel ödeme simülatörü ve kasiyer test ödemeleri varsayılan olarak kasa hareketi üretmez.
 
 ## Capability ve modüler davranış
 
 - Yeni operasyonel capability anahtarı: `cash.management`; firma/şube tercihi kapsamındadır ve `sales.monitoring` veya `payments.simulator` bağımlılığı yoktur.
 - Var olan `cash.monitoring` anahtarı ve saklı tercihler bu dilimde silinmez. İşletme kayıtlarının sahibine dönüşmez; analitik/izleme kapsamı ayrıca ele alınır. Panel kasa operasyonlarını `cash.management` durumuna göre göstermelidir.
-- Capability kapalıysa okuma ve geçmiş erişimi sürer; vardiya açma ve yeni hareket yazma reddedilir. Açık vardiya varsa, kasa kapatma ve sayım farkını kaydetme güvenli tamamlama işlemi olarak kabul edilir. Böylece kapatılan modül yeni nakit işlemi başlatmaz, fakat açık vardiyayı yarım bırakmaz.
+- Capability kapalıysa okuma ve geçmiş erişimi sürer; vardiya açma ve yeni hareket yazma reddedilir. Açık adisyon yoksa mevcut vardiyanın kapanışı güvenli tamamlama olarak kabul edilir; şubede açık adisyon varsa kasa kapatma reddedilir.
 - Capability kapalıyken düzeltme yeni bir defter hareketi olacağı için reddedilir. Onboarding provisioning'i kurulum işlemi olarak capability'den bağımsızdır; tercihi değiştirmez.
 - Capability değişikliği migration çalıştırmaz, kayıt silmez ve satış/adisyon/personel gibi bağımsız modülleri kapatmaz.
 - Kullanıcı/rol kimliği gerçek değildir. Development ortamında aynı şubedeki demo POS aktörü yalnız vardiya açma ve kapama işlemlerini de yapabilir; diğer kasa yazmaları yönetici aktörü gerektirir. Development dışındaki tüm kasa yazmaları yönetici aktörü gerektirir. Bu istisna gerçek kasiyer yetkilendirmesi değildir.
@@ -49,6 +51,7 @@ Gelecekteki onboarding orkestrasyonu şube kaydının kalıcı olmasından sonra
 |---|---|
 | `cash.registers` | `id`, `firm_id`, `branch_id`, şube içinde benzersiz `code`, ad, `provider_mode` (`manual` şimdi, `external_pos` gelecekte), etkinlik, sürüm. Onboarding varsayılanı `MAIN / Ana Kasa / manual` olur. |
 | `cash.shifts` | `id`, firma/şube/kasa, `open/closed`, açan-kapayan aktör ve zaman, açılış hareket kimliği, isteğe bağlı `opening_note`, beklenen/fiziksel/fark tutarı, kapanış `requestId`, sürüm. Kasa başına aynı anda en fazla bir açık vardiya; DB kısıtıyla korunur. |
+| `cash.shift_denominations` | Kapanış fiziksel sayımındaki kupür türü ve adedi; vardiyaya firma/şube/kasa kapsamlı bileşik FK ile bağlıdır. Kupür toplamı `countedCashMinor` ile eşleşmeden kapanış kabul edilmez. |
 | `cash.movements` | İstek kimliği, firma/şube/kasa/vardiya, `opening_float/manual_in/manual_out`, pozitif kuruş tutarı, TRY, kategori, açıklama, kaynak (`manual` şimdi; `pos` geleceğe ayrılmış), sağlayıcı/harici referans/sağlayıcı olay kimliği, düzeltme ise `original_movement_id`, `correction_type='reversal'`, zorunlu `correction_reason`, aktör ve zaman. Sağlayıcı olay kimliği firma/şube/sağlayıcı kapsamında tekildir. Satır değiştirilemez; aynı orijinal hareket için yalnız bir düzeltme olabilir. |
 | `cash.audit` | Provisioning, açma/hareket/düzeltme/kapama işlemi, firma/şube/kasa/opsiyonel vardiya/hareket kimlikleri, aktör, eylem, istek kimliği, zaman ve özet. Şube seviyesindeki provisioning audit'i için `shift_id` nullable; audit ve operasyon kaydı aynı DB transaction'ında yazılır. |
 
@@ -75,12 +78,12 @@ Kök: `/api/v1/firms/{firmId}/branches/{branchId}/cash`
 | `GET /overview` | Kasayı, açık vardiyayı, ledger'dan türetilen beklenen nakdi, bu vardiyanın giriş/çıkış toplamlarını ve en son hareketleri döndürür. Kaynak PostgreSQL'dir; başka modül bakiye hesaplamaz. |
 | `GET /registers` | Şubedeki aktif kasa kayıtlarını listeler. İlk sürümde bir kayıt bulunur. |
 | `GET /movements?shiftId=&from=&to=&page=&pageSize=` | Şube kapsamlı, sayfalı hareket geçmişi. Kapanmış vardiya hareketleri de okunur. |
-| `GET /shifts?status=&from=&to=&page=&pageSize=` | Açık/kapalı vardiya geçmişi ve kayıtlı sayım/fark sonucu. |
+| `GET /shifts?status=&from=&to=&page=&pageSize=` | Açık/kapalı vardiya geçmişi, kayıtlı sayım/fark sonucu ve kapanmış vardiyanın kupür dökümü. |
 | `PUT /registers/default` | Önceden oluşturulmuş firma/şubede idempotent varsayılan kasa provisioning'i. Yeni kayıt `201`, uyumlu mevcut MAIN `200`; başka aktif kasa `409 EXISTING_REGISTER`, uyumsuz MAIN `409 DEFAULT_REGISTER_CONFLICT`. Capability tercihini değiştirmez. |
 | `POST /shifts` | `{ requestId, registerId, openingCashMinor, note? }`; isteğe bağlı açılış notu en fazla 500 karakterdir ve vardiyada saklanır. Capability açıkken vardiya ve `opening_float` atomik açılır. |
 | `POST /shifts/{shiftId}/movements` | `{ requestId, kind: manual_in\|manual_out, amountMinor, category, description }`; açık vardiyaya manuel nakit kaydı ekler. |
 | `POST /movements/{originalMovementId}/corrections` | `{ requestId, correctionType: "reversal", correctionReason }`; eş tutarlı ters hareketi yalnız aynı kasanın açık vardiyasına ekler. |
-| `POST /shifts/{shiftId}/close` | `{ requestId, expectedVersion, countedCashMinor, note }`; anlık ledger beklenen tutarını kilit altında hesaplar, fiziksel sayım/farkı saklar ve vardiyayı kapatır. Aynı kapanış isteği tekrarında ikinci kayıt/hareket oluşmaz. Fark varsa açıklama zorunludur. |
+| `POST /shifts/{shiftId}/close` | `{ requestId, expectedVersion, countedCashMinor, note, denominations: [{ denominationMinor, quantity }] }`; izin verilen kupür dökümünün toplamı sayılan tutarla aynı olmalıdır. Anlık ledger beklenen tutarını kilit altında hesaplar, sayım/farkı ve kupür kırılımını saklayıp vardiyayı kapatır. Herhangi bir açık adisyon varsa `409 OPEN_CHECKS_PREVENT_SHIFT_CLOSE` döner ve kapanış kaydı değişmez. Kontrol, adisyon oluşturma/bölme ve ödeme işlemlerinin şube kilidiyle aynı transaction içinde yapılır. Aynı kapanış isteği tekrarı ikinci kayıt/hareket oluşturmaz. Fark varsa açıklama zorunludur. |
 
 Başarılı açma/hareket/kapama yanıtı işlem kimliği, `simulated: false`, `source: manual`, firma/şube/kasa, aktör, zaman ve saklanan sonucu içerir. Tarih aralığı ve sayfa sınırı backend'de doğrulanır. Hatalar mevcut API biçiminde `{ code, detail }` olur.
 
@@ -104,8 +107,9 @@ Beklenen temel hatalar: `FEATURE_DISABLED` (409), `CASH_STORAGE_UNAVAILABLE` (50
 10. `manual_in` ve `manual_out` hatası tam ters yönde aynı tutarla yeni `reversal` üretir; orijinal değişmez. Gerekçe olmadan, kapalı vardiyaya, açılış/POS hareketine, başka kapsama veya ikinci kez düzeltme reddedilir.
 11. Aynı düzeltme isteği ikinci hareket/audit oluşturmaz; farklı request ID ile aynı orijinalin tekrar düzeltmesi reddedilir. Orijinal vardiya kapalıysa ters hareket mevcut açık vardiyada olur; açık vardiya yoksa reddedilir.
 12. Capability kapalıyken özet/register/movement/shift geçmişi okunur; yeni vardiya, normal hareket ve düzeltme reddedilir; önceden açık vardiya kapanabilir.
-13. Simüle başarılı/bekleyen/belirsiz/iptal nakit/kart denemeleri öncesi ve sonrasında aynı kapsamda `cash.movements` ve `cari.movements` sayıları aynıdır.
+13. Genel ödeme simülatörü ile kasiyer test ödemelerinin başarılı/bekleyen/belirsiz/iptal nakit/kart denemeleri kasa/cari hareketi üretmez. Garson check tahsilatında `postToCash=true` yalnız başarılı sonuçta açık vardiyaya bir kasa hareketi yazar; nakit beklenen tutarı artırır, kart artırmaz. Tekrar istek aynı hareketi çoğaltmaz. Her iki akışta cari hareket oluşmaz.
 14. Firma/şube dışından provisioning, düzeltme veya geçmiş okuma yetkisizdir; başka kapsamın kaydı yanıt/audit ile açığa çıkmaz.
+15. Şubede en az bir `open` adisyon varken vardiya kapanışı `409 OPEN_CHECKS_PREVENT_SHIFT_CLOSE` ile reddedilir ve vardiya/audit/sayım değişmeden kalır. Açık adisyon kalmadığında aynı vardiya normal kapanış kurallarıyla kapatılabilir.
 
 ## Durum ve sonraki dilimler
 

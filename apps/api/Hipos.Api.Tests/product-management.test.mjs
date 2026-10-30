@@ -58,7 +58,7 @@ test("fiyatlı ürün kaydı, POS yayını ve yayımlanan fiyat değişikliği k
       return { status: response.status, data: await response.json() };
     }
     const features = (await request(`${branchRoot}/features`)).data;
-    for (const key of ["catalog.drafts", "catalog.price_drafts", "catalog.publishing", "sales.checks", "sales.pos_orders"]) {
+    for (const key of ["catalog.drafts", "catalog.price_drafts", "catalog.publishing", "sales.checks", "sales.pos_orders", "payments.simulator", "staff.records", "branches.tables", "service.waiters"]) {
       const state = features.find(item => item.key === key);
       const enabled = await request(`${branchRoot}/features/${key}`, "PUT", { desiredEnabled: true, expectedVersion: state.version });
       assert.equal(enabled.status, 200, JSON.stringify(enabled.data));
@@ -84,6 +84,11 @@ test("fiyatlı ürün kaydı, POS yayını ve yayımlanan fiyat değişikliği k
     const order = await request(`${branchRoot}/sales/orders`, "POST", { orderId, items: [{ productId: command.draftId, quantity: 1 }] }, "pos-single");
     assert.equal(order.status, 201, JSON.stringify(order.data));
     assert.equal(order.data.items[0].unitPriceMinor, 7550);
+    const waiterOrders = await request(`/api/v1/firms/${firm}/sales/orders?branchId=${branch}`, "GET", undefined, "pos-single");
+    assert.equal(waiterOrders.status, 200, JSON.stringify(waiterOrders.data));
+    assert.ok(waiterOrders.data.items.some(item => item.id === orderId));
+    assert.equal((await request(`/api/v1/firms/${firm}/sales/orders?branchId=${branch}`, "GET", undefined, "pos-moda")).status, 403);
+    assert.equal((await request(`/api/v1/firms/${firm}/sales/orders`, "GET", undefined, "pos-single")).status, 403);
     const checkRequest = { requestId: randomUUID(), firstOrderId: randomUUID(), items: [{ productId: command.draftId, quantity: 1 }], customerId: null, tableId: null, waiterId: null };
     const firstCheck = await request(`${branchRoot}/sales/checks`, "POST", checkRequest, "pos-single");
     assert.equal(firstCheck.status, 201, JSON.stringify(firstCheck.data));
@@ -94,6 +99,57 @@ test("fiyatlı ürün kaydı, POS yayını ve yayımlanan fiyat değişikliği k
     assert.equal(unfinished.status, 200, JSON.stringify(unfinished.data));
     assert.equal(unfinished.data.items.filter(check => check.id === firstCheck.data.id).length, 1);
     assert.ok(unfinished.data.items.every(check => check.status === "open" && check.tableId == null));
+    const testCheck = await request(`${branchRoot}/sales/checks`, "POST", { requestId: randomUUID(), firstOrderId: randomUUID(), items: [{ productId: command.draftId, quantity: 2 }] }, "pos-single");
+    assert.equal(testCheck.status, 201, JSON.stringify(testCheck.data));
+    const checkUrl = `${branchRoot}/sales/checks/${testCheck.data.id}`;
+    const secondOrder = await request(`${checkUrl}/orders`, "POST", { orderId: randomUUID(), items: [{ productId: command.draftId, quantity: 1 }] }, "pos-single");
+    assert.equal(secondOrder.status, 201, JSON.stringify(secondOrder.data));
+    const initialCheck = secondOrder.data;
+    const firstLine = initialCheck.orders.find(item => item.items[0].quantity === 2).items[0];
+    const voided = await request(`${checkUrl}/adjustments`, "POST", { requestId: randomUUID(), expectedVersion: initialCheck.version, action: "void", orderLineId: firstLine.id, quantity: 1, reason: "Test iptali" }, "pos-single");
+    assert.equal(voided.status, 201, JSON.stringify(voided.data));
+    assert.deepEqual(voided.data.check.orders.map(item => item.remainingMinor).sort((a, b) => a - b), [7550, 7550]);
+    const discounted = await request(`${checkUrl}/adjustments`, "POST", { requestId: randomUUID(), expectedVersion: voided.data.check.version, action: "discount", valueType: "fixed", value: 101, quantity: 0, reason: "Test indirimi" }, "pos-single");
+    assert.equal(discounted.status, 201, JSON.stringify(discounted.data));
+    assert.deepEqual(discounted.data.check.orders.map(item => item.remainingMinor).sort((a, b) => a - b), [7499, 7500]);
+    for (const item of discounted.data.check.orders) {
+      const payment = await request(`${checkUrl}/payment-attempts`, "POST", { orderId: item.id, attemptId: randomUUID(), amountMinor: item.remainingMinor, method: "cash", simulatedOutcome: "succeeded", expectedOrderVersion: item.version }, "pos-single");
+      assert.equal(payment.status, 201, JSON.stringify(payment.data));
+    }
+    const completed = await request(checkUrl, "GET", undefined, "pos-single");
+    assert.equal(completed.data.remainingMinor, 0);
+    assert.equal(completed.data.status, "closed");
+    const service = `${branchRoot}/service`;
+    const waiter = await request(`${service}/waiters`, "POST", { name: "Test garson" });
+    assert.equal(waiter.status, 201, JSON.stringify(waiter.data));
+    const targetTable = await request(`${service}/tables`, "POST", { name: "Hedef" });
+    const sourceTable = await request(`${service}/tables`, "POST", { name: "Kaynak" });
+    assert.equal(targetTable.status, 201, JSON.stringify(targetTable.data));
+    assert.equal(sourceTable.status, 201, JSON.stringify(sourceTable.data));
+    const targetOrderId = randomUUID(), sourceOrderId = randomUUID();
+    for (const [table, id] of [[targetTable.data.id, targetOrderId], [sourceTable.data.id, sourceOrderId]]) {
+      const placed = await request(`${service}/tables/${table}/orders`, "POST", { orderId: id, waiterId: waiter.data.id, items: [{ productId: command.draftId, quantity: 2 }] }, "pos-single");
+      assert.equal(placed.status, 201, JSON.stringify(placed.data));
+    }
+    const targetCheckUrl = `${branchRoot}/sales/checks/${targetOrderId}`, sourceCheckUrl = `${branchRoot}/sales/checks/${sourceOrderId}`;
+    const sourceCheck = (await request(sourceCheckUrl)).data;
+    const compRequest = { requestId: randomUUID(), expectedVersion: sourceCheck.version, action: "comp", orderLineId: sourceCheck.orders[0].items[0].id, quantity: 1, reason: "İkram" };
+    const comp = await request(`${sourceCheckUrl}/adjustments`, "POST", compRequest, "pos-single");
+    assert.equal(comp.status, 201, JSON.stringify(comp.data));
+    const targetCheck = (await request(targetCheckUrl)).data;
+    const discount = await request(`${targetCheckUrl}/adjustments`, "POST", { requestId: randomUUID(), expectedVersion: targetCheck.version, action: "discount", valueType: "fixed", value: 100, quantity: 0, reason: "İndirim" }, "pos-single");
+    assert.equal(discount.status, 201, JSON.stringify(discount.data));
+    const tables = (await request(`${service}/tables`)).data.items;
+    const versions = Object.fromEntries(tables.filter(table => [targetTable.data.id, sourceTable.data.id].includes(table.id)).map(table => [table.id, table.assignment.version]));
+    const mergeBody = { requestId: randomUUID(), sourceTableIds: [sourceTable.data.id], expectedVersions: versions };
+    const merged = await request(`${service}/tables/${targetTable.data.id}/merge`, "POST", mergeBody, "pos-single");
+    assert.equal(merged.status, 200, JSON.stringify(merged.data));
+    const afterMerge = (await request(targetCheckUrl)).data;
+    assert.equal(afterMerge.totalMinor, 4 * 7550 - 7550 - 100);
+    assert.equal(afterMerge.adjustments.length, 2);
+    assert.equal(afterMerge.adjustments.find(item => item.action === "comp").originalCheckId, sourceOrderId);
+    assert.equal((await request(`${service}/tables/${targetTable.data.id}/merge`, "POST", mergeBody, "pos-single")).status, 200);
+    assert.equal((await request(`${sourceCheckUrl}/adjustments`, "POST", compRequest, "pos-single")).status, 200);
     const priceChange = { priceVersionId: randomUUID(), amountMinor: 9000, expectedVersion: published.data.product.version };
     const changed = await request(`${productPath}/${command.draftId}/price`, "PUT", priceChange);
     assert.equal(changed.status, 201, JSON.stringify(changed.data));
