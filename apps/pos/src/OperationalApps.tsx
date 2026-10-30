@@ -153,33 +153,124 @@ export function KitchenApp() {
   useEffect(() => { void load(); const timer = window.setInterval(() => { void load(); }, 3000); return () => window.clearInterval(timer); }, [load]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer); }, []);
 
-  async function changeStatus(task: KitchenTask) {
-    const nextStatus = task.status === "submitted" ? "preparing" : task.status === "preparing" ? "ready" : "served";
-    setSavingTaskId(task.id); setError("");
-    try {
-      await request(`/api/v1/firms/${firmId}/branches/${branchId}/kitchen/tasks/${task.id}/status`, "manager-single",
-        { requestId: createRequestId(), nextStatus, expectedVersion: task.version });
-      await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Görev durumu değiştirilemedi."); }
-    finally { setSavingTaskId(""); }
+  type KitchenGroup = {
+    key: string;
+    orderId: string;
+    stationCode: string;
+    stationName: string;
+    isFood: boolean;
+    isDrink: boolean;
+    tableName?: string;
+    waiterName?: string;
+    submittedAt: string;
+    tasks: KitchenTask[];
+  };
+
+  const isFoodTask = (task: KitchenTask) => task.stationCode === "food" || ["oven", "hot", "cold"].includes(task.stationCode);
+  const isDrinkTask = (task: KitchenTask) => task.stationCode === "drink" || task.stationCode === "bar";
+
+  function groupTasks(taskList: KitchenTask[]): KitchenGroup[] {
+    const map = new Map<string, KitchenGroup>();
+    for (const task of taskList) {
+      const isFood = isFoodTask(task);
+      const isDrink = isDrinkTask(task);
+      const groupStation = isFood ? "food" : isDrink ? "drink" : (task.stationCode || "unassigned");
+      const key = `${task.orderId}::${groupStation}`;
+
+      const existing = map.get(key);
+      if (existing) {
+        existing.tasks.push(task);
+        if (new Date(task.submittedAt).getTime() < new Date(existing.submittedAt).getTime()) {
+          existing.submittedAt = task.submittedAt;
+        }
+      } else {
+        map.set(key, {
+          key,
+          orderId: task.orderId,
+          stationCode: task.stationCode,
+          stationName: isFood ? "🍕 YİYECEK" : isDrink ? "🥤 İÇECEK" : (task.stationName || "DİĞER"),
+          isFood,
+          isDrink,
+          tableName: task.tableName,
+          waiterName: task.waiterName,
+          submittedAt: task.submittedAt,
+          tasks: [task],
+        });
+      }
+    }
+    return Array.from(map.values());
   }
 
-  function taskAge(task: KitchenTask) {
-    const minutes = Math.max(0, Math.floor((now - new Date(task.submittedAt).getTime()) / 60_000));
+  function taskAge(submittedAt: string) {
+    const minutes = Math.max(0, Math.floor((now - new Date(submittedAt).getTime()) / 60_000));
     return { minutes, level: minutes >= 20 ? "late" : minutes >= 10 ? "warning" : "normal" };
   }
 
-  const visibleTasks = tasks.filter((task) => stationFilter === "all" || task.stationCode === stationFilter);
-  const activeTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+  async function changeGroupStatus(group: KitchenGroup) {
+    const hasSubmitted = group.tasks.some((t) => t.status === "submitted");
+    const hasPreparing = group.tasks.some((t) => t.status === "preparing");
+    const nextStatus: "preparing" | "ready" | "served" = hasSubmitted ? "preparing" : hasPreparing ? "ready" : "served";
+
+    const targetTasks = group.tasks.filter((t) => {
+      if (nextStatus === "preparing") return t.status === "submitted";
+      if (nextStatus === "ready") return t.status === "preparing";
+      if (nextStatus === "served") return t.status === "ready";
+      return false;
+    });
+
+    if (targetTasks.length === 0) return;
+
+    setSavingTaskId(group.key);
+    setError("");
+    try {
+      await Promise.all(
+        targetTasks.map((t) =>
+          request(`/api/v1/firms/${firmId}/branches/${branchId}/kitchen/tasks/${t.id}/status`, "manager-single", {
+            requestId: createRequestId(),
+            nextStatus,
+            expectedVersion: t.version,
+          })
+        )
+      );
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Görev durumları güncellenemedi.");
+    } finally {
+      setSavingTaskId("");
+    }
+  }
+
+  const foodTasks = tasks.filter(isFoodTask);
+  const drinkTasks = tasks.filter(isDrinkTask);
+  const unassignedTasks = tasks.filter((t) => !isFoodTask(t) && !isDrinkTask(t));
+
+  const activeFoodTasks = foodTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+  const activeDrinkTasks = drinkTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+  const activeUnassignedTasks = unassignedTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+
+  const activeFoodGroups = groupTasks(activeFoodTasks);
+  const activeDrinkGroups = groupTasks(activeDrinkTasks);
+  const activeUnassignedGroups = groupTasks(activeUnassignedTasks);
+
+  const totalActive = activeFoodGroups.length + activeDrinkGroups.length + activeUnassignedGroups.length;
+
+  const visibleTasks = tasks.filter((task) => stationFilter === "all" || (stationFilter === "food" && isFoodTask(task)) || (stationFilter === "drink" && isDrinkTask(task)) || task.stationCode === stationFilter);
+  const activeVisibleTasks = visibleTasks.filter((task) => task.status === "submitted" || task.status === "preparing");
+  const activeVisibleGroups = groupTasks(activeVisibleTasks);
+
   const readyTasks = visibleTasks.filter((task) => task.status === "ready");
-  const servedTasks = visibleTasks
-    .filter((task) => task.status === "served")
-    .sort((left, right) => new Date(right.servedAt!).getTime() - new Date(left.servedAt!).getTime())
-    .slice(0, 6);
+  const readyGroups = groupTasks(readyTasks);
   const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
 
   function printTicket(task: KitchenTask) {
-    const printItems = tasks.filter((item) => item.orderId === task.orderId && item.stationCode === task.stationCode && item.status !== "cancelled");
+    const isFood = isFoodTask(task);
+    const isDrink = isDrinkTask(task);
+    const printItems = tasks.filter((item) => {
+      if (item.orderId !== task.orderId || item.status === "cancelled") return false;
+      if (isFood) return isFoodTask(item);
+      if (isDrink) return isDrinkTask(item);
+      return item.stationCode === task.stationCode;
+    });
     return <div className="kitchen-print-ticket">
       <div className="kitchen-print-double-rule" />
       <h1>MUTFAK SİPARİŞİ</h1>
@@ -201,22 +292,58 @@ export function KitchenApp() {
     </div>;
   }
 
-  function ticket(task: KitchenTask, ready = false) {
-    const age = taskAge(task);
-    return <article className={`kitchen-ticket ${ready ? "kitchen-ready" : `kitchen-${age.level}`} ${selected?.id === task.id ? "print-target" : ""}`} key={task.id}>
+  function ticketCard(group: KitchenGroup, ready = false) {
+    const age = taskAge(group.submittedAt);
+    const isSaving = savingTaskId === group.key;
+    const hasSubmitted = group.tasks.some((t) => t.status === "submitted");
+    const hasPreparing = group.tasks.some((t) => t.status === "preparing");
+    const isReady = !hasSubmitted && !hasPreparing;
+    const statusText = hasSubmitted && !hasPreparing ? "BEKLİYOR" : hasPreparing && !hasSubmitted ? "HAZIRLANIYOR" : hasSubmitted ? "KISMİ HAZIRLIK" : "SERVİSE HAZIR";
+    const actionLabel = hasSubmitted ? "Hazırlamaya başla" : hasPreparing ? "Hazır" : "Servis edildi";
+    const firstTask = group.tasks[0]!;
+
+    return <article
+      className={`kitchen-ticket ${ready || isReady ? "kitchen-ready" : `kitchen-${age.level}`} ${selected?.orderId === group.orderId && ((group.isFood && isFoodTask(selected)) || (group.isDrink && isDrinkTask(selected)) || selected.stationCode === group.stationCode) ? "print-target" : ""}`}
+      key={group.key}
+    >
       <div className="kitchen-screen-ticket-content">
-        <header><div><span>{task.tableName ?? "MASA SİPARİŞİ"}{task.waiterName ? ` · ${task.waiterName}` : ""}</span><h2>{task.orderId.slice(0, 8).toUpperCase()}</h2></div><time>{new Date(task.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time></header>
-        <div className="kitchen-station-label">{task.stationName}</div>
-        <div className="kitchen-ticket-status"><b>{task.status === "submitted" ? "BEKLİYOR" : task.status === "preparing" ? "HAZIRLANIYOR" : "SERVİSE HAZIR"}</b><span>{age.minutes} dk</span></div>
-        <ul><li><strong>{task.quantity}×</strong><span>{task.productName}</span></li></ul>
+        <header>
+          <div>
+            <span>{group.tableName ?? "MASA SİPARİŞİ"}{group.waiterName ? ` · ${group.waiterName}` : ""}</span>
+            <h2>{group.orderId.slice(0, 8).toUpperCase()}</h2>
+          </div>
+          <time>{new Date(group.submittedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</time>
+        </header>
+        <div className={`kitchen-station-label ${group.isFood ? "station-food" : group.isDrink ? "station-drink" : ""}`}>
+          {group.stationName}
+        </div>
+        <div className="kitchen-ticket-status">
+          <b>{statusText}</b>
+          <span>{age.minutes} dk</span>
+        </div>
+        <ul>
+          {group.tasks.map((task) => (
+            <li key={task.id}>
+              <strong>{task.quantity}×</strong>
+              <span>
+                {task.productName}
+                {task.notes && <small style={{ display: "block", color: "#6b7280", marginTop: "2px" }}>· {task.notes}</small>}
+              </span>
+            </li>
+          ))}
+        </ul>
         <div className="kitchen-actions">
-          <button className="kitchen-status-button" disabled={savingTaskId === task.id} onClick={() => void changeStatus(task)}>
-            {savingTaskId === task.id ? "Kaydediliyor…" : task.status === "submitted" ? "Hazırlamaya başla" : task.status === "preparing" ? "Hazır" : "Servis edildi"}
+          <button
+            className="kitchen-status-button"
+            disabled={isSaving}
+            onClick={() => void changeGroupStatus(group)}
+          >
+            {isSaving ? "Kaydediliyor…" : actionLabel}
           </button>
-          <button className="kitchen-print-button" onClick={() => setSelected(task)}>Fiş yazdır</button>
+          <button className="kitchen-print-button" onClick={() => setSelected(firstTask)}>Fiş yazdır</button>
         </div>
       </div>
-      <div aria-hidden="true">{printTicket(task)}</div>
+      <div aria-hidden="true">{printTicket(firstTask)}</div>
     </article>;
   }
 
@@ -225,16 +352,87 @@ export function KitchenApp() {
     <section className="ops-intro"><span className="ops-eyebrow">SİPARİŞ KUYRUĞU</span><h1>Mutfak fişleri</h1><p>Yeni garson siparişleri yerel sunucudan otomatik olarak yenilenir.</p></section>
     <div className="kitchen-toolbar"><span className={error ? "offline-dot" : "online-dot"} />{error ? "Sunucuya ulaşılamıyor" : `Bağlı · son yenileme ${lastRefresh?.toLocaleTimeString("tr-TR") ?? "—"}`}<button onClick={() => void load()}>Yenile</button></div>
     <nav className="kitchen-filters" aria-label="Mutfak istasyonları">
-      <button className={stationFilter === "all" ? "active" : ""} onClick={() => setStationFilter("all")}>Tümü</button>
-      {[...stations].sort((a, b) => ["hot", "oven", "bar", "cold"].indexOf(a.code) - ["hot", "oven", "bar", "cold"].indexOf(b.code)).map((station) => <button className={stationFilter === station.code ? "active" : ""} key={station.id} onClick={() => setStationFilter(station.code)}>{station.name}</button>)}
-      <button className={stationFilter === "unassigned" ? "active" : ""} onClick={() => setStationFilter("unassigned")}>Atanmamış</button>
+      <button className={stationFilter === "all" ? "active" : ""} onClick={() => setStationFilter("all")}>İkili Ekran ({totalActive})</button>
+      {stations.length > 0 ? (
+        stations.map((station) => {
+          const isFood = station.code === "food";
+          const isDrink = station.code === "drink";
+          const count = isFood ? activeFoodGroups.length : isDrink ? activeDrinkGroups.length : groupTasks(tasks.filter((t) => t.stationCode === station.code && (t.status === "submitted" || t.status === "preparing"))).length;
+          return (
+            <button
+              key={station.id}
+              className={stationFilter === station.code ? "active" : ""}
+              onClick={() => setStationFilter(station.code)}
+            >
+              {isFood ? "🍕 " : isDrink ? "🥤 " : ""}{station.name} ({count})
+            </button>
+          );
+        })
+      ) : (
+        <>
+          <button className={stationFilter === "food" ? "active" : ""} onClick={() => setStationFilter("food")}>🍕 Yiyecek ({activeFoodGroups.length})</button>
+          <button className={stationFilter === "drink" ? "active" : ""} onClick={() => setStationFilter("drink")}>🥤 İçecek ({activeDrinkGroups.length})</button>
+        </>
+      )}
+      {activeUnassignedGroups.length > 0 && <button className={stationFilter === "unassigned" ? "active" : ""} onClick={() => setStationFilter("unassigned")}>Atanmamış ({activeUnassignedGroups.length})</button>}
     </nav>
     {error && <p className="ops-error" role="alert">{error}</p>}
-    {activeTasks.length === 0 && !error && <div className="kitchen-empty">Aktif hazırlık görevi yok. Yeni sipariş bekleniyor.</div>}
-    <section className="kitchen-grid">{activeTasks.map((task) => ticket(task))}</section>
-    {readyTasks.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyTasks.length}</b></div><div className="kitchen-grid">{readyTasks.map((task) => ticket(task, true))}</div></section>}
+    {stationFilter === "all" ? (
+      <div className="kitchen-split-container">
+        <section className="kitchen-column kitchen-food-column">
+          <header className="kitchen-column-header">
+            <div className="kitchen-column-title">
+              <span className="kitchen-column-icon">🍕</span>
+              <h2>YİYECEK SİPARİŞLERİ</h2>
+            </div>
+            <span className="kitchen-column-badge">{activeFoodGroups.length}</span>
+          </header>
+          {activeFoodGroups.length === 0 ? (
+            <div className="kitchen-empty kitchen-column-empty">Bekleyen yiyecek siparişi yok.</div>
+          ) : (
+            <div className="kitchen-grid">{activeFoodGroups.map((group) => ticketCard(group))}</div>
+          )}
+        </section>
+
+        <section className="kitchen-column kitchen-drink-column">
+          <header className="kitchen-column-header">
+            <div className="kitchen-column-title">
+              <span className="kitchen-column-icon">🥤</span>
+              <h2>İÇECEK SİPARİŞLERİ</h2>
+            </div>
+            <span className="kitchen-column-badge">{activeDrinkGroups.length}</span>
+          </header>
+          {activeDrinkGroups.length === 0 ? (
+            <div className="kitchen-empty kitchen-column-empty">Bekleyen içecek siparişi yok.</div>
+          ) : (
+            <div className="kitchen-grid">{activeDrinkGroups.map((group) => ticketCard(group))}</div>
+          )}
+        </section>
+      </div>
+    ) : (
+      <section className="kitchen-column kitchen-column-single">
+        <header className="kitchen-column-header">
+          <div className="kitchen-column-title">
+            <span className="kitchen-column-icon">{stationFilter === "food" ? "🍕" : stationFilter === "drink" ? "🥤" : "📋"}</span>
+            <h2>{stationFilter === "food" ? "YİYECEK SİPARİŞLERİ" : stationFilter === "drink" ? "İÇECEK SİPARİŞLERİ" : "ATANMAMIŞ SİPARİŞLER"}</h2>
+          </div>
+          <span className="kitchen-column-badge">{activeVisibleGroups.length}</span>
+        </header>
+        {activeVisibleGroups.length === 0 ? (
+          <div className="kitchen-empty">Aktif sipariş bulunmuyor.</div>
+        ) : (
+          <div className="kitchen-grid">{activeVisibleGroups.map((group) => ticketCard(group))}</div>
+        )}
+      </section>
+    )}
+    {stationFilter === "all" && activeUnassignedGroups.length > 0 && (
+      <section className="kitchen-section">
+        <div className="kitchen-section-title"><span>DİĞER / ATANMAMIŞ SİPARİŞLER</span><b>{activeUnassignedGroups.length}</b></div>
+        <div className="kitchen-grid">{activeUnassignedGroups.map((group) => ticketCard(group))}</div>
+      </section>
+    )}
+    {readyGroups.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyGroups.length}</b></div><div className="kitchen-grid">{readyGroups.map((group) => ticketCard(group, true))}</div></section>}
     {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
-    {servedTasks.length > 0 && <section className="kitchen-section kitchen-history"><div className="kitchen-section-title"><span>SON SERVİS EDİLENLER</span><b>{servedTasks.length}</b></div><ul>{servedTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()}</small></span><time>{task.servedAt ? new Date(task.servedAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
     {selected && <div className="kitchen-print-preview" role="dialog" aria-modal="true" aria-label="Mutfak fişi önizlemesi">
       <div className="kitchen-print-preview-panel">
         <div className="kitchen-print-preview-header"><strong>80 mm fiş önizlemesi</strong><button onClick={() => setSelected(null)} aria-label="Önizlemeyi kapat">×</button></div>
@@ -242,7 +440,6 @@ export function KitchenApp() {
         <div className="kitchen-print-preview-actions"><button onClick={() => setSelected(null)}>Kapat</button><button className="kitchen-print-confirm" onClick={() => window.print()}>Yazdır</button></div>
       </div>
     </div>}
-    <p className="ops-footer">Yazdır düğmesi cihazın tarayıcı baskı penceresini açar. Gerçek otomatik yazdırma için mutfak yazıcısının modeli ve sürücüsü ayrıca gerekir.</p>
   </main>;
 }
 

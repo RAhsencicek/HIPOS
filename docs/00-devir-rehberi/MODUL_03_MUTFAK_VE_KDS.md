@@ -4,7 +4,7 @@
 > **Kapsam:** KDS Ekranı, Durum Makinesi, Gecikme Alarmları, İstasyon Filtreleme ve ESC/POS Termal Fiş Basımı
 > **Modül Durumu:** Kalıcı KDS çekirdeği çalışıyor · Bildirim, satış iptali bağlantısı, gerçek yetki, offline çalışma ve yazıcı entegrasyonu eksik
 > **PostgreSQL Şeması:** `kitchen` (`tasks`, `task_audit`)
-> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif, servise hazır ve son servis edilenler)
+> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif, ikiye bölünmüş görünüm ve servise hazır)
 > **API:** Var (görev listesi ve sürüm kontrollü durum güncelleme)
 > **Test:** PostgreSQL kabul paketinde KDS görev üretimi, istasyon, durum, idempotency, sürüm ve audit senaryoları var
 > **Üretime Hazır mı?:** Hayır (Garson bildirimi, satış iptali bağlantısı, gerçek auth, offline/sync ve termal yazıcı servisi eksiktir)
@@ -31,7 +31,8 @@
 - Yerel ağ ve merkezi eşitleme ayrıntıları daha sonra netleştirilecektir; bu çalışma offline/sync uygulamaz.
 - İş modeli, PostgreSQL kalıcılığı, siparişten görev üretimi, liste/durum API'si ve ekran bağlantısı uygulanmıştır. İptal/gerekçe/onay akışı satış modülüyle birlikte sonraki entegrasyonda ele alınacaktır.
 - Sipariş kalemi notu için uçtan uca veri altyapısı hazırdır: satış isteği isteğe bağlı `notes` kabul eder, notu satış satırında ve mutfak görevinde saklar, mutfak API'sinde döndürür ve 80 mm fişin Not sütununda gösterir. Garson ekranındaki not giriş alanı henüz bağlı değildir.
-- İlk istasyon dilimi uygulanmıştır: `kitchen.stations` ve `kitchen.station_categories` kategoriye göre Fırın, Sıcak Mutfak, Bar ve Soğuk Mutfak yönlendirmesini yapar. Eşleşmeyen ürün görevleri silinmez ve `Atanmamış` filtresinde kalır. Demo kategori eşleştirmeleri migration ile kurulur; yönetim ekranından istasyon/eşleştirme düzenleme sonraki kapsamdır.
+- İstasyon modeli ve bölünmüş KDS görünümü: `kitchen.stations` ve `kitchen.station_categories` operasyonel sadeleştirme ile 2 istasyona düşürülmüştür: **Yiyecek** (`food` - pizza, sandwich, dessert) ve **İçecek** (`drink` - drinks). KDS ekranı çift sütunlu bölünmüş görünümde sol tarafta yiyecek siparişlerini, sağ tarafta içecek siparişlerini canlı ve eşzamanlı gösterir; istasyon filtreleri ile tek istasyona da odaklanılabilir. Eşleşmeyen ürün görevleri silinmez ve `Atanmamış` filtresinde/bölümünde kalır. Demo kategori eşleştirmeleri migration ile kurulur; yönetim ekranından istasyon/eşleştirme düzenleme sonraki kapsamdır.
+- Sipariş bazlı bilet gruplama: Aynı adisyona aynı sipariş kodu (`order_id`) ile gönderilen birden çok ürün satırı, mutfak ekranında aynı istasyon tarafında tek bir sipariş bilet kartında toplanır (örneğin pizza ve cheesecake yiyecek tarafında tek kartta; filtre kahve ve limonata içecek tarafında tek kartta satır satır gösterilir). Bilet üzerindeki durum butonları (`Hazırlamaya başla` / `Hazır` / `Servis edildi`) biletteki tüm aktif kalemleri toplu ve eşzamanlı günceller.
 - İptalin mutfak tarafındaki veri temeli hazırlanmıştır: görev `cancelled` durumunu, iptal zamanı, gerekçe ve aktörü saklar; KDS iptal edilen görevi kırmızı ve üzeri çizili geçmişte gösterebilir. İptal komutunun sahibi satış/adisyon modülüdür. Satış kalemi iptal endpoint'i ve müdür onayı henüz bulunmadığı için mutfak doğrudan iptal başlatmaz; gerçek bağlantı ortak entegrasyonda yapılacaktır.
 
 ### 📌 Hızlı Gerçeklik Özeti
@@ -39,7 +40,7 @@
   - `/kitchen` ekranı (`OperationalApps.tsx`) 3 saniyelik polling ile kalıcı `kitchen.tasks` görevlerini listeler.
   - Garsonun girdiği her sipariş kalemi ayrı görev olur; aynı adisyona sonradan gelen sipariş kendi süresini başlatır.
   - Dokunmatik `Bekliyor → Hazırlanıyor → Hazır → Servis edildi` geçişleri, sürüm kontrolü ve audit kaydı çalışır.
-  - Fırın, Sıcak Mutfak, Bar, Soğuk Mutfak ve Atanmamış filtreleri çalışır; gecikme süresi ve renkleri gösterilir.
+  - İkiye bölünmüş ekran görünümü (sol: Yiyecek, sağ: İçecek), Yiyecek (`food`), İçecek (`drink`) ve Atanmamış filtreleri çalışır; gecikme süresi ve renkleri gösterilir.
   - İptal bilgisini saklayacak alanlar ve iptal geçmişi görünümü vardır; satış/adisyon iptal komutu henüz bağlı değildir.
   - İsteğe bağlı sipariş notu satıştan mutfak görevine taşınır ve mutfak fişinde gösterilir; mevcut garson ekranında not giriş alanı henüz yoktur.
   <!-- 23 Ekim 2026: Salt-okunur prototip ifadesindeki eksik bilgi, tamamlanan kalıcı KDS akışıyla güncellendi. -->

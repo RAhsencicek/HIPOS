@@ -123,6 +123,96 @@ button, select { font: inherit; }
   .kitchen-grid { grid-template-columns: 1fr; }
   .kitchen-ticket { padding: 14px; }
 }
+
+.ops-shell.kitchen-shell { width: min(100% - 32px, 1440px); }
+.kitchen-split-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.kitchen-column {
+  border-radius: 16px;
+  background: #f7f9f6;
+  border: 1px solid #dfe5dc;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.kitchen-food-column {
+  border-top: 4px solid #ea580c;
+}
+.kitchen-drink-column {
+  border-top: 4px solid #0284c7;
+}
+.kitchen-column-single {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.kitchen-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #e2e8df;
+}
+.kitchen-column-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kitchen-column-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: .06em;
+  color: #24382c;
+}
+.kitchen-column-icon {
+  font-size: 20px;
+}
+.kitchen-column-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #294d35;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+.kitchen-food-column .kitchen-column-badge {
+  background: #ea580c;
+}
+.kitchen-drink-column .kitchen-column-badge {
+  background: #0284c7;
+}
+.kitchen-column-empty {
+  padding: 36px 16px;
+  background: #fff;
+  border: 1px dashed #cad2c7;
+  border-radius: 12px;
+}
+.station-food {
+  background: #ffedd5 !important;
+  color: #9a3412 !important;
+}
+.station-drink {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+}
+
+@media (max-width: 900px) {
+  .kitchen-split-container {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+}
+
 @media print {
   @page { size: 80mm auto; margin: 0; }
   html, body { width: 80mm; margin: 0; background: #fff; }

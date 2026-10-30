@@ -10,7 +10,7 @@
 Şu anki HIPOS mutfak arayüzü ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx)):
 * `GET /kitchen/tasks` endpoint'ini 3 saniyede bir çağırır ve PostgreSQL'deki kalıcı mutfak görevlerini gösterir.
 * Mutfak personeli `Hazırlanıyor`, `Hazır` ve `Servis Edildi` geçişlerini dokunmatik butonlarla kaydedebilir.
-* **İlk İstasyon Ayrımı Vardır:** Fırın, Sıcak Mutfak, Bar ve Soğuk Mutfak kategori eşleştirmeleri ile `Atanmamış` güvenli kuyruğu çalışır; yönetim ekranı henüz yoktur.
+* **İki İstasyon ve Bölünmüş Ekran (KDS Split Screen):** İstasyonlar 2 ana gruba indirilmiştir: **Yiyecek** (`food` - pizza, sandwich, dessert) ve **İçecek** (`drink` - drinks). KDS ekranı iki sütunlu bölünmüş görünümde bir tarafta yiyecek siparişlerini, diğer tarafta içecek siparişlerini canlı sunar; eşleşmeyenler için `Atanmamış` güvenli kuyruğu korunur; yönetim ekranı henüz yoktur.
 * **Garson ve İptal Bağları Eksiktir:** Hazır bildirimi garson ekranına gitmez; satış/adisyon kalem iptali ve müdür PIN onayı mutfağa bağlı değildir.
 * **Gerçek Auth ve Offline Kuyruk Eksiktir:** Demo aktör kullanılır; cihaz bağlantısı kesildiğinde işlemleri saklayıp tekrar gönderen kuyruk yoktur.
 * **Yazıcı Altyapısı Yoktur:** Garson sipariş girdiğinde mutfaktaki termal bilet yazıcısından (ESC/POS) otomatik kağıt fiş basılamaz.
@@ -21,9 +21,9 @@
 
 ## 2. Mutfak ve Hazırlık Durum Makinesi (KDS State Machine)
 
-22 Ekim 2026 kararı: sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı seçilmiştir. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer; `served` görev son servis edilenlerde görünür, kaydı ve audit geçmişi korunur. Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
+22 Ekim 2026 kararı: sipariş kalemi bazlı ayrı mutfak görevi yaklaşımı seçilmiştir. Aynı adisyona sonradan gelen sipariş yeni görevler ve yeni başlangıç süreleri oluşturur; eski hazırlık görevleri değişmez. Bir kalemdeki miktar tek görevde tutulur; kısmi miktar hazırlama henüz kapsamda değildir. Görev durumu satış/ödeme durumunu değiştirmez. Hazır görev aktif hazırlık listesinden ayrı “Servise hazır” bölümüne geçer; `served` görev kaydı ve audit geçmişi korunur (ekranda kalabalığı önlemek amacıyla son servis edilenler mutfak ekranından kaldırılmıştır). Kalıcılık, liste/durum API'si ve `/kitchen` ekran bağlantısı uygulanmıştır. Yerel ağ/senkronizasyon kararları ertelenmiştir.
 
-İlk istasyon yönlendirmesi de uygulanmıştır. Demo şubede ürün kategorileri `pizza → Fırın`, `sandwich → Sıcak Mutfak`, `drinks → Bar`, `dessert → Soğuk Mutfak` olarak eşlenir. Görev oluşturulurken eşleşme bulunamazsa `station_id` boş kalır ve ekran görevi `Atanmamış` kuyruğunda gösterir; sipariş hiçbir durumda sessizce kaybolmaz. Bu eşleştirmelerin yönetim ekranından değiştirilmesi henüz kapsamda değildir.
+İstasyon yönlendirmesi 2 ana gruba göre yapılandırılmıştır. Demo şubede ürün kategorileri `pizza, sandwich, dessert → Yiyecek (food)`, `drinks → İçecek (drink)` olarak eşlenir. Görev oluşturulurken eşleşme bulunamazsa `station_id` boş kalır ve ekran görevi `Atanmamış` kuyruğunda gösterir; sipariş hiçbir durumda sessizce kaybolmaz. KDS ekranı varsayılan olarak ikiye bölünmüş görünümde sol tarafta Yiyecek, sağ tarafta İçecek siparişlerini gösterir. Bu eşleştirmelerin yönetim ekranından değiştirilmesi henüz kapsamda değildir.
 
 İptal entegrasyonunun mutfak veri modeli de hazırdır: `cancelled_at`, `cancellation_reason` ve `cancelled_by` saklanır; `served` veya daha önce `cancelled` olmuş görev yeniden iptal edilemez. KDS iptal geçmişini kırmızı/üzeri çizili gösterir. Kaynak komut mutfaktan verilmez; satış/adisyon modülündeki gerekçeli kalem iptali ve gerekli müdür onayı tamamlandığında aynı transaction/olay sınırından mutfak görevine aktarılacaktır.
 

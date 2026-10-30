@@ -29,17 +29,16 @@ Mutfak modülünde çekirdek iş mantığından arayüze, veritabanı kalıcıl�
 - **Sürüm Kontrolü ve İdempotency:** Her durum geçişinde `expectedVersion` kontrolü yapılır, eşzamanlı çakışmalar engellenir.
 - **Denetim İzi (`kitchen.task_audit`):** Tüm durum geçişleri işlem zamanı, aktör ve kaynak bilgisiyle kalıcı olarak saklanır.
 
-### 2.3. İstasyon Ayrımı ve Otomatik Yönlendirme
-- `kitchen.stations` ve `kitchen.station_categories` tabloları üzerinden ürün kategorisine göre otomatik istasyon ayrımı kurgulanmıştır:
-  - 🍕 **Taş Fırın**
-  - 🍳 **Sıcak Mutfak**
-  - 🍹 **Bar / İçecek**
-  - 🥗 **Soğuk Mutfak**
+### 2.3. İstasyon Ayrımı ve Otomatik Yönlendirme (2 İstasyonlu Model)
+- `kitchen.stations` ve `kitchen.station_categories` tabloları üzerinden ürün kategorisine göre otomatik istasyon ayrımı 2 ana istasyona sadeleştirilmiştir:
+  - 🍕 **Yiyecek (`food`):** Pizza, Sandviç, Tatlı vb.
+  - 🥤 **İçecek (`drink`):** Sıcak ve soğuk içecekler, bar ürünleri.
 - Kategorisi eşleşmeyen veya istasyonu tanımlanmamış ürünler kaybolmaz; **"Atanmamış"** sekmesinde toplanır.
 
-### 2.4. Dokunmatik KDS Arayüzü ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx#L38-L120) — `/kitchen`)
+### 2.4. İkiye Bölünmüş Dokunmatik KDS Arayüzü ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx#L38-L120) — `/kitchen`)
+- **İkiye Bölünmüş Görünüm (Split Screen):** Sayfa yan yana iki ana kolona ayrılmıştır: Sol tarafta **Yiyecek Siparişleri**, sağ tarafta **İçecek Siparişleri** eşzamanlı akar.
 - **Canlı Polling:** 3 saniyelik periyodik sorgulama ile PostgreSQL veritabanındaki görevleri canlı listeler.
-- **İstasyon Sekmeleri:** Aşçının kendi istasyonunu seçebildiği filtreleme çubuğu (`Tümü`, `Fırın`, `Sıcak Mutfak`, `Bar`, `Soğuk Mutfak`, `Atanmamış`).
+- **İstasyon Sekmeleri:** `İkili Ekran (Tümü)`, `🍕 Yiyecek`, `🥤 İçecek` ve varsa `Atanmamış` butonları ile tek istasyona da odaklanılabilir.
 - **Geçen Süre Sayaçları ve Renk Alarmları:**
   - `0 - 10 dk`: Normal süre.
   - `10 - 20 dk`: Sarı gecikme uyarısı.
