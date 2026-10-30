@@ -8,7 +8,7 @@ type Line = { productId: string; productName: string; quantity: number; unitPric
 type Assignment = { id: string; orderId: string; waiterId: string | null; waiterName: string | null;
   openedAt: string; orderCreatedAt: string; orderStatus: string; paymentStatus: string;
   totalMinor: number; version: number; items: Line[] };
-type Table = { id: string; number: number; name: string; isActive: boolean; group?: { tableNames: string[]; guestCount: number } | null; assignment?: Assignment | null };
+type Table = { id: string; number: number; name: string; isActive: boolean; floor: "lower" | "upper" | null; version: number; group?: { tableNames: string[]; guestCount: number } | null; assignment?: Assignment | null };
 type Waiter = { id: string; name: string; isActive: boolean };
 type TableResponse = { source: "postgres"; tablesEnabled: boolean; waitersEnabled: boolean; items: Table[] };
 
@@ -17,7 +17,7 @@ const dateTime = (value: string) => new Intl.DateTimeFormat("tr-TR", {
   dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Istanbul",
 }).format(new Date(value));
 
-async function serviceApi<T>(path: string, actor: string, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown): Promise<T> {
+async function serviceApi<T>(path: string, actor: string, method: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
@@ -94,6 +94,16 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
     finally { setBusy(false); }
   }
 
+  async function changeFloor(floor: "lower" | "upper" | null) {
+    if (!scope || !selected || busy || !data?.tablesEnabled) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await serviceApi(`${scope}/tables/${encodeURIComponent(selected.id)}/floor`, actor, "PUT", { floor, expectedVersion: selected.version });
+      setNotice(`${selected.name} için kat bilgisi kaydedildi.`); await reload();
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setBusy(false); }
+  }
+
   async function removeLastTable() {
     if (!scope || !lastTable || lastTable.assignment || lastTable.group || busy) return;
     setBusy(true); setError(""); setNotice("");
@@ -151,6 +161,8 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
           <span className="card-kicker">MASA DETAYI</span>
           {!selected ? <><h2>Masa seçin</h2><p>Adisyon, sipariş zamanı, ürünler ve sorumlu garson için bir masaya tıklayın.</p></> : <>
             <h2>{selected.name}</h2>
+            <label className="service-floor-field">Kat<select value={selected.floor ?? ""} disabled={busy || !data.tablesEnabled} onChange={(event) => void changeFloor((event.target.value || null) as "lower" | "upper" | null)}><option value="">Kat seçilmedi</option><option value="lower">Alt kat</option><option value="upper">Üst kat</option></select></label>
+            <p className="service-floor-hint">Bu seçim garson ekranındaki masa sıralamasını belirler.</p>
             {selected.group && <p>Masa grubu: {selected.group.tableNames.join(" + ")} · {selected.group.guestCount} kişi. Ortak hesap ana masada tutulur.</p>}
             {!selected.isActive && <StatusPill tone="orange">Masa pasif</StatusPill>}
             {!selected.assignment ? <p>Bu masada açık adisyon yok.</p> : <>

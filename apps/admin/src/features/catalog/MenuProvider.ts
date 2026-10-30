@@ -4,7 +4,7 @@ import type { CatalogScope, Money } from "./contracts";
 export type MenuSection = { sectionId: string; name: string; productIds: string[] };
 export type RestaurantMenu = { id: string; name: string; description: string; isActive: boolean;
   version: number; updatedAt: string; sections: MenuSection[] };
-export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; image: string; price: Money };
+export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; channels: string[]; image: string; price: Money };
 export type MenuWorkspace = { source: "postgres" | "mock"; items: RestaurantMenu[];
   categories: { id: string; name: string; isActive: boolean }[]; products: MenuProduct[] };
 export type MenuSaveInput = { requestId: string; expectedVersion: number; name: string; description: string; sections: MenuSection[] };
@@ -44,7 +44,7 @@ export function sampleMenus(scope: CatalogScope): MenuWorkspace {
   if (scope.firmId !== demo.firm.id || scope.branchId !== demo.branch.id)
     return { source: "mock", categories: [], products: [], items: [] };
   return { source: "mock", categories: demo.categories.map(x => ({ ...x, isActive: true })),
-    products: demo.products.map(x => ({ id: x.id, name: x.name, categoryId: x.categoryId, status: "published", isActive: true, image: x.image,
+    products: demo.products.map(x => ({ id: x.id, name: x.name, categoryId: x.categoryId, status: "published", isActive: true, channels: ["pos"], image: x.image,
       price: { amountMinor: x.priceMinor, currency: "TRY" } })),
     items: [{ id: "sample-main", name: "Ana Menü", description: "Fırından çıkan lezzetler, tatlılar ve içecekler.", isActive: true,
       version: 1, updatedAt: "2026-10-08T09:00:00Z", sections: demo.categories.map(c => ({ sectionId: `catalog-${c.id}`, name: c.name,

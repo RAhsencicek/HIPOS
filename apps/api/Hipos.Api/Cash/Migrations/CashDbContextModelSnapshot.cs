@@ -354,6 +354,11 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("opening_cash_minor");
 
+                    b.Property<string>("OpeningNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("opening_note");
+
                     b.Property<Guid>("RegisterId")
                         .HasColumnType("uuid")
                         .HasColumnName("register_id");

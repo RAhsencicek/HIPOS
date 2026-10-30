@@ -23,9 +23,10 @@ export function useProductList(
   scope: CatalogScope,
   query: string,
   categoryId: string | undefined,
+  page = 1,
 ): CatalogLoad<ProductListResponse> {
   const { provider, mode, revision } = useCatalogProvider();
-  const requestKey = `${mode}:${revision}:${scope.firmId}:${scope.branchId ?? "all"}:${query}:${categoryId ?? "all"}`;
+  const requestKey = `${mode}:${revision}:${scope.firmId}:${scope.branchId ?? "all"}:${query}:${categoryId ?? "all"}:${page}`;
   const [load, setLoad] = useState<{
     key: string;
     value: CatalogLoad<ProductListResponse>;
@@ -38,7 +39,7 @@ export function useProductList(
     let current = true;
     setLoad({ key: requestKey, value: { status: "loading" } });
     provider
-      .listProducts({ scope, query, categoryId, page: 1, pageSize: 25 })
+      .listProducts({ scope, query, categoryId, page, pageSize: 25 })
       .then((data) => {
         if (current)
           setLoad({ key: requestKey, value: { status: "success", data } });
@@ -53,7 +54,7 @@ export function useProductList(
     return () => {
       current = false;
     };
-  }, [provider, requestKey, scope.firmId, scope.branchId, query, categoryId]);
+  }, [provider, requestKey, scope.firmId, scope.branchId, query, categoryId, page]);
 
   return load.key === requestKey ? load.value : { status: "loading" };
 }
@@ -69,6 +70,10 @@ export function useCategoryList(scope: CatalogScope): CatalogLoad<CategoryListRe
   useEffect(() => {
     let current = true;
     setLoad({ key: requestKey, value: { status: "loading" } });
+    if (!scope.branchId) {
+      setLoad({ key: requestKey, value: { status: "success", data: { scope, items: [] } } });
+      return () => { current = false; };
+    }
     provider.listCategories(scope).then((data) => {
       if (current) setLoad({ key: requestKey, value: { status: "success", data } });
     }).catch((error: unknown) => {

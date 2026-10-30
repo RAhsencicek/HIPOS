@@ -45,6 +45,9 @@ public sealed class CatalogProductActivationCommands(CatalogDbContext db, Featur
             return new CatalogProductActivationResult(productId, previous.IsActive, previous.Version, null, true);
         }
 
+        var draft = await db.Drafts.FromSqlInterpolated(
+            $"SELECT * FROM catalog.drafts WHERE id = {productId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
         var product = await db.Products.FromSqlInterpolated(
             $"SELECT * FROM catalog.products WHERE id = {productId} AND firm_id = {firmId} AND branch_ids @> ARRAY[{branchId}]::text[] FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
@@ -62,6 +65,17 @@ public sealed class CatalogProductActivationCommands(CatalogDbContext db, Featur
             product.IsActive = command.IsActive;
             product.Version++;
             product.UpdatedAt = now;
+            if (draft is not null)
+            {
+                draft.Version = product.Version;
+                draft.UpdatedAt = now;
+                db.DraftAudit.Add(new CatalogDraftAuditRow
+                {
+                    DraftId = draft.Id, FirmId = firmId, BranchId = branchId,
+                    Actor = actor, Action = command.IsActive ? "activated" : "deactivated",
+                    Version = draft.Version, OccurredAt = now,
+                });
+            }
         }
         db.ProductActivationAudit.Add(new CatalogProductActivationAuditRow
         {

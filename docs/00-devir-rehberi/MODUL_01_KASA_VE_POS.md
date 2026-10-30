@@ -23,6 +23,10 @@
 
 ---
 
+### Kasiyer ekranı: güncel geliştirme durumu
+
+Kasiyer ekranında masa/adisyon görünümü, hızlı satış, test ödemesi, hesap fişinin tarayıcıdan yazdırılması ve manuel vardiya açma/kapatma arayüzü vardır. Açılış notu kaydedilir; kapatmada kupür girişi yalnız toplamı hesaplar. Açık masa uyarısı kapanış kilidi değildir. Gerçek tahsilat, kasaya otomatik satış hareketi, gerçek kasiyer oturumu, mali fiş ve Z raporu yoktur. Güncel ayrıntılar [Kasa/POS operasyon sözleşmesindedir](../02-kasa-ve-operasyon/KASA_POS_VE_OPERASYON_SOZLESMESI.md).
+
 ### 📌 Hızlı Gerçeklik Özeti
 * **Manuel Kasa MVP'si (Bugün Kodda Gerçekten Çalışanlar):**
   - Tek kasa (`MAIN`) için manuel vardiya açma/kapatma

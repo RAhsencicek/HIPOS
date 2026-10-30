@@ -24,7 +24,7 @@ public static class CatalogMenuEndpoints
             if (Guard(ctx, firmId, branchId, ready, false) is { } denied) return denied;
             var products = await db.Products.AsNoTracking().Include(x => x.BranchPrices)
                 .Where(x => x.FirmId == firmId && x.BranchIds.Contains(branchId)).OrderBy(x => x.Name).ToListAsync(ctx.RequestAborted);
-            var categories = await db.Categories.AsNoTracking().Where(x => x.FirmId == firmId)
+            var categories = await db.Categories.AsNoTracking().Where(x => x.FirmId == firmId && x.BranchId == branchId)
                 .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).Select(x => new { x.Id, x.Name, x.IsActive }).ToListAsync(ctx.RequestAborted);
             var menus = await db.Menus.AsNoTracking().Where(x => x.FirmId == firmId && x.BranchId == branchId)
                 .OrderByDescending(x => x.IsActive).ThenBy(x => x.Name).ToListAsync(ctx.RequestAborted);
@@ -32,7 +32,7 @@ public static class CatalogMenuEndpoints
             var sections = await db.MenuSections.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
             var items = await db.MenuItems.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
             return Results.Ok(new { source = "postgres", items = menus.Select(x => View(x, sections, items)), categories,
-                products = products.Select(x => new { x.Id, x.Name, x.CategoryId, x.Status, x.IsActive, x.Image,
+                products = products.Select(x => new { x.Id, x.Name, x.Sku, x.CategoryId, x.Status, x.IsActive, x.Channels, x.Image,
                     price = new CatalogMoney(x.BranchPrices.FirstOrDefault(p => p.BranchId == branchId)?.AmountMinor ?? x.BasePriceMinor, x.Currency) }) });
         });
         group.MapPost("", (string firmId, string branchId, SaveCatalogMenu command, HttpContext ctx,
@@ -104,17 +104,6 @@ public static class CatalogMenuEndpoints
         if (row.Version != input.ExpectedVersion) return Fail("VERSION_CONFLICT", 409, "Menü başka bir işlemle değişti. Güncel kaydı yükleyin.");
         var sections = await Sections(db, id, ctx);
         if (input.IsActive && await Validate(db, firm, branch, sections, true, ctx) is { } invalid) return invalid;
-        if (input.IsActive)
-        {
-            var previous = await db.Menus.Where(x => x.FirmId == firm && x.BranchId == branch && x.IsActive && x.Id != id).ToListAsync(ctx.RequestAborted);
-            foreach (var other in previous)
-            {
-                other.IsActive = false; other.Version++; other.UpdatedAt = DateTimeOffset.UtcNow;
-                AddAudit(db, other, Guid.NewGuid(), fingerprint, "replaced_active", await Sections(db, other.Id, ctx), ctx);
-            }
-            // Önce eski aktif satırı boşalt: kısmi tekillik kısıtı her SQL komutunda geçerlidir.
-            await db.SaveChangesAsync(ctx.RequestAborted);
-        }
         row.IsActive = input.IsActive; row.Version++; row.UpdatedAt = DateTimeOffset.UtcNow;
         AddAudit(db, row, input.RequestId, fingerprint, input.IsActive ? "activated" : "deactivated", sections, ctx);
         return await Commit(db, tx, row, ctx);
@@ -127,9 +116,9 @@ public static class CatalogMenuEndpoints
             .Where(x => x.FirmId == firm && x.BranchIds.Contains(branch) && ids.Contains(x.Id)).ToListAsync(ctx.RequestAborted);
         if (products.Count != ids.Length)
             return Fail("INVALID_MENU_PRODUCT", 400, "Seçilen ürünlerden biri bu firmaya veya şubeye ait değil.");
-        if (active && (ids.Length == 0 || sections.Any(s => s.ProductIds.Length == 0) || products.Any(p => !p.IsActive || p.Status != "published" ||
+        if (active && (ids.Length == 0 || sections.Any(s => s.ProductIds.Length == 0) || products.Any(p => !p.IsActive || p.Status != "published" || !p.Channels.Contains("pos") ||
             p.Currency != "TRY" || (p.BranchPrices.FirstOrDefault(x => x.BranchId == branch)?.AmountMinor ?? p.BasePriceMinor) <= 0)))
-            return Fail("MENU_NOT_READY", 409, "Aktif menüde boş kategori olamaz; yalnız aktif, yayınlanmış ve geçerli fiyatlı ürün kullanılabilir.");
+            return Fail("MENU_NOT_READY", 409, "POS'ta kullanılabilir menüde boş bölüm olamaz; yalnız aktif, POS kanalında yayınlanmış ve geçerli fiyatlı ürün kullanılabilir.");
         return null;
     }
 
@@ -159,7 +148,7 @@ public static class CatalogMenuEndpoints
         try { await db.SaveChangesAsync(ctx.RequestAborted); await tx.CommitAsync(ctx.RequestAborted); }
         catch (DbUpdateConcurrencyException) { return Fail("VERSION_CONFLICT", 409, "Menü başka bir işlemle değişti."); }
         catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        { return Fail("REQUEST_ID_CONFLICT", 409, "İstek kimliği veya aktif menü çakıştı. Kayıtları yenileyin."); }
+        { return Fail("REQUEST_ID_CONFLICT", 409, "İstek kimliği çakıştı. Kayıtları yenileyin."); }
         return Results.Ok(new { id = row.Id, version = row.Version, replayed = false });
     }
     private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));

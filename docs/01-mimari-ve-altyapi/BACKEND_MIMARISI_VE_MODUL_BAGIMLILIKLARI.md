@@ -25,7 +25,7 @@ API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm w
 | Modül | PostgreSQL şeması | Sahip olduğu veri | Durum |
 |---|---|---|---|
 | Özellik yönetimi | `modules` | Şube bazlı tercih, etkin yeni iş durumu, sürüm ve audit | PostgreSQL’de çalışıyor; kullanıcı/rol kimliği demo. |
-| Ürünler ve Menü | `catalog` | Kategori, ürün, fiyat sürümü, yayın anlık görüntüsü, taslak, menü, menüye özel adlandırılmış bölümler ve sıralı ürün bağları | Liste/detay, taslak, fiyat sürümü ve ilk yayın yanında; mevcut ürünleri farklı katalog kategorilerinden seçip özel menü başlığı altında yeniden kullanma, menü sıralama ve aktif menü seçimi API’ye bağlı. Menü yeni ürün/fiyat kopyası üretmez. |
+| Ürünler ve Menü | `catalog` | Şube kategorisi, ürün, fiyat sürümü, yayın ve düzenleme geçmişi, seçenekler, menü ve bölümler | Fiyatlı ürün oluşturma, tek şubeli yayımlanmış ürün düzenleme, fiyat güncelleme, seçenek yönetimi ve POS yayını API’ye bağlıdır. Menü mevcut ürünleri kullanır; yeni ürün/fiyat kopyası üretmez. |
 | Satış ve Adisyon | `sales` | `checks`, `orders`, kalemler, fiyat snapshot'ı, simüle payment attempts/audit | Ortak adisyon API'si check açma, sipariş ekleme, liste/detay ve check üzerinden simüle ödeme başlatma/sonuçlandırmayı sağlar. Tam tahsilat simülasyonu adisyonu kapatır; masa/grup boşaltma aynı transaction içinde `PaidCheckTableSettlement` ile Service alanına devredilir. Gerçek tahsilat/refund, mali belge ve operasyonel KDS state machine yoktur. |
 | Personel ve Masa Servisi | `service` | Şube kapsamlı personel, masa, personel-adisyon bağı ve audit | `staff.records` personel kartını; `branches.tables`/`service.waiters` masa-servis bağını yönetir. Panel bölüm/görev kartı CRUD ve ayrı çalışan ızgaraları sunar. Bordro, puantaj, POS kimliği yok. |
 | Cari | `cari` | Müşteri/tedarikçi kartı ve iletişimi, semantik hareket defteri, ekstre, audit | PostgreSQL'de kalıcı; müşteri ve tedarikçi capability'leri ayrı. Tahsilat/ödeme elle girilen işletme kaydıdır; banka/POS/fatura değildir. |
@@ -100,8 +100,8 @@ Masa servisini kapatma, devam eden açık masa-adisyon bağlarını şu an `drai
 Temel endpoint envanteri:
 
 - `GET /api/v1/features/definitions`; `GET/PUT /api/v1/firms/{firmId}/branches/{branchId}/features...`
-- `/api/v1/firms/{firmId}/catalog/...`: ürün/kategori okuma, taslak, fiyat sürümü ve ilk yayın.
-- `/api/v1/firms/{firmId}/branches/{branchId}/catalog/menus`: menü genel bakışı ve düzenleyici sözlüğü, sürümlü içerik yazma, tek aktif menü seçimi. [Menü sözleşmesi](../03-is-alanlari-ve-yonetim/MENU_YONETIMI_MVP.md).
+- `/api/v1/firms/{firmId}/catalog/...` ve şube kapsamlı katalog uçları: ürün/kategori okuma, fiyatlı ürün kaydı, düzenleme, seçenekler, fiyat sürümü ve POS yayını.
+- `/api/v1/firms/{firmId}/branches/{branchId}/catalog/menus`: menü genel bakışı ve düzenleyici sözlüğü, sürümlü içerik yazma, aynı şubede birden fazla aktif menüyü POS'a sunma. [Menü sözleşmesi](../03-is-alanlari-ve-yonetim/MENU_YONETIMI_MVP.md).
 - `/api/v1/firms/{firmId}/sales/orders...`: legacy/test sipariş listeleme/oluşturma ve simüle ödeme akışı.
 - `/api/v1/firms/{firmId}/branches/{branchId}/sales/checks...`: ortak adisyon açma, sipariş ekleme, liste/detay ve adisyona bağlı simüle ödeme. [Ortak Adisyon Sözleşmesi](../02-kasa-ve-operasyon/ORTAK_ADISYON_SOZLESMESI.md).
 - `/api/v1/firms/{firmId}/branches/{branchId}/caris...`: cari kart, hareket ve ekstre.

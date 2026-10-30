@@ -76,6 +76,10 @@ Sizin çalışma alanınız temel olarak şuralardır (doğrudan kod satırına 
 * Hesap isteme ve rezervasyon durumları bu adımla kalıcı Service masa durumlarına ve garson ekranına eklenmiştir. Kalem iptali adisyon kaydına ek olarak mutfak sipariş anlık görüntüsüne iptal bildirimi satırı yazar. Development simüle tahsilatında tam ödenen adisyon kapanır; masadaki/gruptaki diğer açık adisyonlar da bitince salon masaları boşaltılır. Gerçek kasa/POS tahsilatı henüz yoktur.
 
 ### 🗺️ Salon Masa Planı ve Durumları
+
+* Masa katı yönetim panelindeki Masa Planı ekranından **Alt kat**, **Üst kat** veya **Kat seçilmedi** olarak belirlenir. Kayıt şubeye bağlıdır; mevcut ve yeni masalar otomatik bir kata atanmaz. Garson ekranı seçilmiş katları ayrı başlık ve çizgilerle, atanmamış masaları ayrı gösterir.
+* Kat güncellemesi yönetici kapsamı, `branches.tables` ve güncel masa sürümü gerektirir. `PUT /service/tables/{tableId}/floor` `{ floor: "lower" | "upper" | null, expectedVersion }` kabul eder; masa ve adisyon kimliklerini değiştirmez. `AddTableFloor` Service migration'ı uygulanmalıdır.
+
 * **Boş masa:** Açık adisyon yok; hedef akışta seçilince yeni ortak adisyon başlatılır.
 * **Dolu masa / açık hesap:** Açık adisyon ve tutar görünür.
 * **Hesap istendi:** Müşteri hesabı istemiştir; Service veritabanına yazılır, tahsilat tamamlanana veya istek kaldırılana kadar masa dolu kalır.

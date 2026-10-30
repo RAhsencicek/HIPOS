@@ -14,6 +14,7 @@ import { StatusPill } from "../shared/ui";
 import { Dashboard } from "../features/overview/OverviewPage";
 import { ProductsPage, ProductDetail, CategoriesPage } from "../features/catalog/CatalogPages";
 import { MenusPage } from "../features/catalog/MenusPage";
+import { OptionGroupsPage } from "../features/catalog/ProductOptionsPanel";
 import { BranchesPage } from "../features/branches/BranchesPage";
 import { ServiceTablesPage } from "../features/branches/ServiceTablesPage";
 import { ServicePersonnelPage } from "../features/branches/ServicePersonnelPage";
@@ -209,10 +210,12 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
       generic = true;
       content = found ? <GenericPage section={found} sources={sources} /> : <Dashboard ctx={ctx} />;
     }
+  } else if (section === "catalog" && item === "options") {
+    content = <OptionGroupsPage scope={{ firmId: ctx.firmId, branchId: ctx.branchApiId }} canManage={canWriteDraft} />;
   } else if (section === "catalog" && item === "products") {
-    content = <ProductsPage ctx={ctx} canPreviewNewWork={canPreviewNewWork} canWriteDraft={canWriteDraft} />;
+    content = <ProductsPage ctx={ctx} canPreviewNewWork={canPreviewNewWork} canWriteDraft={canWriteDraft} canSetPrice={canSetPrice} />;
   } else if (section === "catalog" && item === "categories") {
-    content = <CategoriesPage ctx={ctx} />;
+    content = <CategoriesPage ctx={ctx} canWriteDraft={canWriteDraft && canSetPrice} />;
   } else if (section === "branches" && item === "tables") {
     content = <ServiceTablesPage ctx={ctx} source={serviceSource} />;
   } else if (section === "kitchen" && item === "personnel") {
@@ -276,6 +279,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     (basePresentation.stage === "working" || basePresentation.stage === "demo")
     ? { stage: "setup" as const, label: "Kurulum gerekiyor", description: "Bu şubede gerekli kurulum tamamlanmadan yeni işlem başlatılamaz." }
     : basePresentation;
+  const suppressCatalogStageNotice = Boolean(productId) || section === "catalog" && (!item || item === "menus" || item === "categories" || item === "products");
 
   return (
     <>
@@ -302,7 +306,8 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
           görünümünde yeni işlem için önce hedef şubeyi seçin.
         </div>
       )}
-      {!generic && !(presentationSection === "overview" && presentationItem === "daily") && <div className="notice feature-stage-notice" role="status">
+      {!generic && !(presentationSection === "overview" && presentationItem === "daily") &&
+        !suppressCatalogStageNotice && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>
       </div>}

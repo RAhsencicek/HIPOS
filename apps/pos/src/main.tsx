@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { PaymentSimulatorPanel } from "./PaymentSimulatorPanel";
 import { mountOperationalApp } from "./OperationalApps";
 import { createRequestId } from "./requestId";
+import { ProductOptionPicker, type OptionSelection } from "./ProductOptionPicker";
 import type { TestOrder } from "./PaymentSimulatorPanel";
 import "./styles.css";
 
@@ -60,6 +61,7 @@ function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState(1);
+  const [optionSelection, setOptionSelection] = useState<OptionSelection | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +75,7 @@ function App() {
     setOrder(null);
     setRetryId(null);
     setProductId("");
+    setOptionSelection(null);
     api<{ items: Product[] }>(
       `/api/v1/firms/${scope.firmId}/catalog/products?branchId=${scope.branchId}&page=1&pageSize=100`,
       scope.actor,
@@ -91,7 +94,7 @@ function App() {
 
   const selected = products.find((item) => item.id === productId);
   async function createOrder() {
-    if (!selected || saving || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) return;
+    if (!selected || !optionSelection?.valid || saving || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) return;
     const orderId = retryId ?? createRequestId();
     setRetryId(orderId);
     setSaving(true);
@@ -99,7 +102,7 @@ function App() {
     try {
       const created = await api<TestOrder>(
         `/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/sales/orders`,
-        scope.actor, { orderId, items: [{ productId: selected.id, quantity }] },
+        scope.actor, { orderId, items: [{ productId: selected.id, quantity, options: optionSelection.items.map(item => ({ groupId: item.groupId, optionId: item.optionId, quantity: item.quantity })) }] },
       );
       setOrder(created);
       setRetryId(null);
@@ -115,7 +118,7 @@ function App() {
       <header>
         <span className="brand">HIPOS <span>TEST POS</span></span>
         <p>Yalnız geliştirme ortamı · Gerçek tahsilat yapılmaz</p>
-        <nav className="role-links"><a href="/waiter">Garson ekranı</a><a href="/kitchen">Mutfak kuyruğu</a></nav>
+        <nav className="role-links"><a href="/cashier">Kasa ekranı</a><a href="/waiter">Garson ekranı</a><a href="/kitchen">Mutfak kuyruğu</a></nav>
       </header>
       <section className="card">
         <p className="eyebrow">AYRI OPERASYON YÜZÜ</p>
@@ -127,15 +130,16 @@ function App() {
         </select>
         <label htmlFor="product">Yayınlanmış POS ürünü</label>
         <select id="product" value={productId} disabled={loading || products.length === 0 || saving}
-          onChange={(event) => { setProductId(event.target.value); setRetryId(null); setOrder(null); }}>
+          onChange={(event) => { setProductId(event.target.value); setOptionSelection(null); setRetryId(null); setOrder(null); }}>
           <option value="">Ürün seçin</option>
           {products.map((item) => <option key={item.id} value={item.id}>{item.name} · {money(item.price.amountMinor)}</option>)}
         </select>
         <label htmlFor="quantity">Adet</label>
         <input id="quantity" type="number" min="1" max="99" value={quantity}
           onChange={(event) => { setQuantity(Number(event.target.value)); setRetryId(null); setOrder(null); }} />
-        {selected && <p className="total">Sipariş toplamı <strong>{money(selected.price.amountMinor * quantity)}</strong></p>}
-        <button disabled={!selected || saving || order !== null || quantity < 1 || quantity > 99 || !Number.isInteger(quantity)}
+        {selected && <ProductOptionPicker key={`${scope.key}:${selected.id}`} firmId={scope.firmId} branchId={scope.branchId} actor={scope.actor} productId={selected.id} basePriceMinor={selected.price.amountMinor} onChange={(value) => { setOptionSelection(value); setRetryId(null); }} />}
+        {selected && <p className="total">Sipariş toplamı <strong>{money((optionSelection?.unitPriceMinor ?? selected.price.amountMinor) * quantity)}</strong></p>}
+        <button disabled={!selected || !optionSelection?.valid || saving || order !== null || quantity < 1 || quantity > 99 || !Number.isInteger(quantity)}
           onClick={createOrder}>{saving ? "Kaydediliyor…" : order ? "Sipariş kaydedildi" : "Sipariş oluştur"}</button>
         {loading && <p role="status">Ürünler yükleniyor…</p>}
         {!loading && products.length === 0 && !error && <p role="status">Bu şubede satışa açık POS ürünü yok.</p>}

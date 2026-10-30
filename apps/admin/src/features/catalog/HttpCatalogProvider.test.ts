@@ -72,6 +72,30 @@ describe("HttpCatalogProvider", () => {
     expect(JSON.parse(options.body)).toEqual({ draftId: command.draftId, name: command.name, sku: command.sku, categoryId: command.categoryId, categoryName: command.categoryName, description: command.description });
   });
 
+  it("ürünü fiyat ve alerjenleriyle seçili şubeye kaydeder", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "product" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const command = { scope, draftId: "product", priceVersionId: "price", name: "Ayran", sku: "AY-1",
+      categoryId: "drinks", categoryName: "İçecekler", description: "", amountMinor: 7550, allergens: ["süt"] };
+    await new HttpCatalogProvider().createPricedProduct(command);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(new URL(url, testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products`);
+    expect(JSON.parse(options.body)).toMatchObject({ draftId: "product", priceVersionId: "price", amountMinor: 7550, allergens: ["süt"] });
+  });
+
+  it("yayımlanmış ürün değişikliğini ve fiyatını sürümle gönderir", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new HttpCatalogProvider();
+    await provider.updatePublishedProduct({ scope, draftId: "p1", requestId: "r1", name: "Ayran", sku: "AY-1",
+      categoryId: "drinks", categoryName: "İçecekler", description: "", allergens: ["süt"], expectedVersion: 2 });
+    await provider.setPublishedPrice({ scope, draftId: "p1", priceVersionId: "v1", amountMinor: 8500, expectedVersion: 3 });
+    expect(new URL(fetchMock.mock.calls[0][0], testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products/p1`);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ requestId: "r1", allergens: ["süt"], expectedVersion: 2 });
+    expect(new URL(fetchMock.mock.calls[1][0], testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products/p1/price`);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ priceVersionId: "v1", amountMinor: 8500, expectedVersion: 3 });
+  });
+
   it("taslak güncellemede beklenen sürümü gönderir ve çatışmayı başarıya çevirmez", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: "VERSION_CONFLICT", detail: "Taslak değişti." }), { status: 409 }));
     vi.stubGlobal("fetch", fetchMock);

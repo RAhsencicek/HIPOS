@@ -61,8 +61,12 @@ export type ProductListResponse = {
 
 export type CategoryListResponse = {
   scope: CatalogScope;
-  items: Array<{ id: string; name: string; productCount: number }>;
+  items: Array<{ id: string; name: string; productCount: number; version?: number; isActive?: boolean; sortOrder?: number }>;
 };
+
+export type CategoryMutationResult = { id: string; name: string; version: number; isActive: boolean; sortOrder: number };
+export type CreateCategoryRequest = { scope: CatalogScope; id: string; name: string };
+export type RenameCategoryRequest = { scope: CatalogScope; categoryId: string; name: string; expectedVersion: number };
 
 export type ProductDetailRequest = {
   scope: CatalogScope;
@@ -75,18 +79,21 @@ export type DraftFields = {
   categoryId: string;
   categoryName: string;
   description: string;
+  allergens?: string[];
 };
 
 export type CreateDraftRequest = DraftFields & {
   scope: CatalogScope;
   draftId: string;
 };
+export type CreatePricedProductRequest = CreateDraftRequest & { priceVersionId: string; amountMinor: number };
 
 export type UpdateDraftRequest = DraftFields & {
   scope: CatalogScope;
   draftId: string;
   expectedVersion: number;
 };
+export type UpdatePublishedProductRequest = UpdateDraftRequest & { requestId: string };
 
 export type PriceVersion = {
   id: string;
@@ -134,17 +141,37 @@ export type SetProductActiveRequest = {
 export type PriceResult = { product: CatalogProductDetail; priceVersion: PriceVersion };
 export type PublicationResult = { product: CatalogProductDetail; publication: Publication };
 
+export type CatalogOptionItem = { id: string; name: string; priceDeltaMinor: number; quantityEnabled: boolean; maxQuantity: number; isActive: boolean; sortOrder: number };
+export type CatalogOptionGroup = { id: string; name: string; isActive: boolean; sortOrder: number; version: number; items: CatalogOptionItem[] };
+export type ProductOptionGroup = { groupId: string; name: string; isActive: boolean; minSelections: number; maxSelections: number | null; sortOrder: number; groupVersion: number; items: CatalogOptionItem[] };
+export type ProductOptionGroups = { productId: string; productVersion: number; items: ProductOptionGroup[] };
+export type OptionGroupInput = { requestId: string; name: string; isActive: boolean; sortOrder: number };
+export type OptionItemInput = { requestId: string; name: string; priceDeltaMinor: number; quantityEnabled: boolean; maxQuantity: number; isActive: boolean; sortOrder: number; expectedVersion: number };
+export type ProductOptionInput = { groupId: string; minSelections: number; maxSelections: number | null; sortOrder: number };
+
 export interface CatalogProvider {
   listProducts(request: ProductListRequest): Promise<ProductListResponse>;
   listCategories(scope: CatalogScope): Promise<CategoryListResponse>;
+  createCategory(request: CreateCategoryRequest): Promise<CategoryMutationResult>;
+  renameCategory(request: RenameCategoryRequest): Promise<CategoryMutationResult>;
   getProduct(request: ProductDetailRequest): Promise<CatalogProductDetail>;
   createDraft(request: CreateDraftRequest): Promise<CatalogProductDetail>;
+  createPricedProduct(request: CreatePricedProductRequest): Promise<CatalogProductDetail>;
   updateDraft(request: UpdateDraftRequest): Promise<CatalogProductDetail>;
+  updatePublishedProduct(request: UpdatePublishedProductRequest): Promise<CatalogProductDetail>;
   setDraftPrice(request: SetDraftPriceRequest): Promise<PriceResult>;
+  setPublishedPrice(request: SetDraftPriceRequest): Promise<PriceResult>;
   publishDraft(request: PublishDraftRequest): Promise<PublicationResult>;
   setProductActive(request: SetProductActiveRequest): Promise<{ isActive: boolean; version: number }>;
   listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]>;
   listPublications(request: ProductDetailRequest): Promise<Publication[]>;
+  listOptionGroups(scope: CatalogScope): Promise<CatalogOptionGroup[]>;
+  listProductOptionGroups(request: ProductDetailRequest): Promise<ProductOptionGroups>;
+  createOptionGroup(scope: CatalogScope, input: OptionGroupInput): Promise<CatalogOptionGroup>;
+  updateOptionGroup(scope: CatalogScope, groupId: string, input: OptionGroupInput & { expectedVersion: number }): Promise<CatalogOptionGroup>;
+  createOptionItem(scope: CatalogScope, groupId: string, input: OptionItemInput): Promise<unknown>;
+  updateOptionItem(scope: CatalogScope, groupId: string, itemId: string, input: OptionItemInput): Promise<unknown>;
+  saveProductOptionGroups(request: ProductDetailRequest & { requestId: string; expectedVersion: number; items: ProductOptionInput[] }): Promise<ProductOptionGroups>;
 }
 
 export type CatalogErrorCode =

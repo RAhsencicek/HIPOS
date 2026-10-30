@@ -7,7 +7,7 @@ import { DemoNotice, MetricCard, PageHeading, StatusPill } from "../../shared/ui
 type Register = { id: string; code: string; name: string; providerMode: string; isActive: boolean };
 type Shift = { id: string; registerId: string; status: "open" | "closed"; openingCashMinor: number;
   expectedCashMinor: number | null; countedCashMinor: number | null; differenceMinor: number | null;
-  openedBy: string; openedAt: string; closedBy: string | null; closedAt: string | null; closeNote: string | null; version: number };
+  openedBy: string; openedAt: string; closedBy: string | null; closedAt: string | null; closeNote: string | null; version: number; openingNote?: string | null };
 type Movement = { id: string; registerId: string; shiftId: string; kind: string; category: string;
   amountMinor: number; currency: string; description: string; source: string; actor: string; createdAt: string;
   originalMovementId: string | null; correctionType: string | null; correctionReason: string | null };
@@ -176,7 +176,7 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
         </div>
         {active ? <div className="cash-layout">
           <section className="card cash-panel"><header><div><span className="eyebrow">AÇIK VARDİYA</span><h2>Vardiya hareketleri</h2></div><StatusPill tone="green">Açık</StatusPill></header>
-            <p>Başlangıç {money(active.shift.openingCashMinor)} · {dateTime(active.shift.openedAt)} · {active.movementCount} hareket</p>
+            <p>Başlangıç {money(active.shift.openingCashMinor)} · {dateTime(active.shift.openedAt)} · {active.movementCount} hareket</p>{active.shift.openingNote && <p>Açılış notu: {active.shift.openingNote}</p>}
             <CashMovementList items={active.recentMovements} />
           </section>
           {canWrite ? <form className="card cash-panel" onSubmit={(event) => void addMovement(event)}><span className="eyebrow">NAKİT HAREKETİ</span><h2>Giriş veya çıkış kaydet</h2>
@@ -209,7 +209,7 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
       {displayView === "shifts" && <div className="cash-layout cash-layout-shifts">
         <section className="card cash-history"><header><h2>Vardiya geçmişi</h2><span>{shifts.length} vardiya</span></header>
           {shifts.length ? <div className="cash-shift-list">{shifts.map((shift) => <article key={shift.id}>
-            <div><StatusPill tone={shift.status === "open" ? "green" : shift.differenceMinor ? "orange" : "neutral"}>{shift.status === "open" ? "Açık vardiya" : "Kapandı"}</StatusPill><strong>{dateTime(shift.openedAt)}</strong><span>Açan {shift.openedBy}{shift.closedAt ? ` · Kapatan ${shift.closedBy ?? "—"}` : ""}</span></div>
+            <div><StatusPill tone={shift.status === "open" ? "green" : shift.differenceMinor ? "orange" : "neutral"}>{shift.status === "open" ? "Açık vardiya" : "Kapandı"}</StatusPill><strong>{dateTime(shift.openedAt)}</strong><span>Açan {shift.openedBy}{shift.closedAt ? ` · Kapatan ${shift.closedBy ?? "—"}` : ""}</span>{shift.openingNote && <span>Açılış notu: {shift.openingNote}</span>}</div>
             <div><small>Beklenen</small><b>{money(shift.expectedCashMinor ?? active?.shift.expectedCashMinor ?? shift.openingCashMinor)}</b></div>
             {shift.status === "closed" && <div><small>Sayılan · fark</small><b>{money(shift.countedCashMinor ?? 0)} · {money(shift.differenceMinor ?? 0)}</b></div>}
             {shift.closeNote && <p>{shift.closeNote}</p>}

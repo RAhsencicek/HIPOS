@@ -6,7 +6,7 @@ using Npgsql;
 
 namespace Hipos.Api.Cash;
 
-public sealed record OpenCashShift(string RequestId, string RegisterId, long OpeningCashMinor);
+public sealed record OpenCashShift(string RequestId, string RegisterId, long OpeningCashMinor, string? Note = null);
 public sealed record ProvisionDefaultCashRegister(string RequestId);
 public sealed record AddCashMovement(string RequestId, string Kind, long AmountMinor, string Category, string Description);
 public sealed record CorrectCashMovement(string RequestId, string CorrectionType, string CorrectionReason);
@@ -17,11 +17,11 @@ public sealed record CashMovementView(string Id, string RegisterId, string Shift
     string? OriginalMovementId, string? CorrectionType, string? CorrectionReason);
 public sealed record CashShiftView(string Id, string RegisterId, string Status, long OpeningCashMinor,
     long? ExpectedCashMinor, long? CountedCashMinor, long? DifferenceMinor, string OpenedBy,
-    DateTimeOffset OpenedAt, string? ClosedBy, DateTimeOffset? ClosedAt, string? CloseNote, int Version);
+    DateTimeOffset OpenedAt, string? ClosedBy, DateTimeOffset? ClosedAt, string? CloseNote, int Version, string? OpeningNote);
 
 public static class CashEndpoints
 {
-    public static void MapCashEndpoints(this WebApplication app, bool ready)
+    public static void MapCashEndpoints(this WebApplication app, bool ready, bool allowDemoOperatorShifts)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/cash");
 
@@ -132,11 +132,11 @@ public static class CashEndpoints
         group.MapPost("/shifts", async (string firmId, string branchId, OpenCashShift command, HttpContext context,
             CashDbContext db, FeatureNewWorkGate gate) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
             if (denied is not null) return denied;
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
                 !Guid.TryParse(command.RegisterId, out var registerId) || registerId == Guid.Empty ||
-                command.OpeningCashMinor < 0 || command.OpeningCashMinor > MaxAmountMinor)
+                command.OpeningCashMinor < 0 || command.OpeningCashMinor > MaxAmountMinor || command.Note?.Trim().Length > 500)
                 return Fail(context, "INVALID_CASH_AMOUNT", 400, "İstek/kasa kimliği veya açılış tutarı geçersiz.");
 
             var actor = DemoAccess.Resolve(context)!;
@@ -146,7 +146,7 @@ public static class CashEndpoints
             var existing = await db.Shifts.AsNoTracking().SingleOrDefaultAsync(row => row.Id == requestId, context.RequestAborted);
             if (existing is not null)
                 return existing.FirmId == firmId && existing.BranchId == branchId && existing.RegisterId == registerId &&
-                    existing.OpeningCashMinor == command.OpeningCashMinor
+                    existing.OpeningCashMinor == command.OpeningCashMinor && existing.OpeningNote == (string.IsNullOrWhiteSpace(command.Note) ? null : command.Note.Trim())
                     ? Results.Ok(new { source = "postgres", simulated = false, shift = ToView(existing) })
                     : Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği farklı içerikle kullanılmış.");
             var register = await LockRegister(db, firmId, branchId, registerId, context.RequestAborted);
@@ -157,7 +157,7 @@ public static class CashEndpoints
             if (existingOpen) return Fail(context, "SHIFT_ALREADY_OPEN", 409, "Bu kasada zaten açık vardiya var.");
             var now = DateTimeOffset.UtcNow;
             var shift = new CashShiftRow { Id = requestId, FirmId = firmId, BranchId = branchId,
-                RegisterId = registerId, Status = "open", OpeningCashMinor = command.OpeningCashMinor,
+                RegisterId = registerId, Status = "open", OpeningCashMinor = command.OpeningCashMinor, OpeningNote = string.IsNullOrWhiteSpace(command.Note) ? null : command.Note.Trim(),
                 OpenedBy = actor.Name, OpenedAt = now, Version = 1 };
             var opening = new CashMovementRow { Id = requestId, FirmId = firmId, BranchId = branchId,
                 RegisterId = registerId, ShiftId = requestId, Kind = "opening_float", Category = "opening",
@@ -335,7 +335,7 @@ public static class CashEndpoints
         group.MapPost("/shifts/{shiftId:guid}/close", async (string firmId, string branchId, Guid shiftId,
             CloseCashShift command, HttpContext context, CashDbContext db) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
             if (denied is not null) return denied;
             var note = command.Note?.Trim();
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
@@ -411,7 +411,7 @@ public static class CashEndpoints
     private static CashShiftView ToView(CashShiftRow row) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.Status, row.OpeningCashMinor,
             row.ExpectedCashMinor, row.CountedCashMinor, row.DifferenceMinor, row.OpenedBy,
-            row.OpenedAt, row.ClosedBy, row.ClosedAt, row.CloseNote, row.Version);
+            row.OpenedAt, row.ClosedBy, row.ClosedAt, row.CloseNote, row.Version, row.OpeningNote);
 
     private static async Task<CashRegisterRow?> LockRegister(CashDbContext db, string firmId, string branchId,
         Guid registerId, CancellationToken cancellationToken) =>
@@ -436,11 +436,11 @@ public static class CashEndpoints
     private static bool Unique(DbUpdateException error) =>
         error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
-    private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write)
+    private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write, bool allowDemoOperator = false)
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Fail(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (!actor.CanRead(firmId, branchId) || write && !actor.CanManage)
+        if (!actor.CanRead(firmId, branchId) || write && !actor.CanManage && !(allowDemoOperator && actor.CanOperate))
             return Fail(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kasa erişim izni yok.");
         if (!ready) return Fail(context, "CASH_STORAGE_UNAVAILABLE", 503, "Kasa migration'ı uygulanmalı ve API yeniden başlatılmalı.");
         return null;

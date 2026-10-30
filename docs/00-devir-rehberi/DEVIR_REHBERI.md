@@ -197,8 +197,8 @@ Restoranın sattığı ürünlerin, reçete bağlarının, fiyat sürümlerinin 
 * Şubelerin farklı menüleri ve farklı fiyatları olabilir (Örn: Kadıköy Şubesi ile Beşiktaş Şubesi farklı fiyat uygulayabilir).
 
 #### B. ✅ Bugün Kodda Çalışanlar (Mevcut Durum)
-* **Ürün ve Kategori Yönetimi ([CatalogPages.tsx:L1-L60](../../apps/admin/src/features/catalog/CatalogPages.tsx#L1-L60)):** Ürün ekleme, kategori atama, alerjenler, temel fiyat, taslak hazırlama ve fiyat yayınlama çalışmaktadır.
-* **Menü Yönetimi ([MenusPage.tsx:L1-L60](../../apps/admin/src/features/catalog/MenusPage.tsx#L1-L60)):** Menü bölümleri oluşturma (Başlangıçlar, Ana Yemekler, İçecekler), ürün sıralaması ve POS için tek aktif menü seçimi API'ye bağlıdır.
+* **Ürün ve Kategori Yönetimi ([CatalogPages.tsx:L1-L60](../../apps/admin/src/features/catalog/CatalogPages.tsx#L1-L60)):** Ürün ekleme, kategori atama, temel fiyat, taslak hazırlama ve fiyat yayınlama çalışmaktadır.
+* **Menü Yönetimi ([MenusPage.tsx:L1-L60](../../apps/admin/src/features/catalog/MenusPage.tsx#L1-L60)):** Menü bölümleri oluşturma (Başlangıçlar, Ana Yemekler, İçecekler), ürün sıralaması ve aynı şubede birden fazla menüyü POS'ta kullanılabilir yapma API'ye bağlıdır.
 * **Backend API ve Veri Modeli ([CatalogDbContext.cs:L6-L50](../../apps/api/Hipos.Api/Catalog/CatalogDbContext.cs#L6-L50)):** `catalog.products`, `catalog.categories`, `catalog.price_versions`, `catalog.publications`, `catalog.drafts`, `catalog.menus`, `catalog.menu_sections`, `catalog.menu_items` ve `catalog.product_activation_audit` PostgreSQL'e bağlıdır.
 * **Test kapsamı:** [HttpCatalogProvider.test.ts](../../apps/admin/src/features/catalog/HttpCatalogProvider.test.ts), [MenuProvider.test.ts](../../apps/admin/src/features/catalog/MenuProvider.test.ts) ve [postgres.test.mjs](../../apps/api/Hipos.Api.Tests/postgres.test.mjs) katalog ve menü senaryalarını içerir.
 

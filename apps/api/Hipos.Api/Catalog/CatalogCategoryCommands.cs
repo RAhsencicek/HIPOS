@@ -16,14 +16,14 @@ public sealed record CatalogCategoryCommandResult(CatalogCategoryState? Category
 public sealed class CatalogCategoryCommands(CatalogDbContext db)
 {
     public async Task<CatalogCategoryCommandResult> CreateAsync(
-        string firmId, CreateCatalogCategory command, string actor, CancellationToken cancellationToken)
+        string firmId, string branchId, CreateCatalogCategory command, string actor, CancellationToken cancellationToken)
     {
         var id = command.Id?.Trim().ToLowerInvariant() ?? "";
         var name = command.Name?.Trim() ?? "";
         if (id.Length is < 1 or > 80 || name.Length is < 1 or > 160)
             return CatalogCategoryCommandResult.Rejected("INVALID_CATEGORY", 400, "Kategori kimliği veya adı geçersiz.");
         var existing = await db.Categories.AsNoTracking().FirstOrDefaultAsync(
-            row => row.FirmId == firmId && row.Id == id, cancellationToken);
+            row => row.FirmId == firmId && row.BranchId == branchId && row.Id == id, cancellationToken);
         if (existing is not null)
             return existing.Name == name
                 ? new CatalogCategoryCommandResult(ToState(existing), null, false)
@@ -33,13 +33,13 @@ public sealed class CatalogCategoryCommands(CatalogDbContext db)
         var now = DateTimeOffset.UtcNow;
         var category = new CatalogCategoryRow
         {
-            FirmId = firmId, Id = id, Name = name, IsActive = true,
+            FirmId = firmId, BranchId = branchId, Id = id, Name = name, IsActive = true,
             Version = 1, SortOrder = 0, UpdatedAt = now,
         };
         db.Categories.Add(category);
         db.CategoryAudit.Add(new CatalogCategoryAuditRow
         {
-            FirmId = firmId, CategoryId = id, Actor = actor, Action = "created",
+            FirmId = firmId, BranchId = branchId, CategoryId = id, Actor = actor, Action = "created",
             NewName = name, Version = 1, OccurredAt = now,
         });
         try
@@ -55,7 +55,7 @@ public sealed class CatalogCategoryCommands(CatalogDbContext db)
     }
 
     public async Task<CatalogCategoryCommandResult> RenameAsync(
-        string firmId, string categoryId, RenameCatalogCategory command, string actor,
+        string firmId, string branchId, string categoryId, RenameCatalogCategory command, string actor,
         CancellationToken cancellationToken)
     {
         var name = command.Name?.Trim() ?? "";
@@ -66,7 +66,7 @@ public sealed class CatalogCategoryCommands(CatalogDbContext db)
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var category = await db.Categories.FromSqlInterpolated(
-            $"SELECT * FROM catalog.categories WHERE firm_id = {firmId} AND id = {categoryId} FOR UPDATE")
+            $"SELECT * FROM catalog.categories WHERE firm_id = {firmId} AND branch_id = {branchId} AND id = {categoryId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
         if (category is null)
             return CatalogCategoryCommandResult.Rejected("CATEGORY_NOT_FOUND", 404, "Kategori bulunamadı.");
@@ -81,15 +81,15 @@ public sealed class CatalogCategoryCommands(CatalogDbContext db)
         category.Version++;
         category.UpdatedAt = now;
         var affectedDrafts = await db.Drafts.AsNoTracking()
-            .Where(row => row.FirmId == firmId && row.CategoryId == categoryId)
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.CategoryId == categoryId)
             .Select(row => new { row.Id, row.BranchId, row.Version })
             .ToListAsync(cancellationToken);
-        await db.Drafts.Where(row => row.FirmId == firmId && row.CategoryId == categoryId)
+        await db.Drafts.Where(row => row.FirmId == firmId && row.BranchId == branchId && row.CategoryId == categoryId)
             .ExecuteUpdateAsync(update => update
                 .SetProperty(row => row.CategoryName, name)
                 .SetProperty(row => row.Version, row => row.Version + 1)
                 .SetProperty(row => row.UpdatedAt, now), cancellationToken);
-        await db.Products.Where(row => row.FirmId == firmId && row.CategoryId == categoryId)
+        await db.Products.Where(row => row.FirmId == firmId && row.CategoryId == categoryId && row.BranchIds.Contains(branchId))
             .ExecuteUpdateAsync(update => update
                 .SetProperty(row => row.CategoryName, name)
                 .SetProperty(row => row.Version, row => row.Version + 1)
@@ -102,7 +102,7 @@ public sealed class CatalogCategoryCommands(CatalogDbContext db)
             });
         db.CategoryAudit.Add(new CatalogCategoryAuditRow
         {
-            FirmId = firmId, CategoryId = categoryId, Actor = actor, Action = "renamed",
+            FirmId = firmId, BranchId = branchId, CategoryId = categoryId, Actor = actor, Action = "renamed",
             OldName = oldName, NewName = name, Version = category.Version, OccurredAt = now,
         });
         await db.SaveChangesAsync(cancellationToken);

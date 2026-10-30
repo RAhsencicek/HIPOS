@@ -122,8 +122,9 @@ app.UseCors("LocalPreview");
 if (storage == "postgres") app.MapCariEndpoints(cariReady);
 if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
 if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
-if (storage == "postgres") app.MapCashEndpoints(cashReady);
+if (storage == "postgres") app.MapCashEndpoints(cashReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
+if (storage == "postgres") app.MapCatalogProductImageEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
@@ -154,6 +155,8 @@ app.MapGet("/api/v1/firms/{firmId}/catalog/categories",
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (string.IsNullOrWhiteSpace(branchId))
+            return Failure(context, "BRANCH_REQUIRED", 400, "Kategorileri görüntülemek için bir şube seçin.");
         if (!DemoAccess.CanReadCatalog(actor, firmId, branchId))
             return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu firma/şube kategorilerine erişim izni yok.");
         if (!catalogReady)
@@ -164,35 +167,39 @@ app.MapGet("/api/v1/firms/{firmId}/catalog/categories",
     });
 
 app.MapPost("/api/v1/firms/{firmId}/catalog/categories",
-    async (string firmId, CreateCatalogCategory command, HttpContext context, IServiceProvider services) =>
+    async (string firmId, string? branchId, CreateCatalogCategory command, HttpContext context, IServiceProvider services) =>
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, null))
-            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Firma genelinde kategori yönetme izni yok.");
+        if (string.IsNullOrWhiteSpace(branchId))
+            return Failure(context, "BRANCH_REQUIRED", 400, "Kategori oluşturmak için bir şube seçin.");
+        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kategori yönetme izni yok.");
         if (!catalogReady)
             return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı ve API yeniden başlatılmalı.");
         var result = await services.GetRequiredService<CatalogCategoryCommands>().CreateAsync(
-            firmId, command, actor.Name, context.RequestAborted);
+            firmId, branchId, command, actor.Name, context.RequestAborted);
         if (result.Failure is { } failure)
             return Failure(context, failure.Code, failure.Status, failure.Message);
         return result.Created
-            ? Results.Created($"/api/v1/firms/{firmId}/catalog/categories/{result.Category!.Id}", result.Category)
+            ? Results.Created($"/api/v1/firms/{firmId}/catalog/categories/{result.Category!.Id}?branchId={branchId}", result.Category)
             : Results.Ok(result.Category);
     });
 
 app.MapPut("/api/v1/firms/{firmId}/catalog/categories/{categoryId}",
-    async (string firmId, string categoryId, RenameCatalogCategory command,
+    async (string firmId, string categoryId, string? branchId, RenameCatalogCategory command,
         HttpContext context, IServiceProvider services) =>
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, null))
-            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Firma genelinde kategori yönetme izni yok.");
+        if (string.IsNullOrWhiteSpace(branchId))
+            return Failure(context, "BRANCH_REQUIRED", 400, "Kategori düzenlemek için bir şube seçin.");
+        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kategori yönetme izni yok.");
         if (!catalogReady)
             return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı ve API yeniden başlatılmalı.");
         var result = await services.GetRequiredService<CatalogCategoryCommands>().RenameAsync(
-            firmId, categoryId, command, actor.Name, context.RequestAborted);
+            firmId, branchId, categoryId, command, actor.Name, context.RequestAborted);
         return result.Failure is { } failure
             ? Failure(context, failure.Code, failure.Status, failure.Message)
             : Results.Ok(result.Category);
@@ -232,6 +239,35 @@ app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{produc
             return Failure(context, failure.Code, failure.Status, failure.Message);
         return Results.Ok(new { id = result.ProductId, isActive = result.IsActive,
             version = result.Version, replayed = result.Replayed });
+    });
+
+app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products",
+    async (string firmId, string branchId, CreatePricedProduct command, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede ürün oluşturma izni yok.");
+        if (!catalogReady) return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        var result = await services.GetRequiredService<CatalogDraftCommands>().CreatePricedAsync(
+            firmId, branchId, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure) return Failure(context, failure.Code, failure.Status, failure.Message);
+        return result.Created
+            ? Results.Created($"/api/v1/firms/{firmId}/catalog/products/{result.Product!.Id}?branchId={branchId}", result.Product)
+            : Results.Ok(result.Product);
+    });
+
+app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}",
+    async (string firmId, string branchId, string productId, UpdatePublishedProduct command, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId)) return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede ürün düzenleme izni yok.");
+        if (!catalogReady) return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(productId, out var id)) return Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bulunamadı.");
+        var result = await services.GetRequiredService<CatalogDraftCommands>().UpdatePublishedAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        return result.Failure is { } failure ? Failure(context, failure.Code, failure.Status, failure.Message) : Results.Ok(result.Product);
     });
 
 app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts",
@@ -288,6 +324,29 @@ app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts/{draftId}/
             firmId, branchId, id, command, actor.Name, context.RequestAborted);
         if (result.Failure is { } failure)
             return Failure(context, failure.Code, failure.Status, failure.Message);
+        if (result.Product is null || result.PriceVersion is null)
+            return Failure(context, "PRICE_INCONSISTENT", 503, "Fiyat kaydı okunamadı.");
+        var response = new { product = result.Product, priceVersion = result.PriceVersion };
+        return result.Created
+            ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{id}/price-versions", response)
+            : Results.Ok(response);
+    });
+
+app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/price",
+    async (string firmId, string branchId, string productId, SetDraftPrice command,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede fiyat değiştirme izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı.");
+        if (!Guid.TryParse(productId, out var id))
+            return Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bulunamadı.");
+        var result = await services.GetRequiredService<CatalogPublicationCommands>().RepricePublishedAsync(
+            firmId, branchId, id, command, actor.Name, context.RequestAborted);
+        if (result.Failure is { } failure) return Failure(context, failure.Code, failure.Status, failure.Message);
         if (result.Product is null || result.PriceVersion is null)
             return Failure(context, "PRICE_INCONSISTENT", 503, "Fiyat kaydı okunamadı.");
         var response = new { product = result.Product, priceVersion = result.PriceVersion };

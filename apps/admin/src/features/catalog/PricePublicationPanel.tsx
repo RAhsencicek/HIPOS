@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
 import { useCatalogProvider, useFeatureProvider } from "../../app/providers";
-import { formatCatalogMoney } from "./formatters";
+import { formatCatalogMoney, parseCatalogPrice } from "./formatters";
 import { CatalogProviderError } from "./contracts";
 import type { CatalogProductDetail, CatalogScope, PriceVersion, Publication } from "./contracts";
 
@@ -11,17 +11,9 @@ type HistoryLoad =
   | { status: "success"; prices: PriceVersion[]; publications: Publication[] }
   | { status: "error"; message: string };
 
-function amountMinor(input: string): number | null {
-  const normalized = input.trim().replace(",", ".");
-  const match = /^(0|[1-9]\d{0,7})(?:\.(\d{1,2}))?$/.exec(normalized);
-  if (!match) return null;
-  const amount = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
-  return amount > 0 && amount <= 1_000_000_000 ? amount : null;
-}
-
 function commandError(error: CatalogProviderError): string {
   switch (error.code) {
-    case "VERSION_CONFLICT": return "Taslak başka bir işlemle değişti. Güncel sürümü yükleyin.";
+    case "VERSION_CONFLICT": return "Ürün başka bir işlemle değişti. Güncel sürümü yükleyin.";
     case "FEATURE_DISABLED": return "Bu işlem modülü bu şubede kapalı; kayıt oluşturulmadı.";
     case "FEATURE_DRAINING": return "Modül kapanıyor; yeni işlem başlatılamaz.";
     case "FEATURE_SETUP_REQUIRED": return "Önce bu özelliğin kurulumunu tamamlayın.";
@@ -73,19 +65,21 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
   }
 
   async function sendPrice() {
-    if (busy || !canSetPrice || !scope.branchId) return;
-    const amount = amountMinor(priceInput);
+    if (busy || !canSetPrice || (product.status === "published" && !canPublish) || !scope.branchId) return;
+    const amount = parseCatalogPrice(priceInput);
     if (amount === null) {
       setError(new CatalogProviderError("INVALID_PRICE", 400, "Pozitif bir TL tutarı girin; en fazla iki kuruş basamağı kullanın."));
       return;
     }
     setBusy("price"); setLastAction("price"); setError(null);
     try {
-      await provider.setDraftPrice({ scope, draftId: product.id, priceVersionId: priceId,
-        amountMinor: amount, expectedVersion: product.version });
+      const request = { scope, draftId: product.id, priceVersionId: priceId,
+        amountMinor: amount, expectedVersion: product.version };
+      if (product.status === "published") await provider.setPublishedPrice(request);
+      else await provider.setDraftPrice(request);
       setPriceInput("");
       setPriceId(crypto.randomUUID());
-      onChanged("Fiyat sürümü veritabanına kaydedildi.");
+      onChanged(product.status === "published" ? "Yeni fiyat kaydedildi ve yeni satışlarda geçerli." : "Fiyat sürümü kaydedildi.");
     } catch (unknownError) { failed(unknownError); }
     finally { setBusy(null); }
   }
@@ -96,7 +90,7 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
   }
 
   async function publish() {
-    if (busy || !canPublish || !scope.branchId) return;
+    if (busy || !canPublish || !product.isActive || !scope.branchId) return;
     setBusy("publish"); setLastAction("publish"); setError(null);
     try {
       await provider.publishDraft({ scope, draftId: product.id, publicationId,
@@ -111,33 +105,35 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
   return <section className="card detail-card publication-panel" aria-label="Fiyat ve yayın">
     <span className="card-kicker">FİYAT VE YAYIN</span>
     <h2>Şube fiyatı ve POS yayını</h2>
-    <p>İlk yayın yalnız seçili şube ve POS kanalı içindir. Ödeme veya gerçek cihaz bağlantısı içermez.</p>
-    {product.status === "draft" && <>
-      <form onSubmit={savePrice} aria-label="Taslak fiyatı">
+    <p>{product.status === "draft" ? "Ürünü POS'a yayınladıktan sonra kullanacağınız menüye de ekleyin." : "Yeni fiyat kaydedildiğinde bu şubedeki yeni satışlarda geçerli olur. Önceki siparişlerin fiyatı korunur."}</p>
+      <form onSubmit={savePrice} aria-label="Ürün fiyatı">
         <label className="draft-field">
           <span>Fiyat (TL)</span>
           <input inputMode="decimal" value={priceInput} placeholder="325,50"
             disabled={Boolean(busy) || error?.code === "LOAD_FAILED"}
             onChange={(event) => setPriceInput(event.target.value)} />
         </label>
-        <button type="submit" className="primary-button" disabled={Boolean(busy) || !canSetPrice || error?.code === "LOAD_FAILED"}>
-          {busy === "price" ? "Kaydediliyor…" : "Fiyat sürümü kaydet"}
+        <button type="submit" className="primary-button" disabled={Boolean(busy) || !canSetPrice || (product.status === "published" && !canPublish) || error?.code === "LOAD_FAILED"}>
+          {busy === "price" ? "Kaydediliyor…" : product.status === "draft" ? "Fiyat sürümü kaydet" : "Fiyatı güncelle"}
         </button>
       </form>
+    {product.status === "draft" && <>
       <div className="publication-action">
         <button type="button" className="primary-button" onClick={publish}
-          disabled={Boolean(busy) || !canPublish || !hasPrice || error?.code === "LOAD_FAILED"}>
+          disabled={Boolean(busy) || !canPublish || !hasPrice || !product.isActive || error?.code === "LOAD_FAILED"}>
           {busy === "publish" ? "Yayınlanıyor…" : "POS'a yayınla"}
         </button>
         {!hasPrice && <small>Yayın için önce fiyat geçmişinde geçerli sürüm görünmeli.</small>}
+        {!product.isActive && <small>Yayınlamak için önce ürünü etkinleştirin.</small>}
       </div>
       {(!canSetPrice || !canPublish) && <div className="notice" role="status">
-        {!canSetPrice ? "Fiyat Taslakları" : "POS'a Ürün Yayını"} bu şubede yeni iş için hazır değil. Geçmiş okunabilir. <Link to="/admin/settings/modules">Modül ayarları</Link>
+        {!canSetPrice ? "Fiyat yönetimi" : "POS yayını"} bu şubede hazır değil. <Link to="/admin/settings/modules">Modül ayarları</Link>
       </div>}
     </>}
+    {product.status === "published" && (!canSetPrice || !canPublish) && <div className="notice" role="status">Fiyat güncellemek için fiyat ve POS yayını özellikleri bu şubede hazır olmalı. <Link to="/admin/settings/modules">Modül ayarları</Link></div>}
     {error && <div className="notice" role="alert">
       {commandError(error)} İşlem başarılı olarak işaretlenmedi.
-      {error.code === "VERSION_CONFLICT" && <button type="button" className="soft-button" onClick={() => onChanged()}>Güncel taslağı yükle</button>}
+      {error.code === "VERSION_CONFLICT" && <button type="button" className="soft-button" onClick={() => onChanged()}>Güncel ürünü yükle</button>}
       {error.code === "LOAD_FAILED" && lastAction && <button type="button" className="soft-button"
         onClick={() => { if (lastAction === "price") void sendPrice(); else void publish(); }}>
         Aynı isteği tekrar dene

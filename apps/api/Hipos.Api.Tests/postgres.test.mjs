@@ -564,11 +564,18 @@ test(
       const cashFeature = cashStates.data.find((row) => row.key === "cash.management");
       assert.equal(cashFeature.effectiveForNewWork, true);
       const cashRegisterId = cashOverview.data.registers[0].id;
-      const openCash = { requestId: "99999999-9999-4999-8999-999999999f01", registerId: cashRegisterId, openingCashMinor: 100000 };
-      const openedCash = await request(`${cashPath}/shifts`, "POST", openCash, "manager-single");
+      const openCash = { requestId: "99999999-9999-4999-8999-999999999f01", registerId: cashRegisterId, openingCashMinor: 100000, note: "  Bozuk para avansı  " };
+      assert.equal((await request(`${cashPath}/shifts`, "POST", openCash, "pos-moda")).status, 403, "Kasiyer başka şubede vardiya açamaz.");
+      const openedCash = await request(`${cashPath}/shifts`, "POST", openCash, "pos-single");
       assert.equal(openedCash.status, 201);
       assert.equal(openedCash.data.shift.status, "open");
       assert.equal(openedCash.data.shift.openingCashMinor, 100000);
+      assert.equal(openedCash.data.shift.openingNote, "Bozuk para avansı");
+      assert.equal(openedCash.data.shift.openedBy, "pos-single");
+      assert.equal((await request(`${cashPath}/shifts`, "POST", openCash, "pos-single")).status, 200);
+      assert.equal((await request(`${cashPath}/shifts`, "POST", { ...openCash, note: "Farklı not" }, "pos-single")).data.code, "IDEMPOTENCY_CONFLICT");
+      const noteHistory = await request(`${cashPath}/shifts`, "GET", undefined, "manager-single");
+      assert.equal(noteHistory.data.items.find(shift => shift.id === openedCash.data.shift.id).openingNote, "Bozuk para avansı");
       assert.equal((await request(`${cashPath}/shifts`, "POST", openCash, "manager-single")).status, 200);
       assert.equal((await request(`${cashPath}/shifts`, "POST", { ...openCash,
         requestId: "99999999-9999-4999-8999-999999999f02" }, "manager-single")).data.code, "SHIFT_ALREADY_OPEN");
@@ -595,10 +602,12 @@ test(
       assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", {
         ...closeCash, requestId: "99999999-9999-4999-8999-999999999f07", note: null,
       }, "manager-single")).data.code, "CASH_DIFFERENCE_NOTE_REQUIRED");
-      const closedCash = await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "manager-single");
+      const closedCash = await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "pos-single");
       assert.equal(closedCash.status, 200);
       assert.equal(closedCash.data.shift.expectedCashMinor, 173000);
       assert.equal(closedCash.data.shift.differenceMinor, -1000);
+      assert.equal(closedCash.data.shift.closedBy, "pos-single");
+      assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "pos-single")).status, 200);
       assert.equal((await request(`${cashPath}/shifts/${cashShiftId}/close`, "POST", closeCash, "manager-single")).status, 200);
       assert.equal((await request(cashMovementPath, "POST", { ...cashIn,
         requestId: "99999999-9999-4999-8999-999999999f08" }, "manager-single")).data.code, "SHIFT_CLOSED");
@@ -1100,8 +1109,7 @@ test(
       await page.getByRole("button", { name: "Yeni taslak" }).click();
       await page.getByLabel("Ürün adı").fill("Tarayıcı Taslağı");
       await page.getByLabel("Stok kodu").fill("WEB-001");
-      await page.getByLabel("Kategori kodu").fill("pizza");
-      await page.getByLabel("Kategori adı").fill("Pizzalar");
+      await page.getByLabel("Kategori", { exact: true }).selectOption("pizza");
       await page.getByLabel("Açıklama").fill("Tarayıcıdan kayıt");
       await page.getByRole("button", { name: "Taslağı kaydet" }).click();
       await page.getByText("Taslak veritabanına kaydedildi.").waitFor();
@@ -1462,6 +1470,16 @@ test(
       assert.equal((await request(`${modaService}/tables`, "GET", undefined, "manager-single")).status, 403);
       const table = await request(`${modaService}/tables`, "POST", { number: 12, name: "Masa 12" });
       assert.equal(table.status, 201);
+      assert.equal(table.data.floor ?? null, null, "Yeni masa kata otomatik atanmaz.");
+      const floorPath = `${modaService}/tables/${table.data.id}/floor`;
+      assert.equal((await request(floorPath, "PUT", { floor: "upper", expectedVersion: table.data.version }, "pos-moda")).status, 403);
+      assert.equal((await request(floorPath, "PUT", { floor: "upper", expectedVersion: table.data.version }, "manager-single")).status, 403);
+      assert.equal((await request(floorPath, "PUT", { floor: "invalid", expectedVersion: table.data.version })).data.code, "INVALID_TABLE_FLOOR");
+      const floorUpdated = await request(floorPath, "PUT", { floor: "upper", expectedVersion: table.data.version });
+      assert.equal(floorUpdated.status, 200);
+      assert.equal(floorUpdated.data.floor, "upper");
+      assert.equal((await request(floorPath, "PUT", { floor: "lower", expectedVersion: table.data.version })).data.code, "VERSION_CONFLICT");
+      assert.equal((await request(`${modaService}/tables`)).data.items.find((item) => item.id === table.data.id).floor, "upper");
       assert.equal((await request(`${modaService}/tables`, "POST", { number: 12, name: "Tekrar" })).data.code, "TABLE_EXISTS");
       assert.equal((await request(`${modaService}/waiters`, "POST", { name: "Demo Garson" })).data.code, "FEATURE_DISABLED");
       const waiterEnabled = await request(featurePath(moda, "service.waiters"), "PUT", { desiredEnabled: true, expectedVersion: 1 });
@@ -1977,8 +1995,7 @@ test(
       await catalogPage.getByRole("button", { name: "Yeni taslak" }).click();
       await catalogPage.getByLabel("Ürün adı").fill("Panelden Pizza");
       await catalogPage.getByLabel("Stok kodu").fill("PZZ-911");
-      await catalogPage.getByLabel("Kategori kodu").fill("pizza");
-      await catalogPage.getByLabel("Kategori adı").fill(winningName);
+      await catalogPage.getByLabel("Kategori", { exact: true }).selectOption("pizza");
       await catalogPage.getByRole("button", { name: "Taslağı kaydet" }).click();
       await catalogPage.getByText("Taslak veritabanına kaydedildi.").waitFor();
       await catalogPage.getByRole("link", { name: "Panelden Pizza", exact: true }).click();

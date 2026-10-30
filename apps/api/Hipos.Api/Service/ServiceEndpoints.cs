@@ -8,6 +8,7 @@ namespace Hipos.Api.Service;
 
 public sealed record CreateServiceTable(int? Number, string? Name);
 public sealed record UpdateServiceTableState(int ExpectedVersion);
+public sealed record UpdateServiceTableFloor(int ExpectedVersion, string? Floor);
 public sealed record ReserveServiceTable(int ExpectedVersion, DateTimeOffset ReservedFor, string? GuestName);
 public sealed record CreateServiceWaiter(string Name);
 public sealed record CreateServiceEmployee(Guid RequestId, string Name, string Department, string JobTitle, string? Phone);
@@ -30,7 +31,7 @@ public sealed record ServiceAssignmentView(string Id, string OrderId, string? Wa
     long TotalMinor, int Version, ServiceLineView[] Items, string[] OrderIds,
     long GrossTotalMinor, long AdjustmentMinor, ServiceAdjustmentView[] Adjustments);
 public sealed record ServiceTableView(string Id, int Number, string Name, bool IsActive, ServiceAssignmentView? Assignment,
-    ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null);
+    ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null, string? Floor = null);
 public sealed record ServiceWaiterView(string Id, string Name, bool IsActive);
 public sealed record ServiceEmployeeView(string Id, string Name, string Department, string JobTitle, string? Phone,
     bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -88,7 +89,7 @@ public static class ServiceEndpoints
                     ? ToView(assignment, tableChecks.SelectMany(checkId => ordersByCheck.TryGetValue(checkId, out var checkOrders)
                         ? checkOrders : []).ToArray(), tableChecks.SelectMany(checkId => adjustmentsByCheck.TryGetValue(checkId, out var checkAdjustments)
                         ? checkAdjustments : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
-                    : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName);
+                    : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName, table.Floor);
             }).ToArray();
             return Results.Ok(new { source = "postgres", tablesEnabled, waitersEnabled, items });
         });
@@ -671,7 +672,7 @@ public static class ServiceEndpoints
                 await db.SaveChangesAsync(context.RequestAborted);
                 await transaction.CommitAsync(context.RequestAborted);
                 return Results.Ok(new ServiceTableView(existing.Id, existing.Number, existing.Name, true, null, null,
-                    existing.Status, existing.ReservedFor, existing.Version));
+                    existing.Status, existing.ReservedFor, existing.Version, existing.ReservationGuestName, existing.Floor));
             }
             var row = new ServiceTableRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
                 Number = number, Name = name?.Length > 0 ? name : $"Masa {number:00}", UpdatedAt = now };
@@ -681,7 +682,32 @@ public static class ServiceEndpoints
             catch (DbUpdateException error) when (Unique(error))
             { return Fail(context, "TABLE_EXISTS", 409, "Bu numarada masa zaten var."); }
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{row.Id}",
-                new ServiceTableView(row.Id, row.Number, row.Name, row.IsActive, null, null, row.Status, row.ReservedFor, row.Version));
+                new ServiceTableView(row.Id, row.Number, row.Name, row.IsActive, null, null, row.Status, row.ReservedFor, row.Version, row.ReservationGuestName, row.Floor));
+        });
+
+        group.MapPut("/tables/{tableId}/floor", async (string firmId, string branchId, string tableId,
+            UpdateServiceTableFloor command, HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1 || command.Floor is not (null or "lower" or "upper"))
+                return Fail(context, "INVALID_TABLE_FLOOR", 400, "Kat seçimi veya masa sürümü geçersiz.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var table = await db.Tables.FromSqlInterpolated($"SELECT * FROM service.tables WHERE id = {tableId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
+            if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa değişti; güncel bilgileri yenileyin.");
+            if (table.Floor != command.Floor)
+            {
+                table.Floor = command.Floor; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+                AddAudit(db, firmId, branchId, table.Id, "table_floor_changed", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
+                await db.SaveChangesAsync(context.RequestAborted);
+            }
+            await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { id = table.Id, floor = table.Floor, version = table.Version });
         });
 
         group.MapDelete("/tables/{tableId}", async (string firmId, string branchId, string tableId,

@@ -48,6 +48,8 @@ export function featurePresentation(section: string, item: string, sources: Sour
   const description = featureStory(section, item).description;
   if (section === "finance" && ["expenses", "expense-categories"].includes(item) && sources.expenseSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
+  if (key === "catalog/options" && sources.catalogSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
   if (key === "catalog/menus" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "overview/daily")

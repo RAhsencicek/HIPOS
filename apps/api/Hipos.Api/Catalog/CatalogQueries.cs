@@ -83,14 +83,16 @@ public sealed class CatalogQueries(CatalogDbContext db)
     public async Task<CatalogCategoryList> ListCategoriesAsync(
         CatalogScope scope, CancellationToken cancellationToken)
     {
+        if (scope.BranchId is not { } branchId)
+            return new CatalogCategoryList(scope, []);
+
         var matching = db.Products.AsNoTracking().Where(product => product.FirmId == scope.FirmId);
-        if (scope.BranchId is { } branchId)
-            matching = matching.Where(product => product.BranchIds.Contains(branchId));
+        matching = matching.Where(product => product.BranchIds.Contains(branchId));
         var counts = await matching.GroupBy(product => product.CategoryId)
             .Select(group => new { Id = group.Key, Count = group.Count() })
             .ToDictionaryAsync(row => row.Id, row => row.Count, cancellationToken);
         var categories = await db.Categories.AsNoTracking()
-            .Where(row => row.FirmId == scope.FirmId)
+            .Where(row => row.FirmId == scope.FirmId && row.BranchId == branchId)
             .OrderBy(row => row.SortOrder).ThenBy(row => row.Name).ThenBy(row => row.Id)
             .ToListAsync(cancellationToken);
         return new CatalogCategoryList(scope, categories.Select(row =>
@@ -107,6 +109,7 @@ public sealed class CatalogQueries(CatalogDbContext db)
             matching = matching.Where(product => product.BranchIds.Contains(branchId));
         var categories = (await ListCategoriesAsync(scope, cancellationToken)).Items
             .Select(category => new CatalogCategory(category.Id, category.Name)).ToArray();
+        var categoryNames = categories.ToDictionary(category => category.Id, category => category.Name);
         if (!string.IsNullOrWhiteSpace(categoryId))
             matching = matching.Where(product => product.CategoryId == categoryId);
         if (!string.IsNullOrWhiteSpace(query))
@@ -122,7 +125,8 @@ public sealed class CatalogQueries(CatalogDbContext db)
             .OrderBy(product => product.Name).ThenBy(product => product.Id)
             .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
         return new CatalogProductList(
-            rows.Select(row => ToProduct(row, scope.BranchId)).ToArray(),
+            rows.Select(row => ToProduct(row, scope.BranchId,
+                categoryNames.GetValueOrDefault(row.CategoryId))).ToArray(),
             new CatalogPageInfo(page, pageSize, total, (int)Math.Ceiling((double)total / pageSize)),
             scope, categories);
     }
@@ -133,7 +137,12 @@ public sealed class CatalogQueries(CatalogDbContext db)
             .FirstOrDefaultAsync(product => product.Id == productId && product.FirmId == scope.FirmId &&
                 (scope.BranchId == null || product.BranchIds.Contains(scope.BranchId)), cancellationToken);
         if (row is null) return null;
-        var product = ToProduct(row, scope.BranchId);
+        var categoryName = scope.BranchId is { } branchId
+            ? await db.Categories.AsNoTracking()
+                .Where(category => category.FirmId == scope.FirmId && category.BranchId == branchId && category.Id == row.CategoryId)
+                .Select(category => category.Name).SingleOrDefaultAsync(cancellationToken)
+            : null;
+        var product = ToProduct(row, scope.BranchId, categoryName);
         return new CatalogProductDetail(
             product.Id, product.FirmId, product.BrandId, product.BranchIds,
             product.Name, product.Sku, product.Category, product.Status,
@@ -142,12 +151,12 @@ public sealed class CatalogQueries(CatalogDbContext db)
             row.Description, row.Allergens, row.OptionGroups);
     }
 
-    private static CatalogProduct ToProduct(CatalogProductRow row, string? branchId)
+    private static CatalogProduct ToProduct(CatalogProductRow row, string? branchId, string? categoryName)
     {
         var overridePrice = branchId is null ? null : row.BranchPrices.FirstOrDefault(price => price.BranchId == branchId);
         return new CatalogProduct(
             row.Id.ToString(), row.FirmId, row.BrandId, row.BranchIds,
-            row.Name, row.Sku, new CatalogCategory(row.CategoryId, row.CategoryName),
+            row.Name, row.Sku, new CatalogCategory(row.CategoryId, categoryName ?? row.CategoryName),
             row.Status, row.IsActive, row.Channels, row.Image, row.RecipeLinked,
             new CatalogMoney(overridePrice?.AmountMinor ?? row.BasePriceMinor, row.Currency),
             overridePrice is null ? "central" : "branch_override", row.UpdatedAt, row.Version);

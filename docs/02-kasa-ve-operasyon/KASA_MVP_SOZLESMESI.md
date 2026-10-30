@@ -37,7 +37,9 @@ Gelecekteki onboarding orkestrasyonu şube kaydının kalıcı olmasından sonra
 - Capability kapalıysa okuma ve geçmiş erişimi sürer; vardiya açma ve yeni hareket yazma reddedilir. Açık vardiya varsa, kasa kapatma ve sayım farkını kaydetme güvenli tamamlama işlemi olarak kabul edilir. Böylece kapatılan modül yeni nakit işlemi başlatmaz, fakat açık vardiyayı yarım bırakmaz.
 - Capability kapalıyken düzeltme yeni bir defter hareketi olacağı için reddedilir. Onboarding provisioning'i kurulum işlemi olarak capability'den bağımsızdır; tercihi değiştirmez.
 - Capability değişikliği migration çalıştırmaz, kayıt silmez ve satış/adisyon/personel gibi bağımsız modülleri kapatmaz.
-- İlk sürümde kullanıcı/rol kimliği gerçek değildir. Yazma endpoint'leri bugünkü geliştirme erişim politikasındaki yönetici aktör şartını kullanır; üretim yetkilendirmesi olarak sunulmaz.
+- Kullanıcı/rol kimliği gerçek değildir. Development ortamında aynı şubedeki demo POS aktörü yalnız vardiya açma ve kapama işlemlerini de yapabilir; diğer kasa yazmaları yönetici aktörü gerektirir. Development dışındaki tüm kasa yazmaları yönetici aktörü gerektirir. Bu istisna gerçek kasiyer yetkilendirmesi değildir.
+
+Önceki çalışma kopyası [arşivde](../05-gecmis-ve-arsiv/KASA_MVP_SOZLESMESI_ONCEKI.md) tutulur. Kasiyer ekranındaki geliştirme akışı ve sınırları [Kasa/POS operasyon sözleşmesinde](KASA_POS_VE_OPERASYON_SOZLESMESI.md) açıklanır.
 
 ## Kalıcı veri sözleşmesi
 
@@ -46,13 +48,13 @@ Gelecekteki onboarding orkestrasyonu şube kaydının kalıcı olmasından sonra
 | Tablo | İçerik / temel kurallar |
 |---|---|
 | `cash.registers` | `id`, `firm_id`, `branch_id`, şube içinde benzersiz `code`, ad, `provider_mode` (`manual` şimdi, `external_pos` gelecekte), etkinlik, sürüm. Onboarding varsayılanı `MAIN / Ana Kasa / manual` olur. |
-| `cash.shifts` | `id`, firma/şube/kasa, `open/closed`, açan-kapayan aktör ve zaman, açılış hareket kimliği, beklenen/fiziksel/fark tutarı, kapanış `requestId`, sürüm. Kasa başına aynı anda en fazla bir açık vardiya; DB kısıtıyla korunur. |
+| `cash.shifts` | `id`, firma/şube/kasa, `open/closed`, açan-kapayan aktör ve zaman, açılış hareket kimliği, isteğe bağlı `opening_note`, beklenen/fiziksel/fark tutarı, kapanış `requestId`, sürüm. Kasa başına aynı anda en fazla bir açık vardiya; DB kısıtıyla korunur. |
 | `cash.movements` | İstek kimliği, firma/şube/kasa/vardiya, `opening_float/manual_in/manual_out`, pozitif kuruş tutarı, TRY, kategori, açıklama, kaynak (`manual` şimdi; `pos` geleceğe ayrılmış), sağlayıcı/harici referans/sağlayıcı olay kimliği, düzeltme ise `original_movement_id`, `correction_type='reversal'`, zorunlu `correction_reason`, aktör ve zaman. Sağlayıcı olay kimliği firma/şube/sağlayıcı kapsamında tekildir. Satır değiştirilemez; aynı orijinal hareket için yalnız bir düzeltme olabilir. |
 | `cash.audit` | Provisioning, açma/hareket/düzeltme/kapama işlemi, firma/şube/kasa/opsiyonel vardiya/hareket kimlikleri, aktör, eylem, istek kimliği, zaman ve özet. Şube seviyesindeki provisioning audit'i için `shift_id` nullable; audit ve operasyon kaydı aynı DB transaction'ında yazılır. |
 
 Para `amountMinor` olarak pozitif tamsayı kuruş cinsinden tutulur; hareketin yönünü tür belirler. Sıfır/negatif tutar, geçersiz tür/kategori, kapalı veya başka kapsamlı kasa/vardiya kabul edilmez. Açılış nakdi de `opening_float` hareketidir; doğrudan bakiye alanı güncellenmez. Kapanış sayımı bir ledger hareketi değildir ve kapanış farkı kendiliğinden yeni hareket yaratmaz.
 
-Her komut benzersiz UUID `requestId` taşır. Aynı istek ve aynı içerik tekrarlandığında ilk sonuç döner; aynı kimlik farklı içerikle kullanılırsa `409 IDEMPOTENCY_CONFLICT` olur. Yarışan açılışlar, aynı kasa satır kilidi ve DB unique constraint ile tekilleştirilir. Para hareketi, audit ve idempotency sonucu aynı transaction içinde yazılır.
+Her komut benzersiz UUID `requestId` taşır. Aynı istek ve aynı içerik tekrarlandığında ilk sonuç döner; vardiya açılışında normalize edilmiş not da içerik karşılaştırmasına dahildir; aynı kimlik farklı içerikle kullanılırsa `409 IDEMPOTENCY_CONFLICT` olur. Yarışan açılışlar, aynı kasa satır kilidi ve DB unique constraint ile tekilleştirilir. Para hareketi, audit ve idempotency sonucu aynı transaction içinde yazılır.
 
 ### Düzeltme ve vardiya kuralları
 
@@ -75,7 +77,7 @@ Kök: `/api/v1/firms/{firmId}/branches/{branchId}/cash`
 | `GET /movements?shiftId=&from=&to=&page=&pageSize=` | Şube kapsamlı, sayfalı hareket geçmişi. Kapanmış vardiya hareketleri de okunur. |
 | `GET /shifts?status=&from=&to=&page=&pageSize=` | Açık/kapalı vardiya geçmişi ve kayıtlı sayım/fark sonucu. |
 | `PUT /registers/default` | Önceden oluşturulmuş firma/şubede idempotent varsayılan kasa provisioning'i. Yeni kayıt `201`, uyumlu mevcut MAIN `200`; başka aktif kasa `409 EXISTING_REGISTER`, uyumsuz MAIN `409 DEFAULT_REGISTER_CONFLICT`. Capability tercihini değiştirmez. |
-| `POST /shifts` | `{ requestId, registerId, openingCashMinor }`; capability açıkken vardiya ve `opening_float` atomik açılır. |
+| `POST /shifts` | `{ requestId, registerId, openingCashMinor, note? }`; isteğe bağlı açılış notu en fazla 500 karakterdir ve vardiyada saklanır. Capability açıkken vardiya ve `opening_float` atomik açılır. |
 | `POST /shifts/{shiftId}/movements` | `{ requestId, kind: manual_in\|manual_out, amountMinor, category, description }`; açık vardiyaya manuel nakit kaydı ekler. |
 | `POST /movements/{originalMovementId}/corrections` | `{ requestId, correctionType: "reversal", correctionReason }`; eş tutarlı ters hareketi yalnız aynı kasanın açık vardiyasına ekler. |
 | `POST /shifts/{shiftId}/close` | `{ requestId, expectedVersion, countedCashMinor, note }`; anlık ledger beklenen tutarını kilit altında hesaplar, fiziksel sayım/farkı saklar ve vardiyayı kapatır. Aynı kapanış isteği tekrarında ikinci kayıt/hareket oluşmaz. Fark varsa açıklama zorunludur. |

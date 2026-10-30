@@ -14,6 +14,7 @@ public sealed record CreateSalesCheck(Guid RequestId, Guid FirstOrderId, IReadOn
 public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long AmountMinor, string Method,
     string SimulatedOutcome, int ExpectedOrderVersion);
 public sealed record SplitCheckLine(long OrderLineId, int Quantity);
+public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
 public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
 public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, string Action, string? ValueType,
     int? Value, long? OrderLineId, int Quantity, string Reason);
@@ -329,7 +330,7 @@ public static class SalesCheckEndpoints
                 new { repeated = false, adjustment = ToAdjustmentView(row), check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
 
-        group.MapGet("", async (string firmId, string branchId, string? tableId, HttpContext context, SalesDbContext db) =>
+        group.MapGet("", async (string firmId, string branchId, string? tableId, bool? unassignedOpen, HttpContext context, SalesDbContext db) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, false);
             if (denied is not null) return denied;
@@ -338,6 +339,8 @@ public static class SalesCheckEndpoints
             var query = db.Checks.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId);
             if (tableId is not null)
                 query = query.Where(row => row.TableId == tableId && row.Status == "open");
+            if (unassignedOpen == true)
+                query = query.Where(row => row.TableId == null && row.Status == "open");
             query = query.OrderByDescending(row => row.CreatedAt).ThenByDescending(row => row.Id);
             if (tableId is null) query = query.Take(100);
             var checks = await query.ToArrayAsync(context.RequestAborted);
@@ -397,6 +400,50 @@ public static class SalesCheckEndpoints
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
             return Results.Ok(new { attempt = result.Attempt, check = detail });
+        });
+
+        // Ödenecek tutarı sıfır olan (tamamı ikram/iptal/indirim veya boş) adisyonu tahsilat olmadan kapatır.
+        group.MapPost("/{checkId:guid}/close-zero-balance", async (string firmId, string branchId, Guid checkId,
+            CloseZeroBalanceCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement) =>
+        {
+            var denied = Guard(context, firmId, branchId, salesReady, true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1)
+                return Fail(context, "INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var check = await db.Checks.FromSqlInterpolated($"""
+                SELECT * FROM sales.checks WHERE id = {checkId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE
+                """).SingleOrDefaultAsync(context.RequestAborted);
+            if (check is null) return Fail(context, "CHECK_NOT_FOUND", 404, "Adisyon bu şubede bulunamadı.");
+            if (check.Status == "closed")
+                return Results.Ok(new { repeated = true, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
+            if (check.Status != "open") return Fail(context, "CHECK_NOT_OPEN", 409, "Yalnız açık adisyon kapatılabilir.");
+            if (check.Version != command.ExpectedVersion)
+                return Fail(context, "VERSION_CONFLICT", 409, "Adisyon başka bir işlemle değişti; yeniden yükleyin.");
+            var orders = await db.Orders.AsNoTracking().Include(row => row.PaymentAttempts)
+                .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+                .ToArrayAsync(context.RequestAborted);
+            if (orders.SelectMany(row => row.PaymentAttempts).Any(row => row.Status is "pending" or "unknown"))
+                return Fail(context, "PAYMENT_UNRESOLVED", 409, "Bekleyen veya belirsiz ödeme sonuçlanmadan adisyon kapatılamaz.");
+            var adjustmentMinor = await db.CheckAdjustments.AsNoTracking().Where(row => row.CheckId == checkId &&
+                row.FirmId == firmId && row.BranchId == branchId).SumAsync(row => row.AmountMinor, context.RequestAborted);
+            if (orders.Sum(row => row.TotalMinor) - adjustmentMinor > 0)
+                return Fail(context, "CHECK_HAS_BALANCE", 409, "Adisyonda ödenecek tutar var; tahsilat alınmalı.");
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var now = DateTimeOffset.UtcNow;
+            check.Status = "closed";
+            check.ClosedAt = now;
+            check.Version++;
+            db.CheckAudit.Add(new SalesCheckAuditRow
+            {
+                CheckId = check.Id, FirmId = firmId, BranchId = branchId, Actor = actor,
+                Action = "zero_balance_check_closed", Version = check.Version, OccurredAt = now,
+            });
+            await db.SaveChangesAsync(context.RequestAborted);
+            if (check.TableId is not null)
+                await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
     }
 

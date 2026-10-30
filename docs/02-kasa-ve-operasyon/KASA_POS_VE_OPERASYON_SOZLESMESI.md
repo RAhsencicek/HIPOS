@@ -1,6 +1,6 @@
 # HIPOS — Kasa, POS ve Parçalı Ödeme Operasyon Sözleşmesi
 
-> **Doküman Durumu:** Kesinleşmiş Geliştirme Sözleşmesi · Sürüm: v2.0
+> **Doküman Durumu:** Kesinleşmiş Geliştirme Sözleşmesi · Sürüm: v2.1 · Güncel uygulama durumu: 30 Ekim 2026
 > **İlgili Mimari Referanslar:** [Backend Mimarisi ve Şemalar](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md) · [Ana Devir Rehberi](../00-devir-rehberi/DEVIR_REHBERI.md) · [Ortak Adisyon Kılavuzu](ADISYON_VE_MASA_YASAM_DONGUSU.md)
 
 ---
@@ -12,7 +12,23 @@ Bu sözleşme; yalnız bir nakit çekmecesi defteri değil, masalardan ve hızl�
 
 ---
 
-## 2. Kesinleşen İş Kuralları ve Temel Yetenekler
+## 2. Güncel uygulama ve sınırları (30 Ekim 2026)
+
+Aşağıdaki davranışlar geliştirme ekranındaki mevcut uygulamayı tarif eder; gerçek restoran tahsilatı değildir. Önceki sözleşme [arşivde](../05-gecmis-ve-arsiv/KASA_POS_VE_OPERASYON_SOZLESMESI_V2.md) saklanır.
+
+- `/cashier` masaları yönetimden belirlenen katlara ayırır; seçilen masanın açık adisyonları, toplamı ve kalan tutarı gösterilir. Bölme, taşıma, birleştirme, indirim, ikram ve ürün iptali kontrolleri mevcut API kuralları ve geliştirme yetkileriyle çalışır. Ödeme girişimi olan adisyon bölünemez; indirim/ikram/iptal uygulanmış adisyonun bölünmesi de mevcut ekranda engellidir. Gerçek yönetici onayı henüz yoktur.
+- Sabah açılışında ilk aktif kasanın başlangıç nakdi ve isteğe bağlı 500 karakterlik açılış notu kaydedilir; not vardiya geçmişinde gösterilir. Gösterilen kasiyer gerçek bir oturum değildir. `cash.management` ve Development demo aktörü sınırları [manuel kasa sözleşmesindedir](KASA_MVP_SOZLESMESI.md).
+- Vardiya kapatma penceresi isteğe bağlı kupür adetlerinden sayılan toplamı hesaplar. Kırılım saklanmaz; API yalnız toplamı, beklenen tutarı, farkı ve gerekliyse fark açıklamasını kaydeder. Açık masa adisyon sayısı yalnız bilgilendirmedir, sunucuda kapatma kilidi veya yönetici onayı değildir.
+- Hızlı satış aktif, yayımlanmış, POS kanalına açık, pozitif fiyatlı ve aktif kategorili ürünleri sunar. Ürün adı veya SKU aranabilir; SKU barkodla aynı veri olmak zorunda değildir. Ürün seçenekleri ve fiyat farkları siparişte sunucu tarafından doğrulanır.
+- Ödeme sayfasına geçince masasız adisyon açılır. Açık masasız adisyonlar en fazla 100 kayıtla listelenip sürdürülebilir; liste başka masasız adisyonları da içerebilir. Belirsiz oluşturma isteği aynı tarayıcının yerel depolamasında saklanıp aynı kimlik ve içerikle tekrar edilir. Cihazlar arasında paylaşılan işlem kuyruğu değildir.
+- Ödeme sayfasında yalnız nakit ve kart **simülasyonu** yapılır; simüle ödeme kayıtları PostgreSQL'de tutulur, gerçek tahsilat veya kasa/cari hareketi oluşturmaz. Kart alt seçimi kaydedilmez; yemek kartı, cari ve havale önizlemedir; iptal düğmesi pasiftir. Test ödemesi kalan bakiyeyi sıfırladığında adisyon kapanabilir ve son açık adisyon ise masa/grup boşalabilir. Açık vardiya kontrolü ekran tarafındadır; gerçek ödeme yetkisi değildir.
+- Hesap fişi seçilen adisyondan elle yazdırılabilir; tam simüle ödeme sonrası tarayıcının yazdırma penceresi açılır. Fiş 80 mm yazıcıya uygun düzenlenir, mali değildir ve test ödemesi açıklanır. Yazıcı seçimi/sürücü tarayıcı ve işletim sistemine aittir; otomatik, sessiz veya fiziksel KPS-80 baskısı doğrulanmamıştır. Son tamamlanan fiş yalnız ekran oturumunda tutulur.
+- Gerçek PIN/oturum, gerçek ödeme ve kasa entegrasyonu, mali fiş/ÖKC, Z raporu, gerçek ödeme iptali ve sağlayıcı mutabakatı henüz yoktur. Gerçek ödeme ve mali cihaz için doğrulanmış sonuç, tekrar/uzlaştırma ve yetki kuralları ayrıca tamamlanmalıdır.
+
+## 3. Hedeflenen İş Kuralları ve Temel Yetenekler
+
+Aşağıdaki kurallar hedef kapsamdır; mevcut uygulanmış davranış listesi değildir.
+
 
 ### 1. Parçalı Ödeme (Multi-Tender / Split Payment)
 * Bir adisyon tek bir ödeme aracıyla kapanmak zorunda değildir.
@@ -48,7 +64,9 @@ Gün sonunda vardiya kapatılırken:
 
 ---
 
-## 3. Mimari ve Veritabanı Modeli
+## 4. Hedef Mimari ve Örnek Veritabanı Modeli
+
+Aşağıdaki SQL hedef taslak olup mevcut migration veya çalışan şema tanımı değildir.
 
 ```sql
 -- 1. Çoklu Kasa Tanımları
@@ -106,7 +124,7 @@ ADD COLUMN supplier_cari_id UUID NULL; -- tedarikçiye tediye yapıldıysa
 
 ---
 
-## 4. Kullanıcı Deneyimi ve Arayüz Akışı
+## 5. Hedef Kullanıcı Deneyimi ve Arayüz Akışı
 
 ### Kasiyer Ekranı (`apps/pos`)
 ```text
@@ -129,7 +147,7 @@ ADD COLUMN supplier_cari_id UUID NULL; -- tedarikçiye tediye yapıldıysa
 
 ---
 
-## 5. Kabul Kriterleri (Devir Doğrulama Testi)
+## 6. Hedef Kabul Kriterleri (Henüz Tamamlanmadı)
 
 1. Bir masada 1.000 TL hesap varken; 400 TL Nakit + 600 TL Ziraat POS ile iki parçada kapatılabilmeli, masanın bakiyesi sıfırlanıp kapanmalıdır.
 2. 400 TL nakit ödendiği anda Kasa 1'in nakit çekmecesine otomatik olarak +400 TL `cash_sale` hareketi eklenmeli; yönetici Kasa ekranında bunu anında görmelidir.

@@ -23,11 +23,9 @@ const sceneDrafts: Record<string, Record<string, string>> = {
   },
   catalog: {
     options: "menu|Kahve boyunu seçin|Süt tercihini ekleyin|Siparişe yansıtın",
-    allergens: "allergen|Ürünü seçin|Süt ve gluten bilgisi|Misafire açıkça gösterin",
     images: "gallery|Ürün fotoğrafı|Menüdeki görünümü|Misafirin seçimi",
     composition: "composition|İçecekler bölümü|En sevilen ürünler|Menü sırası",
     channels: "channels|Salon menüsü|Paket menüsü|QR menüsü",
-    "branch-visibility": "map|Kadıköy menüsü|Beşiktaş menüsü|Moda menüsü",
     prices: "ledger|Latte fiyatı|Tatlı fiyatı|Güncel menü",
     "price-versions": "timeline|Önceki fiyat|Değişiklik tarihi|Yeni fiyat",
     "scheduled-prices": "calendar|Fiyatı hazırlayın|Başlangıç gününü seçin|Zamanında yayınlayın",

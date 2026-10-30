@@ -23,6 +23,7 @@ public sealed class CashShiftRow
     public Guid RegisterId { get; set; }
     public string Status { get; set; } = "open";
     public long OpeningCashMinor { get; set; }
+    public string? OpeningNote { get; set; }
     public string OpenedBy { get; set; } = "";
     public DateTimeOffset OpenedAt { get; set; }
     public long? ExpectedCashMinor { get; set; }
@@ -124,6 +125,7 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.Property(row => row.RegisterId).HasColumnName("register_id");
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
             entity.Property(row => row.OpeningCashMinor).HasColumnName("opening_cash_minor");
+            entity.Property(row => row.OpeningNote).HasColumnName("opening_note").HasMaxLength(500);
             entity.Property(row => row.OpenedBy).HasColumnName("opened_by").HasMaxLength(128);
             entity.Property(row => row.OpenedAt).HasColumnName("opened_at");
             entity.Property(row => row.ExpectedCashMinor).HasColumnName("expected_cash_minor");

@@ -3,14 +3,23 @@ import type { CatalogProductRecord } from "./catalog.fixtures";
 import { CatalogProviderError } from "./contracts";
 import type {
   CatalogProduct,
+  CatalogOptionGroup,
+  OptionGroupInput,
+  OptionItemInput,
+  ProductOptionGroups,
+  ProductOptionInput,
+  CategoryMutationResult,
   CategoryListResponse,
   CatalogProductDetail,
   CatalogProvider,
   CatalogScope,
+  CreateCategoryRequest,
   CreateDraftRequest,
+  CreatePricedProductRequest,
   ProductDetailRequest,
   ProductListRequest,
   ProductListResponse,
+  RenameCategoryRequest,
   PriceResult,
   PriceVersion,
   Publication,
@@ -18,6 +27,7 @@ import type {
   PublishDraftRequest,
   SetDraftPriceRequest,
   UpdateDraftRequest,
+  UpdatePublishedProductRequest,
 } from "./contracts";
 
 export type MockCatalogMode =
@@ -143,6 +153,26 @@ export class MockCatalogProvider implements CatalogProvider {
       a.name.localeCompare(b.name, "tr") || a.id.localeCompare(b.id)) };
   }
 
+  async createCategory(_request: CreateCategoryRequest): Promise<CategoryMutationResult> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori kaydı yapılamaz.");
+  }
+
+  async renameCategory(_request: RenameCategoryRequest): Promise<CategoryMutationResult> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori adı değiştirilemez.");
+  }
+
+  async setPublishedPrice(_request: SetDraftPriceRequest): Promise<PriceResult> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride fiyat değiştirilemez.");
+  }
+
+  async listOptionGroups(_scope: CatalogScope): Promise<CatalogOptionGroup[]> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek grupları yönetilemez."); }
+  async listProductOptionGroups(_request: ProductDetailRequest): Promise<ProductOptionGroups> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek grupları yönetilemez."); }
+  async createOptionGroup(_scope: CatalogScope, _input: OptionGroupInput): Promise<CatalogOptionGroup> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek grubu kaydedilemez."); }
+  async updateOptionGroup(_scope: CatalogScope, _id: string, _input: OptionGroupInput & { expectedVersion: number }): Promise<CatalogOptionGroup> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek grubu kaydedilemez."); }
+  async createOptionItem(_scope: CatalogScope, _id: string, _input: OptionItemInput): Promise<unknown> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek kaydedilemez."); }
+  async updateOptionItem(_scope: CatalogScope, _groupId: string, _itemId: string, _input: OptionItemInput): Promise<unknown> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride seçenek kaydedilemez."); }
+  async saveProductOptionGroups(_request: ProductDetailRequest & { requestId: string; expectedVersion: number; items: ProductOptionInput[] }): Promise<ProductOptionGroups> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride ürün seçenekleri kaydedilemez."); }
+
   async listProducts(
     request: ProductListRequest,
   ): Promise<ProductListResponse> {
@@ -159,9 +189,11 @@ export class MockCatalogProvider implements CatalogProvider {
     const firmRecords = catalogRecords.filter(
       (record) => record.firmId === request.scope.firmId,
     );
+    const scopedRecords = firmRecords.filter(record =>
+      request.scope.branchId === null || record.branchIds.includes(request.scope.branchId));
     const categories = Array.from(
       new Map(
-        firmRecords.map((record) => [record.category.id, record.category]),
+        scopedRecords.map((record) => [record.category.id, record.category]),
       ).values(),
     ).map((category) => ({ ...category }));
     const normalizedQuery =
@@ -169,10 +201,8 @@ export class MockCatalogProvider implements CatalogProvider {
     const matching =
       this.mode === "empty"
         ? []
-        : firmRecords.filter(
+        : scopedRecords.filter(
             (record) =>
-              (request.scope.branchId === null ||
-                record.branchIds.includes(request.scope.branchId)) &&
               (!request.categoryId ||
                 record.category.id === request.categoryId) &&
               (!normalizedQuery ||
@@ -233,11 +263,19 @@ export class MockCatalogProvider implements CatalogProvider {
     ));
   }
 
+  createPricedProduct(_request: CreatePricedProductRequest): Promise<CatalogProductDetail> {
+    return Promise.reject(new CatalogProviderError("DRAFT_NOT_AVAILABLE", 409, "Örnek veride ürün kaydedilemez."));
+  }
+
   updateDraft(_request: UpdateDraftRequest): Promise<CatalogProductDetail> {
     return Promise.reject(new CatalogProviderError(
       "DRAFT_NOT_AVAILABLE", 409,
       "Örnek görünümde ürün taslağı düzenlenemez. Kayıt işlemleri için katalog bağlantısı gerekiyor.",
     ));
+  }
+
+  updatePublishedProduct(_request: UpdatePublishedProductRequest): Promise<CatalogProductDetail> {
+    return Promise.reject(new CatalogProviderError("DRAFT_NOT_AVAILABLE", 409, "Örnek veride ürün düzenlenemez."));
   }
 
   setDraftPrice(_request: SetDraftPriceRequest): Promise<PriceResult> {

@@ -48,7 +48,9 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - Satış ve adisyon kapamaları kasaya otomatik yansımamaktadır (çift defter sorunu).
   - Parçalı ödeme (Nakit + Kart + Cari + Yemek Kartı) altyapısı yoktur.
   - Çoklu kasa (Ana Kasa, Bar vb.) ve kasiyer PIN ile kasa seçimi yoktur.
-  - Gün sonu Z-Raporu, kupür sayımı (200x, 100x...) ve hasılat teslim tutanağı (Safe Drop) yoktur.
+  - Kasiyer vardiya kapatma ekranında isteğe bağlı kupür girişi sayılan toplamı hesaplar; masa özeti uyarısı gösterilir. Kupür kırılımı ayrıca saklanmaz ve uyarı sunucuda kapanış kilidi değildir. Gün sonu Z-Raporu ve hasılat teslim tutanağı (Safe Drop) yoktur.
+  - Hızlı satışta açık masasız adisyonlar listelenip sürdürülebilir; sonuçlanmamış oluşturma isteği aynı terminalde saklanarak aynı kimlikle tekrar edilir. Liste şubedeki ilk 100 açık masasız adisyonla sınırlıdır ve yalnız hızlı satışa ait kayıtları ayırmaz.
+  - Açılış notu vardiyada saklanır; hesap fişi tarayıcı üzerinden mali olmayan çıktı olarak yazdırılır. Tam simüle tahsilat sonrasında yazdırma penceresi açılır; gerçek ÖKC ve otomatik donanım baskısı yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. `sales.check_payments` tablosunun eklenmesi ve parçalı ödeme tiplerinin desteklenmesi.
   2. Kasiyerlerin 4 haneli PIN ile istasyon/kasa seçerek oturum açması.
@@ -74,7 +76,7 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - Masa taşıma/birleştirme API'leri garson ekranındaki modal akışlara bağlandı; birleştirme açık ve ödeme girişimi olmayan adisyonlarla sınırlıdır.
   - Adisyon bölme API'si kalem/miktar seçen garson ekranına bağlandı.
   - Gerçek kasa/POS tahsilatının adisyon kapanışına bağlanması, ödeme hareketinin kasa kaydıyla eşleştirilmesi ve gerçek müdür yetkisi eksiktir.
-  - Ürün seçenekleri ve varyasyonları (modifiers) sipariş kalemine eklenememektedir.
+  - Ürün seçenekleri garson ve kasa hızlı satış ekranından sipariş kalemine eklenebilir.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. Masa taşıma/birleştirme ve bölme UI akışları eklendi; gerçek veritabanı kabul testleri gereklidir.
   2. İndirim/ikram/kalem iptali API'si ve gerçek yetki/audit altyapısı.
@@ -114,13 +116,14 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 | **Kılavuz Doküman** | 👉 [Modül 4 Şartnamesi](MODUL_04_KATALOG_VE_MENU.md) · [Katalog Backend Sözleşmesi](../03-is-alanlari-ve-yonetim/KATALOG_BACKEND_SOZLESMESI.md) · [Menü Yönetimi MVP](../03-is-alanlari-ve-yonetim/MENU_YONETIMI_MVP.md) |
 
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
-  - Kategoriler, ürün taslağı, fiyat sürümü ve POS yayını PostgreSQL'e tam bağlıdır.
-  - Menü oluşturma, kategori ve ürün sıralama, tek aktif menü seçimi API üzerinden çalışmaktadır.
+  - Şube kategorileri, fiyatlı ürün kaydı, tek şubeli ürün düzenleme, fiyat sürümleri ve POS yayını PostgreSQL'e bağlıdır.
+  - Ürün ayrıntısında seçenek grubu ve seçenek yönetimi API'ye bağlıdır; sipariş API'si seçilen seçenekleri ve fiyat farklarını doğrular.
+  - Menü oluşturma, kategori ve ürün sıralama, aynı şubede birden fazla menüyü POS'ta kullanılabilir yapma API üzerinden çalışmaktadır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
-  - Ürün seçenekleri/ekstraları (Modifiers: "Büyük Boy +20 TL", "Az Pişmiş") tanımlanamamaktadır.
+  - Ürün görseli yükleme ve menü/operasyon ekranlarında gösterimi için katalog migration’ı uygulanmalıdır; kanal yayını genişletmeleri tamamlanmamıştır.
   - QR Menü dış yayını henüz yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
-  1. Ürünlere opsiyon grubu (Modifiers) şemasının eklenmesi.
+  1. Garson ve kasa hızlı satışında seçenek seçimleri sipariş API'sine bağlandı.
   2. Şube menülerinin masalara özel QR kod çıktısı üretmesi.
 
 ---
