@@ -401,13 +401,13 @@ export function ReceivingPage({ ctx, canWrite }: { ctx: ViewContext; canWrite: b
     {loading ? <div className="card generic-empty">Mal kabul sözlükleri yükleniyor…</div> : <>
       <section className="card content-card receiving-document">
         <div className="card-heading padded">
-          <div><span className="card-kicker">BELGE BİLGİLERİ</span><h2>Gelen mal belgesi</h2></div>
+          <div><span className="card-kicker">BELGE BİLGİLERİ</span><h2>Gelen mal belgesi (Fiyatsız sipariş taslağı)</h2></div>
           <button className="soft-button" disabled={!canWrite || busy} onClick={openNewOrderModal}>
             <FileText size={15} /> Yeni Satın Alma Siparişi
           </button>
         </div>
         <div className="cari-form receiving-header">
-          <label>Bağlı Satın Alma Siparişi
+          <label>Bağlı sipariş (satın alma)
             <select value={selectedOrderId} disabled={!canWrite || busy} onChange={(event) => onSelectOrder(event.target.value)}>
               <option value="">Siparişsiz / Doğrudan Alım</option>
               {approvedOrders.map((order) => (
