@@ -51,4 +51,6 @@ public sealed class PrinterTargetConfig
 
 public sealed record UpdatePrinterConfigRequest(string? KitchenIp, int? KitchenPort, string? CashierIp, int? CashierPort);
 
+public sealed record SettleTableRequest(string? PaymentMethod = "NAKIT");
+
 public sealed record PrintResult(bool Success, string Target, string TransportUsed, string? Error = null);
