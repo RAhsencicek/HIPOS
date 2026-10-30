@@ -173,7 +173,7 @@ export function WaiterApp() {
         tableId && (tableAction === "split" || tableAction === "discount")
           ? request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(tableId)}`, "pos-single")
           : Promise.resolve(null),
-        tableId ? request<{ items: Order[] }>(ordersPath, "pos-single") : Promise.resolve(null),
+        tableId ? request<{ items: Order[] }>(ordersPath, "manager-single") : Promise.resolve(null),
       ]);
       if (serial !== reloadSerial.current) return;
       const currentId = tableId;

@@ -364,7 +364,7 @@ app.MapGet("/api/v1/firms/{firmId}/sales/orders",
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (actor.CanOperate || !DemoAccess.CanReadCatalog(actor, firmId, branchId))
+        if (!DemoAccess.CanReadCatalog(actor, firmId, branchId))
             return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu firma/şube siparişlerini izleme izni yok.");
         if (!salesReady)
             return Failure(context, "SALES_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı ve API yeniden başlatılmalı.");
