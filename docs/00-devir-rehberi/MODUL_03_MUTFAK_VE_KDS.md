@@ -1,13 +1,14 @@
 # Modül 3 Devir Şartnamesi — Mutfak (KDS) & Servis Kuyruğu (A'dan Z'ye)
 
-> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
+> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.1
 > **Kapsam:** KDS Ekranı, Durum Makinesi, Gecikme Alarmları, İstasyon Filtreleme ve ESC/POS Termal Fiş Basımı
-> **Modül Durumu:** Geliştirme Önizlemesi (Prototip) · Gerçek KDS ve Yazıcı (Hedef / Sırada)
-> **PostgreSQL Şeması:** Yok (Şu an salt-okunur `sales.orders` listeleniyor)
-> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` polling önizlemesi)
-> **API:** Yok (Durum güncelleme ve KDS domain endpoint'i henüz yazılmadı)
-> **Test:** Yok (Yalnızca genel sipariş testleri var)
-> **Üretime Hazır mı?:** Hayır (Mutfak durum makinesi ve termal yazıcı servisi eksiktir)
+> **Modül Durumu:** Kalıcı KDS çekirdeği çalışıyor · Bildirim, satış iptali bağlantısı, gerçek yetki, offline çalışma ve yazıcı entegrasyonu eksik
+> **PostgreSQL Şeması:** `kitchen` (`tasks`, `task_audit`)
+> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif, servise hazır ve son servis edilenler)
+> **API:** Var (görev listesi ve sürüm kontrollü durum güncelleme)
+> **Test:** PostgreSQL kabul paketinde KDS görev üretimi, istasyon, durum, idempotency, sürüm ve audit senaryoları var
+> **Üretime Hazır mı?:** Hayır (Garson bildirimi, satış iptali bağlantısı, gerçek auth, offline/sync ve termal yazıcı servisi eksiktir)
+<!-- 23 Ekim 2026: Üst durum özetindeki eksik bilgi mevcut KDS uygulamasına göre eklendi; üretim engelleri silinmeden korundu. -->
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
 > * **Güncel teslim ve yol haritası için:** [docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
@@ -18,18 +19,37 @@
 
 ---
 
+### Ayrı mutfak görevi kararı — 22 Ekim 2026
+
+- Hazırlık bilgisi satış satırını değiştirerek değil, `kitchen.tasks` içinde sipariş kalemine bağlı ayrı görevle tutulacaktır. Ayrıntılı mutfak kılavuzundaki görev modeli esastır.
+- Adisyon müşterinin toplam hesabıdır; aynı adisyona sonradan eklenen her sipariş kendi ürün satırları için yeni görevler oluşturur. Tamamlanmış görevler yeniden açılmaz.
+- Her görev bir sipariş kalemine bağlıdır; örneğin aynı kalemdeki 2 pizza, miktarı 2 olan tek görevdir. Kısmi miktar hazırlama bu adımın kapsamı değildir.
+- Hazırlık sırası `submitted` (Bekliyor) → `preparing` (Hazırlanıyor) → `ready` (Hazır) → `served` (Servis edildi). Hazır görev aktif hazırlık kuyruğundan ayrı “Servise hazır” bölümüne geçer; servis edilen görev son işlemler bölümünde görünür ve geçmişten silinmez.
+- Süre adisyonun açılışından değil, ilgili görevin sunucu tarafından kaydedilen başlangıcından hesaplanır. Saat 19.00'da servis edilen pizzanın ardından 20.00'de gelen içeceğin süresi 20.00'de başlar.
+- Görevler firma/şube kapsamı taşır. Mevcut satış kalemi kimliği `long` olduğu için görev bağlantısı da `bigint` olmalıdır; satış kimlikleri değiştirilmez.
+- Kalıcı entegrasyon adımında aynı sipariş kaleminden ikinci görev oluşması benzersizlikle engellenmeli; durum yazmaları sürüm, tekil istek ve denetim kaydıyla korunmalıdır.
+- Yerel ağ ve merkezi eşitleme ayrıntıları daha sonra netleştirilecektir; bu çalışma offline/sync uygulamaz.
+- İş modeli, PostgreSQL kalıcılığı, siparişten görev üretimi, liste/durum API'si ve ekran bağlantısı uygulanmıştır. İptal/gerekçe/onay akışı satış modülüyle birlikte sonraki entegrasyonda ele alınacaktır.
+- İlk istasyon dilimi uygulanmıştır: `kitchen.stations` ve `kitchen.station_categories` kategoriye göre Fırın, Sıcak Mutfak, Bar ve Soğuk Mutfak yönlendirmesini yapar. Eşleşmeyen ürün görevleri silinmez ve `Atanmamış` filtresinde kalır. Demo kategori eşleştirmeleri migration ile kurulur; yönetim ekranından istasyon/eşleştirme düzenleme sonraki kapsamdır.
+- İptalin mutfak tarafındaki veri temeli hazırlanmıştır: görev `cancelled` durumunu, iptal zamanı, gerekçe ve aktörü saklar; KDS iptal edilen görevi kırmızı ve üzeri çizili geçmişte gösterebilir. İptal komutunun sahibi satış/adisyon modülüdür. Satış kalemi iptal endpoint'i ve müdür onayı henüz bulunmadığı için mutfak doğrudan iptal başlatmaz; gerçek bağlantı ortak entegrasyonda yapılacaktır.
+
 ### 📌 Hızlı Gerçeklik Özeti
 * **Bugün Kodda Gerçekten Çalışanlar (Mevcut Durum):**
-  - Geliştirme amaçlı `/kitchen` ekranı (`OperationalApps.tsx`)
-  - 3 saniyede bir polling yaparak açık siparişleri listeleyen salt-okunur prototip
-  - Garsonun girdiği sipariş kalemlerinin ekranda listelenmesi
+  - `/kitchen` ekranı (`OperationalApps.tsx`) 3 saniyelik polling ile kalıcı `kitchen.tasks` görevlerini listeler.
+  - Garsonun girdiği her sipariş kalemi ayrı görev olur; aynı adisyona sonradan gelen sipariş kendi süresini başlatır.
+  - Dokunmatik `Bekliyor → Hazırlanıyor → Hazır → Servis edildi` geçişleri, sürüm kontrolü ve audit kaydı çalışır.
+  - Fırın, Sıcak Mutfak, Bar, Soğuk Mutfak ve Atanmamış filtreleri çalışır; gecikme süresi ve renkleri gösterilir.
+  - İptal bilgisini saklayacak alanlar ve iptal geçmişi görünümü vardır; satış/adisyon iptal komutu henüz bağlı değildir.
+  <!-- 23 Ekim 2026: Salt-okunur prototip ifadesindeki eksik bilgi, tamamlanan kalıcı KDS akışıyla güncellendi. -->
 * **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
-  - Gerçek KDS iş modeli ve durum güncelleme API'si (`POST /api/v1/kitchen/orders/{id}/status`)
-  - Dokunmatik durum butonları (`Hazırlanıyor`, `Hazır`, `Servise Çıkar`)
-  - İstasyon ayrımı (Sıcak Mutfak, Fırın, Bar) ve kategori filtreleme
-  - Gecikme renk sayaçları (10 dk yeşil, 20 dk sarı, 30+ dk kırmızı alarm)
+  - Yönetilebilir istasyon/kategori ayar ekranı (ilk sabit demo eşleştirmesi ve KDS filtreleri çalışıyor)
+  - Garsona “sipariş hazır” anlık bildirimi ve teslim alındı bilgisi
+  - Satış/adisyon kalem iptali, iptal gerekçesi ve gerektiğinde müdür PIN onayı bağlantısı
+  - Demo aktör yerine gerçek mutfak kullanıcısı/PIN ve rol yetkilendirmesi
+  - Yerel ağ kesintisi, cihaz kuyruğu ve merkezi offline/sync davranışı
   - ESC/POS TCP 9100 ağ yazıcısı yerel servisi ve otomatik bilet dökümü
   - Yazıcı bağlantı ve kuyruk yönetimi
+  <!-- 23 Ekim 2026: Tamamlanan API, buton ve sayaç maddeleri mevcut duruma taşındı; kalan sorunlar korunup eksik bildirim/auth/offline maddeleri eklendi. -->
 
 ---
 
@@ -110,8 +130,8 @@ graph TD
 ```
 
 1. **1. Adım: Mutfak Durum Güncelleme API'si:**
-   * `POST /api/v1/firms/{f}/branches/{b}/kitchen/orders/{id}/status`
-   * Durumlar: `pending` -> `preparing` -> `ready` -> `served`.
+   * `POST /api/v1/firms/{f}/branches/{b}/kitchen/tasks/{taskId}/status`
+   * Durumlar: `submitted` -> `preparing` -> `ready` -> `served`.
 2. **2. Adım: KDS Arayüzü Geliştirmesi:**
    * `/kitchen` ekranına dokunmatik büyük butonlar ve geçen süre sayaçları ekleme.
 3. **3. Adım: İstasyon Filtreleme:**
@@ -134,11 +154,8 @@ CREATE TABLE kitchen.stations (
     is_active BOOLEAN NOT NULL DEFAULT true
 );
 
--- Sipariş Kalem Mutfak Durumu
-ALTER TABLE sales.order_lines
-    ADD COLUMN IF NOT EXISTS kitchen_status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'preparing', 'ready', 'served'
-    ADD COLUMN IF NOT EXISTS station_id UUID NULL,
-    ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ NULL;
+-- Hazırlık durumu sales.order_lines'a eklenmez.
+-- Ayrı kitchen.tasks modeli ve istasyon bağları için MUTFAK_KDS_VE_YAZICI.md esas alınır.
 ```
 
 ---

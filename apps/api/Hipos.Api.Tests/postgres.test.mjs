@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execFile as execFileCallback } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,20 +8,23 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { chromium, expect } from "@playwright/test";
 import { verifyMenuApi, verifyMenuPanel } from "./menu.acceptance.mjs";
 
 const sharedCatalog = JSON.parse(await readFile(new URL("../../../contracts/feature-catalog.v1.json", import.meta.url), "utf8"));
 
 const execFile = promisify(execFileCallback);
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
+const localPlaywrightBrowsers = join(repo, ".playwright-browsers");
+if (existsSync(localPlaywrightBrowsers)) process.env.PLAYWRIGHT_BROWSERS_PATH = localPlaywrightBrowsers;
+const { chromium, expect } = await import("@playwright/test");
 const project = fileURLToPath(
   new URL("../Hipos.Api/Hipos.Api.csproj", import.meta.url),
 );
-const pgBin = process.env.HIPOS_TEST_PG_BIN ?? (process.platform === "win32"
+const pgBin = process.env.HIPOS_POSTGRES_BIN ?? (process.platform === "win32"
   ? "C:/Program Files/PostgreSQL/15/bin"
   : "/opt/homebrew/opt/postgresql@18/bin");
-const pgUser = process.env.USER ?? process.env.USERNAME;
+const useDockerPostgres = process.env.HIPOS_TEST_POSTGRES === "docker" ||
+  (process.platform === "win32" && !process.env.HIPOS_POSTGRES_BIN);
 const firm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const moda = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
 const besiktas = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
@@ -72,6 +76,11 @@ async function waitForUi(base, child, output) {
   throw new Error(`Panel başlatılamadı: ${output()}`);
 }
 
+async function launchBrowser() {
+  if (existsSync(chromium.executablePath())) return chromium.launch({ headless: true });
+  return chromium.launch({ channel: process.platform === "win32" ? "msedge" : "chrome", headless: true });
+}
+
 test(
   "PostgreSQL modül tercihini yeniden başlatma ve eşzamanlı istekte korur",
   { timeout: 600000 },
@@ -82,11 +91,16 @@ test(
     const pgPort = await freePort();
     const apiPort = await freePort();
     const uiPort = await freePort();
+    const pgUser = useDockerPostgres ? "hipos" : (process.env.USER ?? process.env.USERNAME);
+    const pgPassword = useDockerPostgres ? "hipos-test-only" : "";
+    const pgContainer = `hipos-postgres-test-${process.pid}-${Date.now()}`;
     const base = `http://127.0.0.1:${apiPort}`;
     const uiBase = `http://127.0.0.1:${uiPort}`;
-    const connection = `Host=127.0.0.1;Port=${pgPort};Database=hipos_features;Username=${pgUser};Pooling=false`;
+    const connection = `Host=127.0.0.1;Port=${pgPort};Database=hipos_features;Username=${pgUser};${pgPassword ? `Password=${pgPassword};` : ""}Pooling=false`;
+    const databaseUrl = `postgresql://${pgUser}${pgPassword ? `:${pgPassword}` : ""}@127.0.0.1:${pgPort}/hipos_features`;
     const env = {
       ...process.env,
+      HIPOS_POSTGRES_CONTAINER: useDockerPostgres ? pgContainer : process.env.HIPOS_POSTGRES_CONTAINER,
       ASPNETCORE_ENVIRONMENT: "Development",
       HIPOS_FEATURE_STORAGE: "postgres",
       HIPOS_FEATURES_CONNECTION: connection,
@@ -101,7 +115,10 @@ test(
     let browser;
     let apiOutput = "";
     let uiOutput = "";
-    const runPg = (command, args) => execFile(join(pgBin, command), args);
+    const runPg = (command, args) => useDockerPostgres
+      ? execFile("docker", ["exec", pgContainer, command, ...args.filter((value, index) =>
+        !(args[index - 1] === "-h" || args[index - 1] === "-p" || value === "-h" || value === "-p"))])
+      : execFile(join(pgBin, command), args);
     const startApi = async () => {
       apiOutput = "";
       api = spawn(
@@ -158,34 +175,24 @@ test(
       `/api/v1/firms/${firm}/branches/${branch}/features${key ? `/${key}` : ""}`;
 
     try {
-      await runPg("initdb", [
-        "-D",
-        data,
-        "-A",
-        "trust",
-        "--encoding",
-        "UTF8",
-        "--no-instructions",
-      ]);
-      await new Promise((resolve, reject) => {
-        const pg = spawn(join(pgBin, "pg_ctl"), [
-          "-D", data, "-l", log, "-o",
-          process.platform === "win32" ? `-h 127.0.0.1 -p ${pgPort}` : `-h 127.0.0.1 -p ${pgPort} -k /tmp`,
-          "start",
-        ], { stdio: "ignore", windowsHide: true });
-        pg.once("error", reject);
-        pg.once("close", code => code === 0 ? resolve() : reject(new Error(`pg_ctl start exited with ${code}`)));
-      });
-      postgresStarted = true;
-      await runPg("createdb", [
-        "-h",
-        "127.0.0.1",
-        "-p",
-        String(pgPort),
-        "-U",
-        pgUser,
-        "hipos_features",
-      ]);
+      if (useDockerPostgres) {
+        await execFile("docker", ["run", "--rm", "-d", "--name", pgContainer,
+          "-e", `POSTGRES_DB=hipos_features`, "-e", `POSTGRES_USER=${pgUser}`,
+          "-e", `POSTGRES_PASSWORD=${pgPassword}`, "-p", `127.0.0.1:${pgPort}:5432`, "postgres:18-alpine"]);
+        for (let attempt = 0; attempt < 120; attempt++) {
+          try {
+            await execFile("docker", ["exec", pgContainer, "pg_isready", "-U", pgUser, "-d", "hipos_features"]);
+            postgresStarted = true;
+            break;
+          } catch { await new Promise((resolve) => setTimeout(resolve, 250)); }
+        }
+        if (!postgresStarted) throw new Error("Docker PostgreSQL test sunucusu hazır olmadı.");
+      } else {
+        await runPg("initdb", ["-D", data, "-A", "trust", "--encoding", "UTF8", "--no-instructions"]);
+        await runPg("pg_ctl", ["-D", data, "-l", log, "-o", `-h 127.0.0.1 -p ${pgPort} -k /tmp`, "start"]);
+        postgresStarted = true;
+        await runPg("createdb", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "hipos_features"]);
+      }
       await execFile(
         "dotnet",
         [
@@ -384,6 +391,11 @@ test(
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "ExpenseDbContext"],
         { cwd: repo, env },
       );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "KitchenDbContext"],
+        { cwd: repo, env },
+      );
       const migratedCategory = await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -518,10 +530,9 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*)||','||(SELECT count(*) FROM cash.audit WHERE firm_id='${firm}' AND branch_id='${moda}' AND action='default_register_provisioned') FROM cash.registers WHERE firm_id='${firm}' AND branch_id='${moda}' AND code='MAIN'`]);
       assert.equal(provisionCounts.stdout.trim(), "1,1", "İdempotent provisioning ikinci kasa/audit oluşturmamalı.");
-      const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      const cashSeedUtf8Env = { ...cashSeedEnv, PGCLIENTENCODING: "UTF8" };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedUtf8Env });
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedUtf8Env });
+      const cashSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: databaseUrl };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cash"], { cwd: repo, env: cashSeedEnv });
       const cashSeedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
         "SELECT (SELECT count(*) FROM cash.registers)||','||(SELECT count(*) FROM cash.shifts)||','||(SELECT count(*) FROM cash.movements)"]);
@@ -722,13 +733,12 @@ test(
       }, "manager-single");
       assert.equal(reenablingCari.status, 200);
       assert.equal(reenablingCari.data.effectiveForNewWork, true);
-      const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      const cariSeedUtf8Env = { ...cariSeedEnv, PGCLIENTENCODING: "UTF8" };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedUtf8Env });
+      const cariSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: databaseUrl };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
       const seededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(seededCariCounts.stdout.trim(), "11,20");
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedUtf8Env });
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--cari"], { cwd: repo, env: cariSeedEnv });
       const reseededCariCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c", "SELECT (SELECT count(*) FROM cari.parties)||','||(SELECT count(*) FROM cari.movements)"]);
       assert.equal(reseededCariCounts.stdout.trim(), "11,20");
@@ -757,11 +767,11 @@ test(
 
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, PGCLIENTENCODING: "UTF8", HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: databaseUrl },
       });
       await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs"), "--inventory"], {
         cwd: repo,
-        env: { ...env, PGCLIENTENCODING: "UTF8", HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` },
+        env: { ...env, HIPOS_DEMO_DATABASE_URL: databaseUrl },
       });
       const seedCounts = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-t", "-A", "-c",
@@ -812,6 +822,29 @@ test(
       assert.equal(inventoryRecipesEnabled.data.effectiveForNewWork, true);
       const inventoryCountsEnabled = await request(inventoryFeaturePath("inventory.counts"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
       assert.equal(inventoryCountsEnabled.data.effectiveForNewWork, true);
+      const procurementEnabled = await request(inventoryFeaturePath("procurement.requests"), "PUT", { desiredEnabled: true, expectedVersion: 1 }, "manager-single");
+      assert.equal(procurementEnabled.data.effectiveForNewWork, true);
+
+      const supplier = (await request(cariPath(single, singleBranch), "GET", undefined, "manager-single")).data.items
+        .find((party) => party.types.includes("supplier"));
+      assert.ok(supplier, "Mal kabul testi için etkin tedarikçi bulunmalı.");
+      const purchaseId = "44444444-4444-4444-8444-444444444420";
+      const purchaseApprovalId = "44444444-4444-4444-8444-444444444421";
+      const purchasePath = `${singleInventory}/purchases`;
+      const purchaseDraft = await request(purchasePath, "POST", {
+        requestId: purchaseId, warehouseId: "warehouse-kadikoy-main", supplierCariId: supplier.id,
+        documentNumber: "TEST-MK-001", documentDate: "2026-10-26",
+        lines: [{ ingredientId: "flour", quantity: 10, unitPriceMinor: 3000, discountRateBps: 0, taxRateBps: 100 }],
+      }, "manager-single");
+      assert.equal(purchaseDraft.status, 201, JSON.stringify(purchaseDraft.data));
+      assert.equal(purchaseDraft.data.status, "draft");
+      assert.equal(purchaseDraft.data.totalMinor, 30300);
+      assert.equal((await request(purchasePath, "GET", undefined, "manager-single")).data.items
+        .find((purchase) => purchase.id === purchaseId).lines[0].ingredientName, "Un");
+      const blockedPurchaseApproval = await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single");
+      assert.equal(blockedPurchaseApproval.data.code, "COUNT_IN_PROGRESS");
 
       const recipeBody = { requestId: "44444444-4444-4444-8444-444444444405", expectedVersion: 1, portion: "1 büyük pizza",
         lines: [{ ingredientId: "flour", quantity: 260 }, { ingredientId: "tomato-sauce", quantity: 80 }, { ingredientId: "mozzarella", quantity: 120 }] };
@@ -843,6 +876,62 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c",
         `SELECT count(*) FROM inventory.movements WHERE count_id='${demoCount.id}' AND ingredient_id='mozzarella' AND delta=-100 AND kind='count_adjustment'`]);
       assert.equal(adjustmentCount.stdout.trim(), "1");
+
+      const approvedPurchase = await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single");
+      assert.equal(approvedPurchase.status, 200, JSON.stringify(approvedPurchase.data));
+      assert.equal(approvedPurchase.data.status, "approved");
+      assert.equal((await request(`${purchasePath}/${purchaseId}/approve`, "POST", {
+        requestId: purchaseApprovalId, expectedVersion: 1,
+      }, "manager-single")).status, 200);
+      const purchaseEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_id='${purchaseId}' AND kind='receiving')||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${purchaseApprovalId}' AND entry_type='supplier_debt' AND delta_minor=30300)`]);
+      assert.equal(purchaseEffects.stdout.trim(), "1,1", "Mal kabul onayı stok ve cari etkisini yalnız bir kez üretmeli.");
+      const purchaseLineId = approvedPurchase.data.lines[0].id;
+      const correctionId = "44444444-4444-4444-8444-444444444422";
+      const purchaseCorrectionPath = `${purchasePath}/${purchaseId}/corrections`;
+      const correctedPurchase = await request(purchaseCorrectionPath, "POST", {
+        requestId: correctionId, purchaseLineId, quantity: 2, reason: "Testte eksik teslim",
+      }, "manager-single");
+      assert.equal(correctedPurchase.status, 201, JSON.stringify(correctedPurchase.data));
+      assert.equal(correctedPurchase.data.totalMinor, 6060);
+      assert.equal((await request(purchaseCorrectionPath, "POST", {
+        requestId: correctionId, purchaseLineId, quantity: 2, reason: "Testte eksik teslim",
+      }, "manager-single")).status, 200);
+      assert.equal((await request(purchaseCorrectionPath, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444423", purchaseLineId, quantity: 9,
+        reason: "Kabul edilenden fazla düzeltme",
+      }, "manager-single")).data.code, "PURCHASE_CORRECTION_EXCEEDS_RECEIPT");
+      const correctionEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_correction_id='${correctionId}' AND kind='purchase_correction' AND delta=-2)||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${correctionId}' AND entry_type='adjustment_decrease' AND delta_minor=-6060)`]);
+      assert.equal(correctionEffects.stdout.trim(), "1,1", "Eksik teslim düzeltmesi stok ve cari etkisini yalnız bir kez üretmeli.");
+      const returnId = "44444444-4444-4444-8444-444444444424";
+      const purchaseReturnPath = `${purchasePath}/${purchaseId}/returns`;
+      const returnedPurchase = await request(purchaseReturnPath, "POST", {
+        requestId: returnId, purchaseLineId, documentNumber: "TEST-IADE-001", documentDate: "2026-10-26",
+        quantity: 3, reason: "Testte kalite iadesi",
+      }, "manager-single");
+      assert.equal(returnedPurchase.status, 201, JSON.stringify(returnedPurchase.data));
+      assert.equal(returnedPurchase.data.totalMinor, 9090);
+      assert.equal((await request(purchaseReturnPath, "POST", {
+        requestId: returnId, purchaseLineId, documentNumber: "TEST-IADE-001", documentDate: "2026-10-26",
+        quantity: 3, reason: "Testte kalite iadesi",
+      }, "manager-single")).status, 200);
+      assert.equal((await request(purchaseReturnPath, "POST", {
+        requestId: "44444444-4444-4444-8444-444444444425", purchaseLineId,
+        documentNumber: "TEST-IADE-002", documentDate: "2026-10-26", quantity: 6,
+        reason: "Kabul edilenden fazla iade",
+      }, "manager-single")).data.code, "PURCHASE_RETURN_EXCEEDS_RECEIPT");
+      const returnEffects = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM inventory.movements WHERE purchase_return_id='${returnId}' AND kind='supplier_return' AND delta=-3)||','||` +
+        `(SELECT count(*) FROM cari.movements WHERE id='${returnId}' AND entry_type='adjustment_decrease' AND delta_minor=-9090)`]);
+      assert.equal(returnEffects.stdout.trim(), "1,1", "Tedarikçi iadesi stok ve cari etkisini yalnız bir kez üretmeli.");
 
       const newIngredient = { requestId: "44444444-4444-4444-8444-444444444401", name: "Test Malzeme", unit: "g", criticalBelow: 10 };
       const createdIngredient = await request(`${singleInventory}/ingredients`, "POST", newIngredient, "manager-single");
@@ -985,7 +1074,7 @@ test(
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
       ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
       await waitForUi(uiBase, ui, () => uiOutput);
-      browser = await chromium.launch({ headless: true });
+      browser = await launchBrowser();
       const page = await browser.newPage();
       const cariPage = await browser.newPage();
       const cashPage = await browser.newPage();
@@ -1482,6 +1571,78 @@ test(
       assert.equal(tableDetail.data.items[0].assignment.waiterName, "Demo Garson");
       assert.equal(tableDetail.data.items[0].assignment.items[0].productName, "Margherita Pizza");
       assert.equal(tableDetail.data.items[0].assignment.items[0].quantity, 2);
+
+      // Aynı açık adisyona sonradan gelen sipariş ayrı mutfak görevleri üretmeli;
+      // görevler ilk siparişin order_id'sine değil ortak check_id'ye göre masa/garsonu bulmalı.
+      const kitchenStationId = "a2000000-0000-4000-8000-000000000001";
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO kitchen.stations (id,firm_id,branch_id,code,name,is_active)
+         VALUES ('${kitchenStationId}','${firm}','${moda}','oven','Test Fırın',true);
+         INSERT INTO kitchen.station_categories (firm_id,branch_id,category_id,station_id)
+         VALUES ('${firm}','${moda}','pizza','${kitchenStationId}');`]);
+      const waiterOrderId = "88888888-8888-4888-8888-888888888851";
+      const waiterOrderBody = { orderId: waiterOrderId, waiterId: waiter.data.id,
+        items: [{ productId: pizzaId, quantity: 3 }] };
+      const waiterOrder = await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
+        waiterOrderBody, "pos-moda");
+      assert.equal(waiterOrder.status, 201);
+      assert.equal((await request(`${modaService}/tables/${table.data.id}/orders`, "POST",
+        waiterOrderBody, "pos-moda")).status, 200);
+
+      const kitchenPath = `/api/v1/firms/${firm}/branches/${moda}/kitchen`;
+      const kitchenAll = await request(`${kitchenPath}/tasks?status=all`);
+      assert.equal(kitchenAll.status, 200);
+      const kitchenTask = kitchenAll.data.items.find((item) => item.orderId === waiterOrderId);
+      assert.ok(kitchenTask, "Sonradan eklenen garson siparişi mutfak görevi oluşturmalı.");
+      assert.equal(kitchenTask.productName, "Margherita Pizza");
+      assert.equal(kitchenTask.quantity, 3);
+      assert.equal(kitchenTask.status, "submitted");
+      assert.equal(kitchenTask.version, 1);
+      assert.equal(kitchenTask.stationCode, "oven");
+      assert.equal(kitchenTask.tableName, "Masa 12");
+      assert.equal(kitchenTask.waiterName, "Demo Garson");
+
+      const preparingRequest = "88888888-8888-4888-8888-888888888852";
+      const preparing = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "preparing", expectedVersion: 1,
+      }, "pos-moda");
+      assert.equal(preparing.status, 200);
+      assert.equal(preparing.data.status, "preparing");
+      assert.equal(preparing.data.version, 2);
+      assert.ok(preparing.data.preparedAt);
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "preparing", expectedVersion: 1,
+      }, "pos-moda")).data.version, 2, "Aynı durum isteği ikinci audit veya sürüm üretmemeli.");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: preparingRequest, nextStatus: "ready", expectedVersion: 2,
+      }, "pos-moda")).data.code, "REQUEST_ID_CONFLICT");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888853", nextStatus: "served", expectedVersion: 2,
+      }, "pos-moda")).data.code, "INVALID_KITCHEN_STATUS_TRANSITION");
+      assert.equal((await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888854", nextStatus: "ready", expectedVersion: 1,
+      }, "pos-moda")).data.code, "VERSION_CONFLICT");
+      const ready = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888855", nextStatus: "ready", expectedVersion: 2,
+      }, "pos-moda");
+      assert.equal(ready.data.status, "ready");
+      assert.equal(ready.data.version, 3);
+      assert.ok((await request(`${kitchenPath}/tasks?status=ready`)).data.items.some((item) => item.id === kitchenTask.id));
+      assert.ok(!(await request(`${kitchenPath}/tasks?status=active`)).data.items.some((item) => item.id === kitchenTask.id));
+      const served = await request(`${kitchenPath}/tasks/${kitchenTask.id}/status`, "POST", {
+        requestId: "88888888-8888-4888-8888-888888888856", nextStatus: "served", expectedVersion: 3,
+      }, "pos-moda");
+      assert.equal(served.data.status, "served");
+      assert.equal(served.data.version, 4);
+      assert.ok(served.data.servedAt);
+      assert.ok((await request(`${kitchenPath}/tasks?status=served`)).data.items.some((item) => item.id === kitchenTask.id));
+      const kitchenRows = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        `SELECT (SELECT count(*) FROM kitchen.tasks WHERE order_id='${waiterOrderId}')||','||
+                (SELECT count(*) FROM kitchen.task_audit WHERE task_id='${kitchenTask.id}')`]);
+      assert.equal(kitchenRows.stdout.trim(), "1,4",
+        "Tek sipariş kalemi bir görev; oluşturma ve üç geçiş toplam dört audit kaydı üretmeli.");
       assert.equal((await request(`${modaService}/tables/${table.data.id}`, "DELETE")).data.code, "TABLE_HAS_OPEN_CHECK");
       const nextTable = await request(`${modaService}/tables`, "POST", { name: null });
       assert.equal(nextTable.status, 201);
@@ -1501,7 +1662,7 @@ test(
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
       ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
       await waitForUi(uiBase, ui, () => uiOutput);
-      browser = await chromium.launch({ headless: true });
+      browser = await launchBrowser();
       const servicePage = await browser.newPage();
       await servicePage.goto(`${uiBase}/admin/branches/tables`);
       await servicePage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
@@ -1672,7 +1833,10 @@ test(
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
       assert.equal((await request(`${posOrders(moda)}/${orderId}`)).data.status, "open");
-      assert.equal((await request(salesList(moda))).data.items.length, 6);
+      const modaOrdersBeforeDisable = (await request(salesList(moda))).data.items;
+      assert.ok(modaOrdersBeforeDisable.some((item) => item.id === waiterOrderId),
+        "Aynı adisyona sonradan eklenen garson siparişi satış listesinde korunmalı.");
+      assert.equal(modaOrdersBeforeDisable.length, 7);
       assert.deepEqual((await request(salesList(besiktas))).data.items, []);
       assert.equal((await request(salesList(), "GET", undefined, "manager-moda")).status, 403);
       assert.equal((await request(salesList(moda), "GET", undefined, "manager-single")).status, 403);
@@ -1719,14 +1883,16 @@ test(
       }, "pos-besiktas");
       assert.equal(pricedOrder.status, 201);
       assert.equal(pricedOrder.data.items[0].unitPriceMinor, 34000);
-      assert.equal((await request(salesList())).data.items.length, 8);
+      assert.equal((await request(salesList())).data.items.length, modaOrdersBeforeDisable.length + 2,
+        "Firma geneli liste Moda siparişleriyle iki Beşiktaş siparişini birlikte göstermeli.");
       assert.equal((await request(featurePath(moda, "sales.pos_orders"), "PUT", {
         desiredEnabled: false, expectedVersion: 2,
       })).status, 200);
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, orderId: "88888888-8888-4888-8888-888888888804",
       }, "pos-moda")).data.code, "FEATURE_DISABLED");
-      assert.equal((await request(salesList(moda))).data.items.length, 6);
+      assert.equal((await request(salesList(moda))).data.items.length, modaOrdersBeforeDisable.length,
+        "Kapalı POS yeteneğiyle reddedilen sipariş listeye kayıt eklememeli.");
       const checksFeatureOff = await request(featurePath(moda, "sales.checks"), "PUT", {
         desiredEnabled: false, expectedVersion: 2,
       });
@@ -1969,7 +2135,7 @@ test(
       ui.stdout.on("data", (chunk) => { uiOutput += chunk; });
       ui.stderr.on("data", (chunk) => { uiOutput += chunk; });
       await waitForUi(uiBase, ui, () => uiOutput);
-      browser = await chromium.launch({ headless: true });
+      browser = await launchBrowser();
       const catalogPage = await browser.newPage();
       await catalogPage.goto(`${uiBase}/admin/catalog/products`);
       await catalogPage.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
@@ -2043,7 +2209,7 @@ test(
       await posPage.getByLabel("Adet").fill("2");
       await posPage.getByRole("button", { name: "Sipariş oluştur" }).click();
       await posPage.getByText("Sipariş veritabanına kaydedildi.").waitFor();
-      assert.equal((await request(salesList(moda))).data.items.length, 7);
+      assert.equal((await request(salesList(moda))).data.items.length, modaOrdersBeforeDisable.length + 1);
       assert.equal((await request(salesList(moda))).data.items[0].totalMinor, 69980);
       await posPage.getByRole("button", { name: "Simüle ödeme girişimi oluştur" }).click();
       await posPage.getByText("Simülatör sonucu: başarılı. Gerçek tahsilat yapılmadı.").waitFor();
@@ -2076,7 +2242,7 @@ test(
       assert.equal((await request(posOrders(moda), "POST", {
         ...orderBody, orderId: "88888888-8888-4888-8888-888888888805",
       }, "pos-moda")).status, 201);
-      assert.equal((await request(salesList(moda))).data.items.length, 8);
+      assert.equal((await request(salesList(moda))).data.items.length, modaOrdersBeforeDisable.length + 2);
 
       // Tek ürün aktifliği kabul senaryosu: mevcut adisyonu ve yayın geçmişini koru, yeni işi engelle.
       const lifecycleOrderId = "88888888-8888-4888-8888-888888888806";
@@ -2167,10 +2333,8 @@ test(
       await verifyMenuApi({ request, firm, branch: moda, otherBranch: besiktas, pizzaId, cakeId,
         sql: async query => (await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
           "-d", "hipos_features", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", query])).stdout });
-      const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: `postgresql://${pgUser}@127.0.0.1:${pgPort}/hipos_features` };
-      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], {
-        cwd: repo, env: { ...menuSeedEnv, PGCLIENTENCODING: "UTF8" },
-      });
+      const menuSeedEnv = { ...env, HIPOS_DEMO_DATABASE_URL: databaseUrl };
+      await execFile(process.execPath, [join(repo, "scripts/seed-demo.mjs")], { cwd: repo, env: menuSeedEnv });
       for (let repetition = 0; repetition < 2; repetition++)
         await execFile(process.execPath, [join(repo, "scripts/seed-menus.mjs")], { cwd: repo, env: menuSeedEnv });
       const menuSeeds = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
@@ -2364,7 +2528,9 @@ test(
       await new Promise((resolve) => ui.once("exit", resolve));
       ui = undefined;
     } catch (error) {
-      const pgOutput = await readFile(log, "utf8").catch(() => "");
+      const pgOutput = useDockerPostgres
+        ? await execFile("docker", ["logs", pgContainer]).then(({ stdout, stderr }) => `${stdout}${stderr}`).catch(() => "")
+        : await readFile(log, "utf8").catch(() => "");
       throw new Error(
         `${error.stack ?? error.message}\nAPI (son bölüm): ${apiOutput.slice(-12000)}\nUI: ${uiOutput}\nPostgreSQL (son bölüm): ${pgOutput.slice(-4000)}`,
       );
@@ -2372,10 +2538,10 @@ test(
       await browser?.close();
       if (ui && ui.exitCode === null) ui.kill("SIGTERM");
       await stopApi();
-      if (postgresStarted)
-        await runPg("pg_ctl", ["-D", data, "-m", "fast", "stop"]).catch(
-          () => {},
-        );
+      if (postgresStarted) {
+        if (useDockerPostgres) await execFile("docker", ["rm", "-f", pgContainer]).catch(() => {});
+        else await runPg("pg_ctl", ["-D", data, "-m", "fast", "stop"]).catch(() => {});
+      }
       await rm(temporary, { recursive: true, force: true });
     }
   },

@@ -8,10 +8,8 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $rootDir = (Resolve-Path "$PSScriptRoot\..").Path
 $logDir = Join-Path $env:TEMP "hipos-dev"
 $pidFile = Join-Path $logDir "pids"
-$tempBin = Join-Path $logDir "bin"
 
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-if (-not (Test-Path $tempBin)) { New-Item -ItemType Directory -Path $tempBin -Force | Out-Null }
 
 function Fail([string]$message) {
     Write-Host "`nHATA: $message" -ForegroundColor Red
@@ -103,13 +101,6 @@ if (-not $databaseReady) {
     Fail "PostgreSQL hazir olmadi. 'docker compose ps' ile durumu kontrol edin."
 }
 
-# Host ortaminda psql yoksa Docker container uzerinden calistiracak shim olustur
-if (-not (Get-Command "psql" -ErrorAction SilentlyContinue)) {
-    $shimContent = "@echo off`r`ndocker compose -f `"$rootDir\compose.yaml`" exec -T db psql %*`r`n"
-    [System.IO.File]::WriteAllText((Join-Path $tempBin "psql.cmd"), $shimContent)
-    $env:PATH = "$tempBin;$env:PATH"
-}
-
 # Paket yukleme kontrolleri
 $vitePath = Join-Path $rootDir "node_modules\vite\bin\vite.js"
 if (-not (Test-Path $vitePath)) {
@@ -145,7 +136,8 @@ $env:HIPOS_DEMO_DATABASE_URL = 'postgresql://hipos:hipos-dev-only@127.0.0.1:5433
 Write-Host "`n[3/5] Veritabani migration'lari kontrol ediliyor..."
 $contexts = @(
     "FeatureDbContext", "CatalogDbContext", "SalesDbContext", "CariDbContext",
-    "ServiceDbContext", "InventoryDbContext", "CashDbContext", "ExpenseDbContext"
+    "ServiceDbContext", "InventoryDbContext", "CashDbContext", "ExpenseDbContext",
+    "KitchenDbContext"
 )
 foreach ($context in $contexts) {
     Write-Host "  - $context... " -NoNewline
@@ -164,14 +156,14 @@ foreach ($context in $contexts) {
 # [4/5] Demo Seed'ler
 Write-Host "`n[4/5] Demo baslangic kayitlari dogrulaniyor..."
 Push-Location $rootDir
-& npm run demo:check
-& npm run demo:seed
-& npm run demo:seed:menus
-& npm run demo:seed:cari
-& npm run demo:seed:service
-& npm run demo:seed:inventory
-& npm run demo:seed:cash
-& npm run demo:seed:expenses
+foreach ($script in @("demo:check", "demo:seed", "demo:seed:menus", "demo:seed:cari",
+    "demo:seed:service", "demo:seed:inventory", "demo:seed:cash", "demo:seed:expenses")) {
+    & npm run $script
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Fail "Demo veri adimi basarisiz oldu: npm run $script"
+    }
+}
 Pop-Location
 
 # [5/5] Servisleri baslatma
