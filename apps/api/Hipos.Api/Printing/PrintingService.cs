@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Net.Sockets;
 using System.Text.Json;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
@@ -88,8 +90,11 @@ public sealed class PrintingService(
         string firmId,
         string branchId,
         Guid orderId,
+        bool isReprint = false,
         CancellationToken ct = default)
     {
+        EnsureLoaded();
+
         var order = await salesDb.Orders
             .AsNoTracking()
             .Include(row => row.Lines)
@@ -168,7 +173,111 @@ public sealed class PrintingService(
             waiterName: waiterName,
             orderNumber: order.Id.ToString()[..8].ToUpperInvariant(),
             orderTime: order.CreatedAt,
-            items: items);
+            items: items,
+            isReprint: isReprint);
+
+        return await transport.SendAsync(_config.KitchenPrinter, ticketBytes, ct);
+    }
+
+    public async Task<PrintResult> PrintKitchenTableAsync(
+        string firmId,
+        string branchId,
+        string tableId,
+        bool isReprint = false,
+        CancellationToken ct = default)
+    {
+        EnsureLoaded();
+
+        // 1. Masaya ait açık adisyonu bul
+        var check = await salesDb.Checks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                row.TableId == tableId && row.Status == "open", ct);
+
+        if (check is null)
+        {
+            var assignment = await serviceDb.Assignments
+                .AsNoTracking()
+                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.TableId == tableId && row.ClosedAt == null, ct);
+
+            if (assignment?.CheckId is not null)
+            {
+                check = await salesDb.Checks
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(row => row.Id == assignment.CheckId, ct);
+            }
+        }
+
+        if (check is null)
+        {
+            logger.LogWarning("Mutfak fişi için masada açık adisyon bulunamadı: Table={TableId}", tableId);
+            return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Bu masada açık bir sipariş/adisyon bulunamadı.");
+        }
+
+        // 2. Bu adisyona ait iptal edilmemiş tüm siparişleri bul
+        var orders = await salesDb.Orders
+            .AsNoTracking()
+            .Include(row => row.Lines)
+            .Where(row => row.CheckId == check.Id && row.FirmId == firmId && row.BranchId == branchId && row.Status != "cancelled")
+            .OrderBy(row => row.CreatedAt)
+            .ToListAsync(ct);
+
+        if (orders.Count == 0 || orders.All(o => o.Lines.Count == 0))
+        {
+            return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Masaya ait yazdırılacak sipariş kalemi bulunamadı.");
+        }
+
+        // 3. Masa ve Garson adını çöz
+        string tableName = "Masa";
+        string waiterName = "Garson";
+
+        var table = await serviceDb.Tables.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == tableId, ct);
+        if (table is not null) tableName = table.Name;
+
+        if (check.WaiterId is not null)
+        {
+            var waiter = await serviceDb.Employees.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.Id == check.WaiterId, ct);
+            if (waiter is not null) waiterName = waiter.Name;
+        }
+
+        var items = new List<KitchenTicketItem>();
+        foreach (var line in orders.SelectMany(o => o.Lines))
+        {
+            List<string>? optionsList = null;
+            if (!string.IsNullOrWhiteSpace(line.OptionsJson) && line.OptionsJson != "[]")
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(line.OptionsJson);
+                    optionsList = doc.RootElement.EnumerateArray()
+                        .Select(el =>
+                        {
+                            var group = el.TryGetProperty("groupName", out var g) ? g.GetString() : null;
+                            var opt = el.TryGetProperty("optionName", out var o) ? o.GetString() : null;
+                            return group is not null && opt is not null ? $"{group}: {opt}" : opt ?? "";
+                        })
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .ToList();
+                }
+                catch
+                {
+                    // Ignore malformed option json
+                }
+            }
+
+            items.Add(new KitchenTicketItem(line.ProductName, line.Quantity, line.Note, optionsList));
+        }
+
+        var ticketBytes = EscPosBuilder.BuildKitchenTicket(
+            tableName: tableName,
+            waiterName: waiterName,
+            orderNumber: check.Id.ToString()[..8].ToUpperInvariant(),
+            orderTime: orders.Last().CreatedAt,
+            items: items,
+            isReprint: isReprint);
 
         return await transport.SendAsync(_config.KitchenPrinter, ticketBytes, ct);
     }
@@ -181,6 +290,8 @@ public sealed class PrintingService(
         bool openCashDrawer = false,
         string paymentMethod = "NAKIT")
     {
+        EnsureLoaded();
+
         var check = await salesDb.Checks
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.Id == checkId && row.FirmId == firmId && row.BranchId == branchId, ct);
@@ -257,6 +368,8 @@ public sealed class PrintingService(
 
     public async Task<PrintResult> TestPrintAsync(string target, CancellationToken ct = default)
     {
+        EnsureLoaded();
+
         if (target.Equals("kitchen", StringComparison.OrdinalIgnoreCase))
         {
             var sampleItems = new List<KitchenTicketItem>
@@ -299,6 +412,39 @@ public sealed class PrintingService(
                 openCashDrawer: true);
 
             return await transport.SendAsync(_config.CashierPrinter, data, ct);
+        }
+    }
+
+    public static async Task<(bool Reachable, int LatencyMs, string? Error)> CheckConnectionAsync(
+        string ip, int port, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(ip) || port <= 0)
+        {
+            return (false, -1, "Geçersiz IP adresi veya port.");
+        }
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var client = new TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(2));
+
+            await client.ConnectAsync(ip, port, cts.Token);
+            sw.Stop();
+            return (true, (int)sw.ElapsedMilliseconds, null);
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, -1, "Zaman aşımı (2 saniye içinde yanıt alınamadı). Yazıcı açık ve ağa bağlı mı?");
+        }
+        catch (SocketException ex)
+        {
+            return (false, -1, $"Bağlantı hatası: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (false, -1, ex.Message);
         }
     }
 }

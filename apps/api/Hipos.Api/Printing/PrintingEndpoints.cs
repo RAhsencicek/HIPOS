@@ -16,12 +16,28 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             Guid orderId,
+            bool? isReprint,
             PrintingService printing,
             CancellationToken ct) =>
         {
-            var result = await printing.PrintKitchenOrderAsync(firmId, branchId, orderId, ct);
+            var result = await printing.PrintKitchenOrderAsync(firmId, branchId, orderId, isReprint ?? false, ct);
             return result.Success
-                ? Results.Ok(new { success = true, result.Target, result.TransportUsed })
+                ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
+                : Results.BadRequest(new { success = false, result.Error });
+        });
+
+        // 1.1 Masaya Göre Mutfak Fişi Yazdır / Tekrar Bas (Hem GET hem POST destekler)
+        group.MapMethods("/service/tables/{tableId}/print-kitchen", ["GET", "POST"], async (
+            string firmId,
+            string branchId,
+            string tableId,
+            bool? isReprint,
+            PrintingService printing,
+            CancellationToken ct) =>
+        {
+            var result = await printing.PrintKitchenTableAsync(firmId, branchId, tableId, isReprint ?? false, ct);
+            return result.Success
+                ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
                 : Results.BadRequest(new { success = false, result.Error });
         });
 
@@ -193,6 +209,24 @@ public static class PrintingEndpoints
             var targetDevice = target ?? "kitchen";
             var result = await printing.TestPrintAsync(targetDevice, ct);
             return Results.Ok(new { success = result.Success, target = targetDevice, result.TransportUsed, result.Error });
+        });
+
+        // 4.1 Ağ Yazıcısı Bağlantı Kontrolü (Hızlı TCP Soket Ping)
+        group.MapGet("/printing/check-connection", async (
+            string ip,
+            int? port,
+            CancellationToken ct) =>
+        {
+            var targetPort = port is > 0 ? port.Value : 9100;
+            var (reachable, latencyMs, error) = await PrintingService.CheckConnectionAsync(ip, targetPort, ct);
+            return Results.Ok(new
+            {
+                reachable,
+                latencyMs,
+                ip,
+                port = targetPort,
+                error
+            });
         });
 
         // 5. Yazıcı Yapılandırması (Ağ IP'lerini dinamik ayarlama)

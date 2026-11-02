@@ -32,7 +32,8 @@ public static class EscPosBuilder
         string waiterName,
         string orderNumber,
         DateTimeOffset orderTime,
-        IReadOnlyList<KitchenTicketItem> items)
+        IReadOnlyList<KitchenTicketItem> items,
+        bool isReprint = false)
     {
         var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -45,11 +46,19 @@ public static class EscPosBuilder
 
         // 3. Header
         SetAlignment(bw, 1); // Center
+        if (isReprint)
+        {
+            SetDoubleSize(bw, true);
+            SetBold(bw, true);
+            WriteText(bw, "*** TEKRAR BASIM ***\n");
+            SetDoubleSize(bw, false);
+            WriteText(bw, "================================================\n");
+        }
         SetDoubleSize(bw, true);
         WriteText(bw, "HIPOS MUTFAK\n");
         SetDoubleSize(bw, false);
         SetBold(bw, true);
-        WriteText(bw, "SIPARIS BILETI\n");
+        WriteText(bw, isReprint ? "SIPARIS BILETI (KOPYA)\n" : "SIPARIS BILETI\n");
         SetBold(bw, false);
         WriteText(bw, "================================================\n");
 
