@@ -1669,3 +1669,21 @@ button, select { font: inherit; }
 .product-option-choice input[type=checkbox] { width: 22px; height: 22px; }
 .product-option-choice input[type=number] { width: 68px; min-height: 40px; }
 .product-option-validation, .product-option-picker [role=alert] { color: #a2472e !important; }
+/* Ürün düzenleme penceresi, içeriği uzun olsa da telefon ekranına sığar. */
+.waiter-product-modal-backdrop { grid-template-columns: minmax(0, 1fr); }
+.waiter-product-modal { min-width: 0; max-width: 100%; }
+.waiter-product-modal .product-option-picker, .waiter-product-modal .product-option-picker fieldset,
+.waiter-product-modal .product-option-choices, .waiter-product-modal .product-option-choice label { min-width: 0; }
+.waiter-product-modal .product-option-picker legend, .waiter-product-modal .product-option-choice span { overflow-wrap: anywhere; }
+.waiter-product-modal .product-option-choice { flex-wrap: wrap; }
+.waiter-product-modal .product-option-choice label:first-child { flex: 1 1 140px; }
+.waiter-product-modal .product-option-choice input[type=checkbox] { flex: 0 0 22px; }
+
+
+@media (max-width: 520px) {
+  .waiter-shell .ops-header { flex-wrap: wrap; gap: 10px; }
+  .waiter-shell .waiter-header-actions { display: flex; flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+  .waiter-shell .waiter-header-actions > * { max-width: 100%; }
+  .waiter-product-modal-backdrop { padding: 12px; }
+  .waiter-product-modal { width: min(100%, 560px); max-height: calc(100dvh - 24px); overflow-x: hidden; }
+}

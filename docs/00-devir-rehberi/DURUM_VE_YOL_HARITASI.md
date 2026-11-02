@@ -1,4 +1,4 @@
-# HIPOS — Mevcut Durum ve Modüler Yol Haritası
+﻿# HIPOS — Mevcut Durum ve Modüler Yol Haritası
 
 > **Doküman Durumu:** Canlı Yol Haritası · Sürüm: v2.5 (21 Ekim 2026)
 >
@@ -117,14 +117,15 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
   - Şube kategorileri, fiyatlı ürün kaydı, tek şubeli ürün düzenleme, fiyat sürümleri ve POS yayını PostgreSQL'e bağlıdır.
+  - İleri tarihli fiyat planları şube kapsamında kaydedilir; zamanı geldiğinde API arka plan işlemi mevcut fiyat/yayın akışıyla uygular. API kapalıysa planlar yeniden başladığında işlenir.
   - Ürün ayrıntısında seçenek grubu ve seçenek yönetimi API'ye bağlıdır; sipariş API'si seçilen seçenekleri ve fiyat farklarını doğrular.
   - Menü oluşturma, kategori ve ürün sıralama, aynı şubede birden fazla menüyü POS'ta kullanılabilir yapma API üzerinden çalışmaktadır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
   - Ürün görseli yükleme ve menü/operasyon ekranlarında gösterimi için katalog migration’ı uygulanmalıdır; kanal yayını genişletmeleri tamamlanmamıştır.
-  - QR Menü dış yayını henüz yoktur.
+  - Yapılandırılmış şubenin aktif menülerini gösteren salt okunur QR menü arayüzü vardır (kahve-zeytin yeşili kafe sıcaklığı teması, hareketli görsel, anlık arama, tıklanabilir ürün detay modalı ve yönetim panelinden tek tıkla erişim tamamlandı); masalara özel QR kod çıktısı üretimi, sipariş ve dış ortamda barındırma henüz yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. Garson ve kasa hızlı satışında seçenek seçimleri sipariş API'sine bağlandı.
-  2. Şube menülerinin masalara özel QR kod çıktısı üretmesi.
+  2. Şube menülerinin masalara özel QR kod çıktısı üretmesi ve dış ortamda barındırılması.
 
 ---
 

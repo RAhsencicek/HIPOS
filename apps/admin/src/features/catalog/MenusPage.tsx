@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import {
   BookOpen, Check, ChevronDown, ChevronUp, CircleCheck,
-  GripVertical, Info, Layers, Package, Pencil, Plus, Search, Trash2, Utensils, X,
+  GripVertical, Info, Layers, Package, Pencil, Plus, QrCode, Search, Trash2, Utensils, X,
 } from "lucide-react";
 import type { ViewContext } from "../../app/context";
 import { PageHeading, StatusPill } from "../../shared/ui";
@@ -162,10 +162,10 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
   const categoryById = new Map(workspace?.categories.map(category => [category.id, category]));
   const selectedProducts = draft.sections.flatMap(section => section.productIds.map(id => productById.get(id)));
   const publishReady = Boolean(draft.sections.length && draft.sections.every(section => section.productIds.length > 0) && selectedProducts.length > 0 &&
-    selectedProducts.every(product => product?.isActive && product.status === "published" && product.channels?.includes("pos") && product.price.amountMinor > 0));
+    selectedProducts.every(product => product?.isActive && product.status === "published" && product.channels?.includes("pos") && (product.desiredChannels?.includes("pos") ?? true) && product.price.amountMinor > 0));
   const publishBlocker = !draft.sections.length ? "Önce menüye bölüm ve ürün ekleyin." : draft.sections.some(section => !section.productIds.length)
     ? "Yayına almak için boş menü bölümlerine ürün ekleyin veya boş bölümü kaldırın."
-    : selectedProducts.some(product => !product || !product.isActive || product.status !== "published" || !product.channels?.includes("pos") || product.price.amountMinor <= 0)
+    : selectedProducts.some(product => !product || !product.isActive || product.status !== "published" || !product.channels?.includes("pos") || !(product.desiredChannels?.includes("pos") ?? true) || product.price.amountMinor <= 0)
       ? "POS'ta kullanılabilir menüde yalnızca aktif, POS kanalında yayımlanmış ve geçerli fiyatı olan ürünler bulunabilir." : "";
   const pickerSection = draft.sections.find(section => section.sectionId === pickerSectionId);
   const pickerUsedElsewhere = new Set(draft.sections.filter(section => section.sectionId !== pickerSectionId)
@@ -184,15 +184,15 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
   return <>
     <PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Menüler"
       description="Menülerinizi hazırlayın, ürünlerinizi bölümlerde sıralayın ve şubenizde kullanılacak menüleri yönetin."
-      action={<button className="primary-button" disabled={!editable || loading || !workspace} onClick={() => open("new")}>
+      action={<div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <a href="/menu/kadikoy" target="_blank" rel="noreferrer" className="soft-button" style={{ display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none" }} title="Müşteriye açık QR menüyü yeni sekmede aç">
+          <QrCode size={16} /> QR Menüyü Aç
+        </a>
+        <button className="primary-button" disabled={!editable || loading || !workspace} onClick={() => open("new")}>
           <Plus size={17} />Yeni menü
-        </button>} />
+        </button>
+      </div>} />
 
-    <div className="menu-status-banner">
-      <div className="menu-status-banner-icon"><BookOpen size={18} /></div>
-      <div><strong>{source === "http" ? "Menü Yönetimi" : "Menü örnek gösterimi"}</strong>
-        <span>{source === "http" ? "Menü içeriği ve şube seçimi kayıtlı katalog verisiyle çalışır." : "Bu görünüm örnek veridir; yaptığınız değişiklikler kaydedilmez."}</span></div>
-    </div>
     {source === "http" && !canWrite && <div className="notice" role="status">
       Menüler salt okunur. Düzenleme için <Link to="/admin/settings/modules">Menü Yönetimi modülünü etkinleştirin</Link>.
     </div>}
@@ -252,7 +252,6 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
                 </div>
                 {!editingInfo && !isNew && !previewOnly && <button className="menu-icon-button" aria-label="Menü adı ve açıklamasını düzenle"
                   disabled={!editable} onClick={() => setEditingInfo(true)}><Pencil size={16} /></button>}
-                {selected && <StatusPill tone={selected.isActive ? "green" : "neutral"}>{selected.isActive ? "Aktif" : "Pasif"}</StatusPill>}
                 {!previewOnly && <button className="primary-button menu-save-button" disabled={!editable || draft.name.trim().length < 2 || (!dirty && Boolean(selected))}
                   onClick={save}><Check size={16} />{busy ? "Kaydediliyor…" : "Değişiklikleri kaydet"}</button>}
                 {previewOnly && <button className="soft-button" onClick={() => open(selectedId)}><Pencil size={15} />Düzenlemeye dön</button>}
@@ -269,7 +268,6 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
                 ><span className="menu-state-toggle-track" aria-hidden="true"><span /></span>
                   <span>{selected.isActive ? "Aktif" : "Pasif"}</span></button>}
               </div>
-              {selected?.isActive && <small className="menu-active-note">Bu menü POS’ta kullanılabilir menüler arasında sunulur.</small>}
               {selected && !selected.isActive && !publishReady && <small className="menu-publish-blocker">{publishBlocker}</small>}
             </section>
 
@@ -393,7 +391,7 @@ export function MenusPage({ ctx, source, canWrite }: { ctx: ViewContext; source:
       <div className="menu-picker-grid">{pickerProducts.map(product => {
         const selectedHere = pickerSection.productIds.includes(product.id);
         const unavailable = pickerUsedElsewhere.has(product.id);
-        const inactive = !product.isActive || product.status !== "published" || !product.channels?.includes("pos");
+        const inactive = !product.isActive || product.status !== "published" || !product.channels?.includes("pos") || !(product.desiredChannels?.includes("pos") ?? true);
         return <button key={product.id} className={`menu-product-card ${selectedHere ? "selected" : ""}`}
           disabled={!selectedHere && (unavailable || inactive)} aria-pressed={selectedHere} onClick={() => {
             const nextIds = selectedHere ? pickerSection.productIds.filter(id => id !== product.id) : [...pickerSection.productIds, product.id];

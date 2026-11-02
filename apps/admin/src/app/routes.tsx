@@ -12,7 +12,7 @@ import type {
 } from "../features/modules/contracts";
 import { StatusPill } from "../shared/ui";
 import { Dashboard } from "../features/overview/OverviewPage";
-import { ProductsPage, ProductDetail, CategoriesPage } from "../features/catalog/CatalogPages";
+import { ProductsPage, ProductDetail, CategoriesPage, ProductImagesPage, ChannelVisibilityPage, PriceManagementPage } from "../features/catalog/CatalogPages";
 import { MenusPage } from "../features/catalog/MenusPage";
 import { OptionGroupsPage } from "../features/catalog/ProductOptionsPanel";
 import { BranchesPage } from "../features/branches/BranchesPage";
@@ -49,9 +49,9 @@ function routeFeatureKey(section?: string, item?: string): string | undefined {
   if (section === "inventory" && item === "counts") return "inventory.counts";
   if (
     section === "catalog" &&
-    ["prices", "price-versions", "scheduled-prices"].includes(item ?? "")
+    item === "prices"
   )
-    return "catalog.pricing";
+    return "catalog.price_drafts";
   if (
     section === "inventory" &&
     ["recipes", "recipe-versions", "portion-cost", "menu-engineering"].includes(
@@ -212,6 +212,12 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     }
   } else if (section === "catalog" && item === "options") {
     content = <OptionGroupsPage scope={{ firmId: ctx.firmId, branchId: ctx.branchApiId }} canManage={canWriteDraft} />;
+  } else if (section === "catalog" && item === "images") {
+    content = <ProductImagesPage ctx={ctx} canWriteDraft={canWriteDraft} canPublish={canPublish} />;
+  } else if (section === "catalog" && item === "channels") {
+    content = <ChannelVisibilityPage ctx={ctx} canWriteDraft={canWriteDraft} canSetPrice={canSetPrice} canPublish={canPublish} />;
+  } else if (section === "catalog" && item === "prices") {
+    content = <PriceManagementPage key={`${ctx.firmId}:${ctx.branchApiId}`} ctx={ctx} canSetPrice={canSetPrice} canPublish={canPublish} />;
   } else if (section === "catalog" && item === "products") {
     content = <ProductsPage ctx={ctx} canPreviewNewWork={canPreviewNewWork} canWriteDraft={canWriteDraft} canSetPrice={canSetPrice} />;
   } else if (section === "catalog" && item === "categories") {

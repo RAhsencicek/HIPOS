@@ -17,8 +17,13 @@ import type {
   ProductListRequest,
   ProductListResponse,
   RenameCategoryRequest,
+  DeleteCategoryRequest,
+  CategoryActiveRequest,
+  MoveCategoryRequest,
   PriceResult,
   PriceVersion,
+  ScheduledPrice,
+  SchedulePriceRequest,
   Publication,
   PublicationResult,
   PublishDraftRequest,
@@ -42,7 +47,7 @@ export class HttpCatalogProvider implements CatalogProvider {
 
   private async request<T>(
     path: string, scope: CatalogScope,
-    method: "GET" | "POST" | "PUT" = "GET", body?: unknown,
+    method: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown,
   ): Promise<T> {
     let response: Response;
     try {
@@ -65,7 +70,7 @@ export class HttpCatalogProvider implements CatalogProvider {
         problem.detail ?? "Ürün verisi yüklenemedi.",
       );
     }
-    return response.json() as Promise<T>;
+    return (response.status === 204 ? undefined : await response.json()) as T;
   }
 
   private productPath(scope: CatalogScope): string {
@@ -109,6 +114,27 @@ export class HttpCatalogProvider implements CatalogProvider {
     const params = new URLSearchParams({ branchId: request.scope.branchId });
     return this.request(`/api/v1/firms/${encodeURIComponent(request.scope.firmId)}/catalog/categories/${encodeURIComponent(request.categoryId)}?${params}`,
       request.scope, "PUT", { name: request.name, expectedVersion: request.expectedVersion });
+  }
+
+  deleteCategory(request: DeleteCategoryRequest): Promise<void> {
+    if (!request.scope.branchId) {
+      return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Kategori silmek için bir şube seçin."));
+    }
+    const params = new URLSearchParams({ branchId: request.scope.branchId, expectedVersion: String(request.expectedVersion) });
+    return this.request(`/api/v1/firms/${encodeURIComponent(request.scope.firmId)}/catalog/categories/${encodeURIComponent(request.categoryId)}?${params}`,
+      request.scope, "DELETE");
+  }
+
+  setCategoryActive(request: CategoryActiveRequest): Promise<CategoryMutationResult> {
+    if (!request.scope.branchId) return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Önce bir şube seçin."));
+    const params = new URLSearchParams({ branchId: request.scope.branchId });
+    return this.request(`/api/v1/firms/${encodeURIComponent(request.scope.firmId)}/catalog/categories/${encodeURIComponent(request.categoryId)}/active?${params}`, request.scope, "PUT", { isActive: request.isActive, expectedVersion: request.expectedVersion });
+  }
+
+  moveCategory(request: MoveCategoryRequest): Promise<void> {
+    if (!request.scope.branchId) return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Önce bir şube seçin."));
+    const params = new URLSearchParams({ branchId: request.scope.branchId });
+    return this.request(`/api/v1/firms/${encodeURIComponent(request.scope.firmId)}/catalog/categories/${encodeURIComponent(request.categoryId)}/position?${params}`, request.scope, "PUT", { neighborId: request.neighborId, expectedVersion: request.expectedVersion, neighborVersion: request.neighborVersion });
   }
 
   getProduct(request: ProductDetailRequest): Promise<CatalogProductDetail> {
@@ -218,6 +244,16 @@ export class HttpCatalogProvider implements CatalogProvider {
       return Promise.reject(new CatalogProviderError("INVALID_DRAFT", 400, "Fiyat geçmişi için bir şube seçin."));
     return this.request(`${this.historyPath(request.scope, request.productId)}/price-versions`, request.scope);
   }
+
+  private scheduledPath(scope: CatalogScope): string {
+    if (!scope.branchId) throw new CatalogProviderError("INVALID_DRAFT", 400, "Fiyat planı için bir şube seçin.");
+    return `/api/v1/firms/${encodeURIComponent(scope.firmId)}/branches/${encodeURIComponent(scope.branchId)}/catalog/scheduled-prices`;
+  }
+  listScheduledPrices(scope: CatalogScope): Promise<ScheduledPrice[]> { return this.request(this.scheduledPath(scope), scope); }
+  schedulePrice(request: SchedulePriceRequest): Promise<ScheduledPrice> {
+    return this.request(this.scheduledPath(request.scope), request.scope, "POST", { requestId: request.requestId, productId: request.productId, amountMinor: request.amountMinor, effectiveAt: request.effectiveAt, expectedVersion: request.expectedVersion });
+  }
+  cancelScheduledPrice(scope: CatalogScope, id: string): Promise<unknown> { return this.request(`${this.scheduledPath(scope)}/${encodeURIComponent(id)}/cancel`, scope, "POST"); }
 
   listPublications(request: ProductDetailRequest): Promise<Publication[]> {
     if (!request.scope.branchId)

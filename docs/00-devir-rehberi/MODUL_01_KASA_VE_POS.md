@@ -25,7 +25,7 @@
 
 ### Kasiyer ekranı: güncel geliştirme durumu
 
-Kasiyer ekranında masa/adisyon görünümü, hızlı satış, test ödemesi, hesap fişinin tarayıcıdan yazdırılması ve manuel vardiya açma/kapatma arayüzü vardır. Açılış notu kaydedilir; kapatmada kupür girişi yalnız toplamı hesaplar. Şubede açık adisyon varsa vardiya kapanışı API tarafından reddedilir. Garson ekranından başlatılan başarılı simüle tahsilatlar açık vardiyaya otomatik hareket yazar; kasiyer test ödemeleri ve gerçek banka/ÖKC tahsilatı bu akışa bağlı değildir. Gerçek kasiyer oturumu, mali fiş ve Z raporu yoktur. Güncel ayrıntılar [Kasa/POS operasyon sözleşmesindedir](../02-kasa-ve-operasyon/KASA_POS_VE_OPERASYON_SOZLESMESI.md).
+Kasiyer ekranında masa/adisyon görünümü, hızlı satış, test ödemesi, hesap fişinin tarayıcıdan yazdırılması ve manuel vardiya açma/kapatma arayüzü vardır. Açılış notu kaydedilir; kapatmada kupür girişi yalnız toplamı hesaplar. Şubede açık adisyon varsa vardiya kapanışı API tarafından reddedilir. Garson ekranındaki Ödeme Al düğmesi seçilen masayla kasa ekranını açar. Kasiyer test ödemeleri ve gerçek banka/ÖKC tahsilatı kasa hareketi akışına bağlı değildir. Gerçek kasiyer oturumu, mali fiş ve Z raporu yoktur. Güncel ayrıntılar [Kasa/POS operasyon sözleşmesindedir](../02-kasa-ve-operasyon/KASA_POS_VE_OPERASYON_SOZLESMESI.md).
 
 ### 📌 Hızlı Gerçeklik Özeti
 * **Manuel Kasa MVP'si (Bugün Kodda Gerçekten Çalışanlar):**

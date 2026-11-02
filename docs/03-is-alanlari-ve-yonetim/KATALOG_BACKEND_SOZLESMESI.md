@@ -1,6 +1,6 @@
 # HIPOS — Ürünler ve Menü backend sözleşmesi
 
-Durum: PostgreSQL liste/detay okuması, şube bazlı kategori ve fiyatlı ürün oluşturma, ürün düzenleme, ilk POS yayını ve yayımlanmış ürünün fiyatını güncelleme uygulandı. Ürün aktifliği, menü aktifliği ve kanal yayını ayrı durumlar olarak korunur. Seçenek gruplarının API'si ve ürün ayrıntısındaki yönetim paneli, sipariş sırasında güncel katalogdan doğrulama ve fiyat snapshot'ı uygulandı; garson ve kasa hızlı satış ekranlarında seçenek seçimi bağlıdır. QR/web yayını, ileri tarihli fiyat ve yayın geri alma planlıdır.
+Durum: PostgreSQL liste/detay okuması, şube bazlı kategori ve fiyatlı ürün oluşturma, ürün düzenleme, ilk POS yayını, yayımlanmış ürün fiyatını güncelleme ve ileri tarihli fiyat planlama uygulandı. Yapılandırılmış şubede aktif menüleri QR tercihi açık ürünlerle gösteren salt okunur müşteri menüsü vardır. Ürün aktifliği, menü aktifliği ve kanal yayını ayrı durumlar olarak korunur. Seçenek gruplarının API'si ve ürün ayrıntısındaki yönetim paneli, sipariş sırasında güncel katalogdan doğrulama ve fiyat snapshot'ı uygulandı; garson ve kasa hızlı satış ekranlarında seçenek seçimi bağlıdır. Ayrı QR yayın yönetimi ve yayın geri alma planlıdır.
 
 ## Bugün çalışan okuma dilimi
 
@@ -48,7 +48,11 @@ Panelde yeni ürün ve ilk pozitif TRY fiyatı tek işlemde kaydedilir; ürün `
 | Ürün `isActive` | Katalog kaydının yeni taslak/yayın/sipariş işlemlerinde kullanılabilir olup olmadığı. Pasife alınması ürünü veya geçmişini silmez. |
 | Ürün `status` | `draft` veya `published`: ürünün katalog/POS yayın akışındaki olgunluk durumu. |
 | Ürün `channels` ve `publications.channels` | Ürünün hangi kanala yayınlandığı. İlk MVP yalnız `pos` kanalını yazar; QR/web etkinmiş gibi gösterilmez. |
-| Menü `isActive` | Seçili şubede POS'ta kullanılabilir/aktif menü durumu. Bir şubede birden fazla menü aktif olabilir; menü içerik kaydından ve tekil ürün aktifliğinden ayrıdır. |
+| Menü `isActive` | Seçili şubede POS'ta kullanılabilir/aktif menü durumu. Bir şubede birden fazla menü aktif olabilir; yapılandırılmış tek QR bağlantısında bu aktif menüler QR tercihi açık ürünleriyle gösterilir. Menü içerik kaydından ve tekil ürün aktifliğinden ayrıdır. |
+
+Ürünün `desiredChannels` tercihi yayın kaydından ayrıdır ve varsayılanı POS ile QR'dır. Kanal Görünürlüğü ekranı tek şubeli ürünlerde POS, QR ve paket tercihlerini kaydeder. POS tercihi kapatıldığında yeni POS siparişleri reddedilir ve operasyon ekranları ürün listesini yenilediklerinde ürünü gizler; mevcut siparişler ve yayın geçmişi korunur. QR ve paket tercihleri kalıcıdır, ancak ilgili müşteri ekranları ve bu kanallardan sipariş henüz uygulanmamıştır. Tercih değişikliği ürün sürümünü artırır, aktör ve istek kimliğiyle denetlenir. `AddProductChannelPreferences` migration'ı gereklidir.
+
+`PUT /api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/channels` gövdesinde `{ requestId, expectedVersion, desiredChannels: ["pos", "qr", "delivery"] }` alır. Seçim boş olabilir. Yönetici ve şube kapsamı, `catalog.drafts` ve yayınlanmış ürün için ayrıca `catalog.publishing` denetlenir. Aynı isteğin tekrarı önceki sonucu döndürür; eski sürüm veya farklı içerikle kullanılan istek kimliği reddedilir. Birden fazla şubeye bağlı ürünler için şube bazında ayrı tercih modeli henüz olmadığı için bu komut reddedilir.
 
 Ürün API yanıtları `isActive` alanını taşır. Yeni ürün aktif olarak oluşturulur. Aktiflik değişikliği şu şube kapsamlı komutla yapılır:
 
@@ -85,6 +89,8 @@ Yayın geçmişi ürünün şube ve kanal bazlı değiştirilemez kayıtlarıdı
 
 ## İlk fiyat sürümü ve POS yayını
 
+Yönetim panelinde Kanal Görünürlüğü sayfasından seçilen ürünün fiyatı, aktifliği ve POS yayın kaydı ayrı gösterilir; taslak ürünün yayını mevcut fiyat/yayın panelindeki aynı komutla yapılır. POS kanal tercihi kapalıysa uyarı gösterilir. Yayın geri alma veya toplu yayın komutu bulunmaz.
+
 ```text
 PUT /api/v1/firms/{firmId}/branches/{branchId}/catalog/drafts/{draftId}/price
 Body: { priceVersionId, amountMinor, expectedVersion }
@@ -101,7 +107,15 @@ GET /api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/publ
 
 Yetkili yönetici aynı şubenin taslağına pozitif TRY fiyatı yazar; her değişiklik ayrı, numaralı ve değiştirilmeyen `price_versions` kaydıdır. `expectedVersion` eskiyse `409` döner. Fiyat kimliğiyle aynı tutarı tekrar göndermek ikinci sürüm üretmez. Yayın, son fiyat sürümünü ve ürünün ad/kategori/kod/fiyatını `publications` anlık görüntüsüne aynı işlemde kaydeder; ürünü yalnız `pos` kanalında `published` yapar, taslak yazma kaydını kaldırır. Geçerli fiyat yoksa yayın reddedilir. Yayın kimliğiyle tekrar aynı istek ikinci yayın yaratmaz. Denetim kaydı, ürün projeksiyonu ve yayın birlikte tamamlanır. `catalog.price_drafts` ve `catalog.publishing` bağımsız şube yetenekleridir; modül kapalıysa yeni komut işlemez, geçmiş fiyat/yayın kayıtları okunabilir.
 
-Yayımlanmış POS ürününün fiyatı güncellendiğinde şubedeki yeni satışlarda hemen geçerli olur; eski sipariş ve yayın anlık görüntüleri korunur. Fiyat sürümü, güncel fiyat ve yeni POS yayın kaydı tek işlemde yazılır. Aynı fiyat kimliği ve tutarının tekrarı aynı kaydı döner; sürüm çakışması reddedilir. Fiyat ve POS yayını yetenekleri hazır olmalıdır. Yayını geri alma, kanal seçimi ve ileri tarihli fiyat henüz yoktur.
+Yayımlanmış POS ürününün fiyatı güncellendiğinde şubedeki yeni satışlarda hemen geçerli olur; eski sipariş ve yayın anlık görüntüleri korunur. Fiyat sürümü, güncel fiyat ve yeni POS yayın kaydı tek işlemde yazılır. Aynı fiyat kimliği ve tutarının tekrarı aynı kaydı döner; sürüm çakışması reddedilir. Fiyat ve POS yayını yetenekleri hazır olmalıdır. Yapılandırılmış müşteri QR menüsü aktif menülerin QR tercihi açık ürünlerini salt okunur gösterir; ayrı QR yayın komutu ve yayını geri alma henüz yoktur.
+
+### İleri tarihli fiyatlar
+
+Panelde ayrı fiyat sürümleri veya ileri tarihli fiyat sayfaları yerine Fiyatlar sayfasındaki seçili ürünün fiyat geçmişi ve hemen altındaki planlama alanı kullanılır. Aynı planlama alanı ürün ayrıntısında da bulunur; yalnız seçili ürünün planları listelenir ve bekleyen planlar buradan iptal edilebilir.
+
+`GET` ve `POST /api/v1/firms/{firmId}/branches/{branchId}/catalog/scheduled-prices` planları listeler ve `{ requestId, productId, amountMinor, effectiveAt, expectedVersion }` ile yeni plan oluşturur. `POST .../{id}/cancel` zamanı gelmemiş bekleyen planı iptal eder. Tarih UTC saklanır; panel cihazın yerel saatini kullanır. Plan yalnız yetkili yönetici ve şube kapsamında oluşturulabilir; fiyat yeteneği ve yayımlanmış ürün için yayın yeteneği gerekir. Aynı kimlikle aynı istek tekrarlanabilir, aynı ürüne aynı zaman için ikinci bekleyen plan oluşturulamaz.
+
+API açıkken arka plan işlemi bekleyen planları yaklaşık 10 saniyede bir kontrol eder; API kapalıysa işlemler yeniden başladığında yapılır. Planlanan tutar, arada elle fiyat değiştirilmiş olsa da zamanı gelince mevcut fiyat akışıyla kaydedilir. Plan, fiyat sürümü kimliği olarak kendi kimliğini kullanır; bu, kesinti sonrası tekrar çalışmada ikinci kayıt oluşmasını engeller. Başarı, iptal ve hata durumları saklanır. `AddScheduledPrices` migration'ı uygulanmalıdır.
 
 ## Bugün çalışan şube kategorisi komutları
 
@@ -111,21 +125,23 @@ Body: { id, name }
 
 PUT /api/v1/firms/{firmId}/catalog/categories/{categoryId}?branchId={branchId}
 Body: { name, expectedVersion }
+
+DELETE /api/v1/firms/{firmId}/catalog/categories/{categoryId}?branchId={branchId}&expectedVersion={version}
 ```
 
-Kategori kimliği firma ve şube içinde benzersizdir; aynı kimlik farklı şubelerde kullanılabilir. Oluşturma ve ad değiştirme için `branchId` zorunludur. Yalnız seçili şubeye erişen yönetici kendi şubesinde komut verebilir; başka şube yöneticisi veya salt okuma kullanıcısı `403` alır. Kategori oluşturma `201`, aynı şube/kimlik/adla tekrar `200`, aynı şube/kimliğin farklı adla kullanımı `409` döner. Ad değiştirme eski sürümle `409 VERSION_CONFLICT` döner. Değişiklik kategori satırını, yalnız o şubeye ait taslak/projeksiyon anlık görüntülerini ve denetim kayıtlarını **tek veritabanı işleminde** günceller. Mevcut firma kategorileri migration sırasında firmanın ürün kayıtlarında bulunan her şubeye kopyalanır; sonraki ad değişiklikleri şubeler arasında bağımsızdır. Bu henüz üretim kimlik/yetki sistemi değildir: yetki geliştirme ortamındaki demo aktörlerle sınanır. Kategori sıralama ve pasifleştirme sonraki dilimlerdir.
+Kategori kimliği firma ve şube içinde benzersizdir; aynı kimlik farklı şubelerde kullanılabilir. Tüm komutlarda `branchId` zorunludur. Yalnız seçili şubeye erişen yönetici kendi şubesinde komut verebilir; başka şube yöneticisi veya salt okuma kullanıcısı `403` alır. Kategori oluşturma `201`, aynı şube/kimlik/adla tekrar `200`, aynı şube/kimliğin farklı adla kullanımı `409` döner. Ad değiştirme ve silme eski sürümle `409 VERSION_CONFLICT` döner. Kategori silinince seçili şubede o kategoriye bağlı taslak ve ürünlerin güncel projeksiyonundaki kategori kimliği boşaltılır, adı `Kategorisiz` yapılır ve sürümleri artırılır; ürün kayıtları korunur. Bir ürün birden çok şubeye bağlı olabildiği için ürün projeksiyonundaki kategori değişikliği ürün kaydı genelinde geçerlidir. Eski yayın anlık görüntüleri değiştirilmez. İlgili taslak denetimleri ve kategori silme audit kaydı ile kategori satırının kaldırılması **tek veritabanı işleminde** tamamlanır. Ad değiştirme kategori satırını, yalnız o şubeye ait taslak/projeksiyon anlık görüntülerini ve denetim kayıtlarını **tek veritabanı işleminde** günceller. Mevcut firma kategorileri migration sırasında firmanın ürün kayıtlarında bulunan her şubeye kopyalanır; sonraki ad değiştirme ve silme işlemleri şubeler arasında bağımsızdır. Bu henüz üretim kimlik/yetki sistemi değildir: yetki geliştirme ortamındaki demo aktörlerle sınanır. Kategori durumunu `PUT /api/v1/firms/{firmId}/catalog/categories/{categoryId}/active?branchId={branchId}` ile `{isActive, expectedVersion}` gövdesiyle değiştirin. Pasif kategori yeni ürün oluşturma veya başka bir ürüne atama için kullanılamaz; mevcut ürünler, menüler ve yayınlar korunur. Mevcut ürün aynı pasif kategoride kalırken düzenlenebilir. `PUT /api/v1/firms/{firmId}/catalog/categories/{categoryId}/position?branchId={branchId}` komutu `{neighborId, expectedVersion, neighborVersion}` ile komşu kategoriler arasında atomik sıra değiştirir. İki işlem de şube kapsamını ve sürümü doğrular, değişiklikleri denetim kaydına yazar.
 
 ## Ekran → veri ve komut ayrımı
 
 | Alt ekran grubu | Okuma ihtiyacı | Gelecek yönetsel komut | Durum |
 | --- | --- | --- | --- |
 | Ürünler, ürün ayrıntısı | Firma/şube ürün listesi, detay, arama; aktiflik ve kanal/yayın durumu ayrı görünür | Taslak oluştur/güncelle, etkinleştir/pasifleştir | Ürün aktifliği, audit ve API korumaları panel/API/PostgreSQL kabul testinde doğrulandı; ürün yayın geçmişi okunabiliyor. |
-| Kategoriler | Seçili şubeye ait kategori listesi ve şube ürün sayısı | Şubede kategori oluştur/ad değiştir/sırala | Okuma, şube kapsamlı oluşturma ve ad değiştirme API/PostgreSQL'de var. Panel yazma formu içerir; sıralama ve pasifleştirme yok. |
+| Kategoriler | Seçili şubeye ait kategori listesi ve şube ürün sayısı | Şubede kategori oluştur/ad değiştir/sil/sırala | Okuma, şube kapsamlı oluşturma, ad değiştirme ve kategori silme API/PostgreSQL'e bağlıdır. Silinen kategoriye bağlı ürünler korunup kategorisiz bırakılır. Yukarı/aşağı sıralama ve etkin/pasif durum değişikliği şube kapsamında kalıcıdır. |
 | Seçenek grupları ve görseller | Ürün ilişkileri | Bağla/çıkar, görsel yükle | Ürün ayrıntısında grup ve seçenekleri yönetme ve ürüne bağlama API'ye bağlıdır. Ürün ayrıntısından JPEG, PNG ve WebP (en fazla 2 MB) yükleme API ve PostgreSQL’e bağlıdır; görsel ürün, menü ve operasyon ekranlarında görüntülenir. |
 | Menüler ve kompozisyon | Menü–kategori–ürün hiyerarşisi; menü aktifliği ürün durumundan ayrıdır | Taslak menü düzenle, şubede etkinleştir/pasifleştir | Menü düzenleme ve aynı şubede birden fazla aktif menü desteği panel/API/PostgreSQL/POS'ta vardır; etkinleştirme aktif olmayan, yayınlanmamış, POS kanalında bulunmayan veya geçersiz fiyatlı ürün içeriyorsa reddedilir. |
-| Kanal görünürlüğü | Ürün kapsamı | Taslak kanal görünürlüğü değiştir | İlk POS yayını vardır; diğer kanallar için görünürlük komutu yoktur. Ayrı şube görünürlüğü ekranı kaldırılmıştır; şube kapsamı ve izolasyonu korunur. |
+| Kanal görünürlüğü | Ürün kapsamı | Ürün bazında kanal tercihi | POS, QR ve paket tercihleri tek şubeli ürünlerde kaydedilir; POS tercihi yeni satışlarda uygulanır, QR tercihi yapılandırılmış salt okunur müşteri menüsünü filtreler. QR/paket sipariş ekranları henüz yoktur. Kanal tercihi yayın kaydından ayrıdır. |
 | Fiyatlar ve sürümler | Merkez/şube fiyatı, geçerlilik | Fiyat taslağı, şube istisnası, sürüm oluştur | Şube taslağı için numaralı fiyat sürümü API'si, panel formu ve geçmiş okuması var; ileri tarih/merkez istisnası yok. |
-| İleri tarihli fiyatlar | Zamanlanmış sürümler | Gelecek tarihli fiyat planla/iptal et | Planlandı. |
+| İleri tarihli fiyatlar | Zamanlanmış sürümler | Gelecek tarihli fiyat planla/iptal et | Plan oluşturma, iptal ve zamanı geldiğinde mevcut fiyat/yayın akışıyla uygulama panel/API/PostgreSQL'e bağlıdır. |
 | Menü yayınlama ve geçmişi | Taslak/yayın sürümleri | Yayınla, geri al | İlk taslak → POS yayını ve geçmişi panelden çalışır; geri alma ve tekrar yayın yok. |
 
 ## Ürün seçenekleri — yönetim paneli ve sipariş API'si
@@ -200,6 +216,8 @@ Fiyatlı ürün kaydı, tek şubeli yayımlanmış ürün düzenleme, fiyat gün
 
 
 ## Ürün görseli
+
+Yönetim panelindeki Ürün Görselleri galerisi seçili şubenin ürünlerini sayfalı ve aranabilir olarak listeler. Her ürün kartından görsel seçilip mevcut ürün görseli API'siyle kaydedilir; ürün ayrıntısına da geçilebilir. Galeri, ürün ayrıntısıyla aynı tek şube, yetki, dosya türü ve boyut sınırlarını kullanır.
 
 Ürün ayrıntısında bilgisayardan JPEG, PNG veya WebP seçilerek ürün görseli kaydedilir (en fazla 2 MB). Görsel `catalog.product_images` içinde kalıcıdır; ürünün `image` alanı görsel kaydının kimliğini taşır. Ürün listesi, menü ve POS/garson ekranları görseli şube kapsamlı ve aktör başlıklı API üzerinden okur; eski emoji gösterimi korunur. Görsel yüklemesi önceden oluşturulmuş, tek şubeli ürünlerde çalışır.
 

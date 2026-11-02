@@ -14,6 +14,9 @@ import type {
   CatalogProvider,
   CatalogScope,
   CreateCategoryRequest,
+  DeleteCategoryRequest,
+  CategoryActiveRequest,
+  MoveCategoryRequest,
   CreateDraftRequest,
   CreatePricedProductRequest,
   ProductDetailRequest,
@@ -22,6 +25,8 @@ import type {
   RenameCategoryRequest,
   PriceResult,
   PriceVersion,
+  ScheduledPrice,
+  SchedulePriceRequest,
   Publication,
   PublicationResult,
   PublishDraftRequest,
@@ -160,6 +165,22 @@ export class MockCatalogProvider implements CatalogProvider {
   async renameCategory(_request: RenameCategoryRequest): Promise<CategoryMutationResult> {
     throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori adı değiştirilemez.");
   }
+
+  async setCategoryActive(_request: CategoryActiveRequest): Promise<CategoryMutationResult> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori değiştirilemez.");
+  }
+
+  async moveCategory(_request: MoveCategoryRequest): Promise<void> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori sıralanamaz.");
+  }
+
+  async deleteCategory(_request: DeleteCategoryRequest): Promise<void> {
+    throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride kategori silinemez.");
+  }
+
+  async listScheduledPrices(_scope: CatalogScope): Promise<ScheduledPrice[]> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride fiyat planları kullanılamaz."); }
+  async schedulePrice(_request: SchedulePriceRequest): Promise<ScheduledPrice> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride fiyat planı kaydedilemez."); }
+  async cancelScheduledPrice(_scope: CatalogScope, _id: string): Promise<unknown> { throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride fiyat planı iptal edilemez."); }
 
   async setPublishedPrice(_request: SetDraftPriceRequest): Promise<PriceResult> {
     throw new CatalogProviderError("MOCK_FAILURE", 501, "Örnek veride fiyat değiştirilemez.");

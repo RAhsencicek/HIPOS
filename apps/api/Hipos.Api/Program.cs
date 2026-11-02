@@ -45,6 +45,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogCategoryCommands>();
     builder.Services.AddScoped<CatalogOptionGroupCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
+    builder.Services.AddHostedService<CatalogScheduledPriceWorker>();
     builder.Services.AddScoped<SalesOrders>();
     builder.Services.AddScoped<PaidCheckTableSettlement>();
     builder.Services.AddScoped<PaymentSimulator>();
@@ -131,7 +132,9 @@ if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogProductImageEndpoints(catalogReady);
+if (storage == "postgres") app.MapCatalogScheduledPriceEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
+if (storage == "postgres") app.MapPublicQrMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
 app.MapPrintingEndpoints();
@@ -212,6 +215,47 @@ app.MapPut("/api/v1/firms/{firmId}/catalog/categories/{categoryId}",
             : Results.Ok(result.Category);
     });
 
+app.MapPut("/api/v1/firms/{firmId}/catalog/categories/{categoryId}/active",
+    async (string firmId, string categoryId, string? branchId, SetCatalogCategoryActive command, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (string.IsNullOrWhiteSpace(branchId)) return Failure(context, "BRANCH_REQUIRED", 400, "Önce bir şube seçin.");
+        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, branchId)) return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kategori yönetme izni yok.");
+        if (!catalogReady) return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog veritabanı hazır değil.");
+        var result = await services.GetRequiredService<CatalogCategoryCommands>().SetActiveAsync(firmId, branchId, categoryId, command, actor.Name, context.RequestAborted);
+        return result.Failure is { } failure ? Failure(context, failure.Code, failure.Status, failure.Message) : Results.Ok(result.Category);
+    });
+
+app.MapPut("/api/v1/firms/{firmId}/catalog/categories/{categoryId}/position",
+    async (string firmId, string categoryId, string? branchId, MoveCatalogCategory command, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (string.IsNullOrWhiteSpace(branchId)) return Failure(context, "BRANCH_REQUIRED", 400, "Önce bir şube seçin.");
+        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, branchId)) return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kategori yönetme izni yok.");
+        if (!catalogReady) return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog veritabanı hazır değil.");
+        var failure = await services.GetRequiredService<CatalogCategoryCommands>().MoveAsync(firmId, branchId, categoryId, command, actor.Name, context.RequestAborted);
+        return failure is { } error ? Failure(context, error.Code, error.Status, error.Message) : Results.NoContent();
+    });
+
+app.MapDelete("/api/v1/firms/{firmId}/catalog/categories/{categoryId}",
+    async (string firmId, string categoryId, string? branchId, int expectedVersion,
+        HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (string.IsNullOrWhiteSpace(branchId))
+            return Failure(context, "BRANCH_REQUIRED", 400, "Kategori silmek için bir şube seçin.");
+        if (!actor.CanManage || !DemoAccess.CanReadCatalog(actor, firmId, branchId))
+            return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kategori yönetme izni yok.");
+        if (!catalogReady)
+            return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı ve API yeniden başlatılmalı.");
+        var failure = await services.GetRequiredService<CatalogCategoryCommands>().DeleteAsync(
+            firmId, branchId, categoryId, new DeleteCatalogCategory(expectedVersion), actor.Name, context.RequestAborted);
+        return failure is { } result ? Failure(context, result.Code, result.Status, result.Message) : Results.NoContent();
+    });
+
 app.MapGet("/api/v1/firms/{firmId}/catalog/products/{productId}",
     async (string firmId, string productId, string? branchId, HttpContext context, IServiceProvider services) =>
     {
@@ -226,6 +270,17 @@ app.MapGet("/api/v1/firms/{firmId}/catalog/products/{productId}",
         var result = await services.GetRequiredService<CatalogQueries>().GetAsync(
             new CatalogScope(firmId, branchId), id, context.RequestAborted);
         return result is null ? Failure(context, "PRODUCT_NOT_FOUND", 404, "Ürün bu kapsamda bulunamadı.") : Results.Ok(result);
+    });
+
+app.MapPut("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/channels",
+    async (string firmId, string branchId, Guid productId, SetCatalogProductChannels command, HttpContext context, IServiceProvider services) =>
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
+        if (!actor.CanManage || !actor.CanRead(firmId, branchId)) return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kanal yönetme izni yok.");
+        if (!catalogReady) return Failure(context, "CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ı uygulanmalı ve API yeniden başlatılmalı.");
+        var result = await services.GetRequiredService<CatalogProductActivationCommands>().SetChannelsAsync(firmId, branchId, productId, command, actor.Name, context.RequestAborted);
+        return result.Failure is { } failure ? Failure(context, failure.Code, failure.Status, failure.Message) : Results.Ok(new { desiredChannels = result.Channels, version = result.Version });
     });
 
 app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId}/activation",

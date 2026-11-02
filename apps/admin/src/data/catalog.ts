@@ -1,4 +1,4 @@
-import singleDemo from "../../../../contracts/demo-single-branch.v1.json";
+﻿import singleDemo from "../../../../contracts/demo-single-branch.v1.json";
 
 export type NavItem = { label: string; slug: string };
 export type NavSection = {
@@ -41,13 +41,8 @@ export const sections: NavSection[] = [
       { label: "Ürünler", slug: "products" },
       { label: "Seçenek Grupları", slug: "options" },
       { label: "Ürün Görselleri", slug: "images" },
-      { label: "Menü Kompozisyonu", slug: "composition" },
       { label: "Kanal Görünürlüğü", slug: "channels" },
       { label: "Fiyatlar", slug: "prices" },
-      { label: "Fiyat Sürümleri", slug: "price-versions" },
-      { label: "İleri Tarihli Fiyatlar", slug: "scheduled-prices" },
-      { label: "POS'a Ürün Yayını", slug: "publishing" },
-      { label: "Yayın Geçmişi", slug: "publish-history" },
     ],
   },
   {

@@ -24,7 +24,6 @@ const sceneDrafts: Record<string, Record<string, string>> = {
   catalog: {
     options: "menu|Kahve boyunu seçin|Süt tercihini ekleyin|Siparişe yansıtın",
     images: "gallery|Ürün fotoğrafı|Menüdeki görünümü|Misafirin seçimi",
-    composition: "composition|İçecekler bölümü|En sevilen ürünler|Menü sırası",
     channels: "channels|Salon menüsü|Paket menüsü|QR menüsü",
     prices: "ledger|Latte fiyatı|Tatlı fiyatı|Güncel menü",
     "price-versions": "timeline|Önceki fiyat|Değişiklik tarihi|Yeni fiyat",

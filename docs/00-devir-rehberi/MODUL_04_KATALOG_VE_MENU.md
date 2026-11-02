@@ -1,8 +1,8 @@
-# Modül 4 Devir Şartnamesi — Ürün Kataloğu & Menü Yönetimi (A'dan Z'ye)
+﻿# Modül 4 Devir Şartnamesi — Ürün Kataloğu & Menü Yönetimi (A'dan Z'ye)
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Ürün Kartları, Menü Editörü, Fiyat Sürümleri, Seçenek/Varyasyon Grupları (Modifiers) ve QR Menü
-> **Modül Durumu:** Kalıcı MVP · Ürün seçenek yönetimi paneli ve sipariş backend'i uygulandı · Garson ve kasa hızlı satış seçenek ekranları uygulandı · QR Menü hedef
+> **Modül Durumu:** Kalıcı MVP · Ürün seçenek yönetimi ve sipariş backend'i uygulandı · Yapılandırılmış şube için salt okunur QR menü arayüzü ve public okuma API'si var
 > **PostgreSQL Şeması:** `catalog`
 > **Yönetim Paneli:** Var (`CatalogPages.tsx`, `MenusPage.tsx`)
 > **API:** Var (`CatalogDbContext.cs`)
@@ -24,9 +24,11 @@
   - Fiyat sürümleme mekanizması (eski satışları bozmadan yeni fiyat yayını)
   - Şube menü editörü, bölümler ve ürün sıralama
   - Aynı şubede birden fazla menüyü etkinleştirme; POS'ta kullanılabilir menüleri sunma ve POS kanalına ürün yayını
+  - Ürün ayrıntı ekranında durum rozetleri (Aktif/Pasif, POS Yayını) ve işlem butonları (Ürünü düzenle, Pasife al/Etkinleştir) görsel hiyerarşiye uygun gruplanmıştır; modern görsel yükleme alanı mevcuttur
+  - Ürün oluşturma formu ile ürün ayrıntı ekranındaki Satış Kanalları bölümü POS'ta yayınlama ve QR'da yayınlama tercihleriyle etkileşimli hale getirilmiştir; yeni ürün eklerken ürün görseli, seçenek grupları ve kanal tercihleri doğrudan belirlenebilmektedir
 * **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
   - Seçenek grubu yönetimi ürün ayrıntısına bağlandı; sipariş API'si güncel katalogdan doğrular ve fiyat snapshot'ı alır. Garson ve kasa hızlı satış ekranları seçenekleri katalogdan yükler.
-  - Masalara özel karekodlu QR Menü dış yayını
+  - QR kod üretimi, masayla doğrulanmış bağlantı ve internette barındırma; QR menüde sipariş/ödeme
 
 ---
 
@@ -85,10 +87,9 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * Ürün pasifse yeni siparişe eklenemez. Pasif grup ve seçenekler ise yeni siparişte seçilebilir; bu alanların `is_active` değeri seçim doğrulamasını engellemez.
 * Sipariş sırasında seçenekler güncel katalogdan doğrulanır. Ürün başına fiyat, temel fiyat ile her seçeneğin birim fiyat farkının seçilen adetle çarpılmış toplamıdır. Sonuç sıfırın altındaysa sipariş reddedilir. Temel fiyat ve seçilen seçeneklerin adı, adedi ve birim fiyat farkı sipariş anındaki değerleriyle sipariş kaleminde saklanır.
 
-### 📱 EKRAN 4: Masaya Özel QR Menü Yayını (Hedef Özellik — Geliştirilecek)
-* Masanın üzerine konulacak karekodun çıktısı:
-  * `https://menu.hipos.com/kadikoy/masa-4`
-  * Müşteri telefonundan tarattığında aktif menü mobil uyumlu web arayüzünde açılır.
+### 📱 EKRAN 4: Müşteriye Açık QR Menü (Salt Okunur)
+* Yapılandırılmış şube için `/menu/{token}` adresi, şubedeki bütün aktif menüleri ve QR'a uygun ürünleri mobil uyumlu gösterir.
+* `?masa=` bağlantıdaki isteğe bağlı görüntüleme etiketidir; masa doğrulaması veya masa işlemi değildir. QR kod üretimi ve internette barındırma henüz yoktur. Ayrıntılar [Menü Yönetimi MVP](../03-is-alanlari-ve-yonetim/MENU_YONETIMI_MVP.md) belgesindedir.
 
 ---
 

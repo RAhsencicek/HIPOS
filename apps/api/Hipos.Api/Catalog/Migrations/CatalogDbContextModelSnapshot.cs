@@ -753,6 +753,59 @@ namespace Hipos.Api.Catalog.Migrations
                     b.ToTable("product_activation_audit", "catalog");
                 });
 
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogProductChannelAuditRow", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.PrimitiveCollection<string[]>("DesiredChannels")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("desired_channels");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("RequestId");
+
+                    b.ToTable("product_channel_audit", "catalog");
+                });
+
             modelBuilder.Entity("Hipos.Api.Catalog.CatalogProductEditAuditRow", b =>
                 {
                     b.Property<Guid>("RequestId")
@@ -966,6 +1019,13 @@ namespace Hipos.Api.Catalog.Migrations
                         .HasColumnType("character varying(4000)")
                         .HasColumnName("description");
 
+                    b.PrimitiveCollection<string[]>("DesiredChannels")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasColumnName("desired_channels")
+                        .HasDefaultValueSql("ARRAY['pos','qr']::text[]");
+
                     b.Property<string>("FirmId")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1128,6 +1188,73 @@ namespace Hipos.Api.Catalog.Migrations
 
                             t.HasCheckConstraint("ck_publication_number", "number > 0");
                         });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Catalog.CatalogScheduledPriceRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor");
+
+                    b.Property<long>("AmountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount_minor");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("detail");
+
+                    b.Property<DateTimeOffset>("EffectiveAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("effective_at");
+
+                    b.Property<int>("ExpectedVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("expected_version");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "EffectiveAt");
+
+                    b.ToTable("scheduled_prices", "catalog");
                 });
 
             modelBuilder.Entity("Hipos.Api.Catalog.CatalogBranchPriceRow", b =>

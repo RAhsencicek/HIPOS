@@ -1,7 +1,9 @@
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
   Check,
   ChevronDown,
   Filter,
@@ -11,6 +13,8 @@ import {
   Search,
   Sparkles,
   Tag,
+  Trash2,
+  UploadCloud,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -18,14 +22,15 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import type { ViewContext } from "../../app/context";
 import { useCatalogProvider } from "../../app/providers";
 import { StatusPill, PageHeading, DemoNotice } from "../../shared/ui";
-import { channelLabels, formatCatalogMoney } from "./formatters";
+import { channelLabels, formatCatalogMoney, parseCatalogPrice } from "./formatters";
 import { useCategoryList, useProductDetail, useProductList } from "./useCatalogData";
 import { DraftForm } from "./DraftForm";
+import { HttpMenuProvider } from "./MenuProvider";
 import { PricePublicationPanel } from "./PricePublicationPanel";
 import { ProductOptionsPanel } from "./ProductOptionsPanel";
 import { ProductImage } from "./ProductImage";
 import type { CatalogLoad } from "./useCatalogData";
-import type { CategoryListResponse, ProductListResponse } from "./contracts";
+import type { CatalogProduct, CatalogProductDetail, CategoryListResponse, ProductListResponse, ScheduledPrice } from "./contracts";
 import singleDemo from "../../../../../contracts/demo-single-branch.v1.json";
 
 const statusLabel = { published: "Yayında", draft: "Satışa açılmadı" } as const;
@@ -91,6 +96,7 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
   const [categoryName, setCategoryName] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
   const [notice, setNotice] = useState("");
   const categories = load.status === "success" ? load.data.items : [];
   const filteredCategories = categories.filter(category => category.name
@@ -151,6 +157,51 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
     }
   }
 
+  async function deleteCategory(category: CategoryListResponse["items"][number]) {
+    if (!canEdit || saving) return;
+    const linkedProductNote = category.productCount > 0
+      ? ` Bu kategorideki ${category.productCount} ürün korunacak ve kategorisiz kalacak.`
+      : "";
+    if (!window.confirm(`“${category.name}” kategorisi silinsin mi?${linkedProductNote} Bu işlem geri alınamaz.`)) return;
+    setSaving(true);
+    setDeleteError("");
+    try {
+      if (category.version === undefined) throw new Error("Kategori sürümü alınamadı. Güncel kayıtları yükleyip tekrar deneyin.");
+      await provider.deleteCategory({ scope, categoryId: category.id, expectedVersion: category.version });
+      setNotice(`“${category.name}” kategorisi silindi.`);
+      notifyChange();
+    } catch (reason) {
+      setNotice("");
+      setDeleteError(reason instanceof Error ? reason.message : "Kategori silinemedi.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function setCategoryActive(category: CategoryListResponse["items"][number]) {
+    if (!canEdit || saving || category.version === undefined) return;
+    setSaving(true); setDeleteError(""); setNotice("");
+    try {
+      const isActive = category.isActive === false;
+      await provider.setCategoryActive({ scope, categoryId: category.id, expectedVersion: category.version, isActive });
+      setNotice(`“${category.name}” kategorisi ${isActive ? "etkinleştirildi" : "pasife alındı"}.`);
+      notifyChange();
+    } catch (reason) { setDeleteError(reason instanceof Error ? reason.message : "Kategori durumu değiştirilemedi."); }
+    finally { setSaving(false); }
+  }
+
+  async function moveCategory(category: CategoryListResponse["items"][number], direction: -1 | 1) {
+    const index = categories.findIndex(item => item.id === category.id);
+    const neighbor = categories[index + direction];
+    if (!canEdit || saving || !neighbor || category.version === undefined || neighbor.version === undefined) return;
+    setSaving(true); setDeleteError(""); setNotice("");
+    try {
+      await provider.moveCategory({ scope, categoryId: category.id, expectedVersion: category.version, neighborId: neighbor.id, neighborVersion: neighbor.version });
+      setNotice("Kategori sırası güncellendi."); notifyChange();
+    } catch (reason) { setDeleteError(reason instanceof Error ? reason.message : "Kategori sırası değiştirilemedi."); }
+    finally { setSaving(false); }
+  }
+
   return <>
     <PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Kategoriler"
       description={selectedBranchName
@@ -158,8 +209,9 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
         : "Kategorileri görüntülemek ve yönetmek için önce bir şube seçin."}
       action={<button className="primary-button" disabled={!canEdit || load.status !== "success"} onClick={openCreate}
         title={!ctx.branchApiId ? "Önce bir şube seçin" : canEdit ? "Yeni kategori oluştur" : "Örnek veride kategori kaydedilemez."}><Plus size={17} />Yeni kategori</button>} />
-    <div className="category-info-banner"><Info size={17} /><span>Menü bölümleri kategorilerden ayrıdır. Bir kategori ürünleri katalogda gruplar; menü bölümlerini menü ekranında düzenlersiniz.</span></div>
+    <div className="category-info-banner"><Info size={17} /><span>Menü bölümleri kategorilerden ayrıdır. Pasif kategorilere yeni ürün eklenemez; mevcut ürünler ve menüler etkilenmez.</span></div>
     {notice && <div className="notice menu-success" role="status"><Check size={16} />{notice}</div>}
+    {deleteError && <div className="category-form-error" role="alert"><AlertCircle size={16} />{deleteError}</div>}
     {!ctx.branchApiId ? <section className="card category-list-empty"><Tag size={23} /><strong>Şube seçin</strong>
       <span>Kategori listesi, üst menüden seçtiğiniz şubeye göre gösterilir.</span></section> :
     load.status !== "success" ? <CatalogStatePanel load={load} /> :
@@ -173,16 +225,22 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
         <div className="category-list-rows">
           {filteredCategories.map(category => <article className="category-list-row" key={category.id}>
             <span className="category-row-icon"><Tag size={18} /></span>
-            <div className="category-row-main"><strong>{category.name}</strong></div>
+            <div className="category-row-main"><strong>{category.name}</strong> <StatusPill tone={category.isActive === false ? "neutral" : "green"}>{category.isActive === false ? "Pasif" : "Aktif"}</StatusPill></div>
             <span className={`category-product-count ${category.productCount ? "has-products" : "empty"}`}>
               {category.productCount} ürün
             </span>
             <div className="category-row-actions">
+              <button type="button" className="soft-button" disabled={!canEdit || saving || Boolean(query.trim()) || categories[0]?.id === category.id} aria-label={`${category.name} kategorisini yukarı taşı`} title="Yukarı taşı" onClick={() => void moveCategory(category, -1)}><ArrowUp size={16} /></button>
+              <button type="button" className="soft-button" disabled={!canEdit || saving || Boolean(query.trim()) || categories[categories.length - 1]?.id === category.id} aria-label={`${category.name} kategorisini aşağı taşı`} title="Aşağı taşı" onClick={() => void moveCategory(category, 1)}><ArrowDown size={16} /></button>
               <Link className="soft-button" to={productsUrl(category.id)} aria-label={`${category.name} ürünlerini gör`}>Ürünleri gör</Link>
-              {canWriteDraft ? <Link className="soft-button" to={productsUrl(category.id, true)} aria-label={`${category.name} kategorisine ürün ekle`}><Plus size={15} />Ürün ekle</Link>
+              {canWriteDraft && category.isActive !== false ? <Link className="soft-button" to={productsUrl(category.id, true)} aria-label={`${category.name} kategorisine ürün ekle`}><Plus size={15} />Ürün ekle</Link>
                 : <button className="soft-button" disabled title="Ürün eklemek için ürün ve fiyat özellikleri bu şubede hazır olmalı."><Plus size={15} />Ürün ekle</button>}
+              <button type="button" className="soft-button" disabled={!canEdit || saving} onClick={() => void setCategoryActive(category)} aria-label={`${category.name} ${category.isActive === false ? "etkinleştir" : "pasife al"}`}>{category.isActive === false ? "Etkinleştir" : "Pasife al"}</button>
               <button className="soft-button category-edit-button" disabled={!canEdit} title={canEdit ? "Kategori adını düzenle" : "Örnek veride kategori düzenlenemez."}
                 onClick={() => openEdit(category)}><Pencil size={15} />Düzenle</button>
+              <button className="soft-button" disabled={!canEdit || saving}
+                title={canEdit ? "Kategoriyi ve kategori bağlarını sil" : "Örnek veride kategori silinemez."}
+                onClick={() => void deleteCategory(category)}><Trash2 size={15} />Sil</button>
             </div>
           </article>)}
           {!filteredCategories.length && <div className="category-list-empty">
@@ -210,6 +268,277 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
             {saving ? "Kaydediliyor…" : dialog.kind === "create" ? "Kategori oluştur" : "Değişiklikleri kaydet"}</button></footer>
       </form>
     </section></div>}
+  </>;
+}
+
+function GalleryProduct({ product, ctx, canWriteDraft, canPublish }: { product: CatalogProduct; ctx: ViewContext; canWriteDraft: boolean; canPublish: boolean }) {
+  const { source, notifyChange } = useCatalogProvider();
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const request = useRef<{ file: File; version: number; id: string } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const enabled = source === "http" && !!ctx.branchApiId && canWriteDraft && (product.status !== "published" || canPublish) && product.branchIds.length === 1;
+  useEffect(() => {
+    if (!file) { setPreviewUrl(""); return; }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  async function upload() {
+    if (!file || !ctx.branchApiId || !enabled || busy) return;
+    if (file.size > 2 * 1024 * 1024) { setMessage("Görsel en fazla 2 MB olabilir."); return; }
+    if (!request.current || request.current.file !== file || request.current.version !== product.version)
+      request.current = { file, version: product.version, id: crypto.randomUUID() };
+    const { id, version } = request.current;
+    const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/images?requestId=${id}&expectedVersion=${version}`;
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "X-Demo-Actor": ctx.isMulti ? "manager-multi" : "manager-single", "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; throw new Error(problem.detail ?? "Görsel kaydedilemedi."); }
+      request.current = null; setFile(null); if (input.current) input.current.value = ""; setMessage("Görsel kaydedildi."); notifyChange();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Görsel kaydedilemedi."); }
+    finally { setBusy(false); }
+  }
+  return <article className="card gallery-product">
+    <div className="gallery-product-image">{file && previewUrl ? <img src={previewUrl} alt={`${product.name} seçilen görsel önizlemesi`} /> : <ProductImage image={product.image} productId={product.id} firmId={ctx.firmId} branchId={ctx.branchApiId} actor={ctx.isMulti ? "manager-multi" : "manager-single"} name={product.name} />}</div>
+    <strong>{product.name}</strong><span>{product.category.name} · {product.sku}</span>
+    <Link to={`/admin/catalog/products/${encodeURIComponent(product.id)}`}>Ürün ayrıntısı</Link>
+    <label className={`gallery-upload${!enabled || busy ? " is-disabled" : ""}`}>
+      <input ref={input} className="gallery-upload-input" type="file" accept="image/jpeg,image/png,image/webp" disabled={!enabled || busy} aria-label={`${product.name} için görsel seç`} onChange={event => { setFile(event.target.files?.[0] ?? null); request.current = null; setMessage(""); }} />
+      <span className="gallery-upload-icon"><UploadCloud size={19} /></span>
+      <span className="gallery-upload-copy"><strong>{file ? "Görsel seçildi" : "Görsel seç"}</strong><small title={file?.name}>{file ? file.name : "JPEG, PNG veya WebP · en fazla 2 MB"}</small></span>
+    </label>
+    <button type="button" className="soft-button" disabled={!enabled || !file || busy} onClick={() => void upload()}>{busy ? "Yükleniyor…" : "Görseli kaydet"}</button>
+    {!enabled && <small>Görsel yüklemek için yetkili şube seçimi ve tek şubeli ürün gerekir.</small>}
+    {message && <small role="status">{message}</small>}
+  </article>;
+}
+
+function ChannelControls({ product, ctx, canWriteDraft, canPublish }: { product: CatalogProduct; ctx: ViewContext; canWriteDraft: boolean; canPublish: boolean }) {
+  const { source, notifyChange } = useCatalogProvider();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const pending = useRef<{ channels: string[]; version: number; id: string } | null>(null);
+  const desired = product.desiredChannels ?? ["pos", "qr"];
+  const canEdit = source === "http" && canWriteDraft && (product.status !== "published" || canPublish) && !!ctx.branchApiId && product.branchIds.length === 1;
+  async function update(channels: string[]) {
+    if (!canEdit || busy || !ctx.branchApiId) return;
+    const selected = [...channels].sort();
+    if (!pending.current || pending.current.version !== product.version || JSON.stringify(pending.current.channels) !== JSON.stringify(selected))
+      pending.current = { channels: selected, version: product.version, id: crypto.randomUUID() };
+    const command = pending.current;
+    setBusy(true); setError("");
+    try {
+      const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/channels`;
+      const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : (ctx.isMulti ? "manager-multi" : "manager-single");
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Demo-Actor": actor }, body: JSON.stringify({ requestId: command.id, expectedVersion: command.version, desiredChannels: command.channels }) });
+      if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; pending.current = null; throw new Error(problem.detail ?? "Kanal seçimi kaydedilemedi."); }
+      pending.current = null;
+      if (command.channels.includes("pos") && product.status === "published" && ctx.branchApiId) {
+        try {
+          await new HttpMenuProvider().ensureProductInActiveMenu(
+            { firmId: ctx.firmId, branchId: ctx.branchApiId },
+            product.id,
+            product.category.name,
+          );
+        } catch (menuErr) {
+          console.warn("Menü senkronizasyonu:", menuErr);
+        }
+      }
+      notifyChange();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Kanal seçimi kaydedilemedi."); }
+    finally { setBusy(false); }
+  }
+  return <div className="channel-controls">
+    <div className="channel-controls-grid">
+      <label className={`channel-control-card ${desired.includes("pos") ? "is-active" : ""}`}>
+        <input type="checkbox" checked={desired.includes("pos")} disabled={!canEdit || busy} onChange={event => void update(event.target.checked ? [...desired, "pos"] : desired.filter(x => x !== "pos"))} />
+        <div>
+          <strong>POS'ta yayınla</strong>
+          <small>Kasa ve garson terminallerinde siparişe açık olur.</small>
+        </div>
+      </label>
+      <label className={`channel-control-card ${desired.includes("qr") ? "is-active" : ""}`}>
+        <input type="checkbox" checked={desired.includes("qr")} disabled={!canEdit || busy} onChange={event => void update(event.target.checked ? [...desired, "qr"] : desired.filter(x => x !== "qr"))} />
+        <div>
+          <strong>QR'da yayınla</strong>
+          <small>Müşterilere açık mobil QR menüde listelenir.</small>
+        </div>
+      </label>
+    </div>
+    {!canEdit && <small className="channel-controls-note">Bu ürünün kanal seçimi bu şubeden değiştirilemiyor.</small>}
+    {error && <small role="alert" className="channel-controls-error">{error}{pending.current && <button type="button" className="soft-button" onClick={() => void update(pending.current!.channels)}>Tekrar dene</button>}</small>}
+  </div>;
+}
+
+export function ChannelVisibilityPage({ ctx, canWriteDraft, canSetPrice, canPublish }: { ctx: ViewContext; canWriteDraft: boolean; canSetPrice: boolean; canPublish: boolean }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState("");
+  const [notice, setNotice] = useState("");
+  const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
+  const load = useProductList(scope, query, undefined, page);
+  useEffect(() => { setPage(1); setSelectedId(""); setNotice(""); }, [ctx.firmId, ctx.branchApiId]);
+  return <>
+    <PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Kanal Görünürlüğü" description="Ürünlerin POS yayın durumunu ve satış kanallarının hazırlık durumunu inceleyin." />
+    {notice && <div className="notice menu-success" role="status">{notice}</div>}
+    {!ctx.branchApiId ? <div className="notice">Ürünleri görmek için bir şube seçin.</div> : <>
+      <div className="channel-overview"><div className="card"><strong>POS</strong><span>Seçim yeni satışlarda geçerli</span></div><div className="card"><strong>Paket servis</strong><span>Tercih kaydedilir; satış ekranı planlanıyor</span></div><div className="card"><strong>QR menü</strong><span>Tercih kaydedilir; QR menü planlanıyor</span></div></div>
+      <section className="card channel-list"><header><div><h2>Ürünler</h2><p>Ürün aktifliği, kanal tercihi ve POS yayın kaydı ayrı gösterilir.</p></div><label className="category-search"><Search size={17} /><input aria-label="Ürün ara" placeholder="Ürün veya stok kodu ara" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label></header>
+        {load.status !== "success" ? <CatalogStatePanel load={load} /> : <>
+          {load.data.items.length === 0 ? <div className="notice">Ürün bulunamadı.</div> : <div className="channel-rows">{load.data.items.map(product => <article className="channel-row" key={product.id}>
+            <div className="channel-row-product"><span className="channel-product-image"><ProductImage image={product.image} productId={product.id} firmId={ctx.firmId} branchId={ctx.branchApiId} actor={ctx.isMulti ? "manager-multi" : "manager-single"} name={product.name} /></span><div><strong>{product.name}</strong><small>{product.category.name} · {product.sku}</small></div></div>
+            <div><small>Ürün durumu</small><StatusPill tone={product.isActive ? "green" : "neutral"}>{product.isActive ? "Aktif" : "Pasif"}</StatusPill></div>
+            <div><small>POS yayını</small><StatusPill tone={product.status === "published" && product.channels.includes("pos") ? "green" : "neutral"}>{product.status === "published" && product.channels.includes("pos") ? "Yayın kaydı var" : "Yayınlanmadı"}</StatusPill></div>
+            <ChannelControls product={product} ctx={ctx} canWriteDraft={canWriteDraft} canPublish={canPublish} />
+            <div className="channel-row-actions"><button type="button" className="soft-button" aria-pressed={selectedId === product.id} onClick={() => { setSelectedId(selectedId === product.id ? "" : product.id); setNotice(""); }}>Yayın işlemleri</button><Link className="subtle-link" to={`/admin/catalog/products/${encodeURIComponent(product.id)}`}>Ürün ayrıntısı</Link></div>
+            {selectedId === product.id && <div className="channel-row-publication"><PublicationProductPanel key={selectedId} ctx={ctx} productId={selectedId} canSetPrice={canSetPrice} canPublish={canPublish} onChanged={message => setNotice(message ?? "")} /></div>}
+          </article>)}</div>}
+          <div className="catalog-pagination"><button className="soft-button" disabled={page <= 1} onClick={() => setPage(page - 1)}>Önceki</button><span>Sayfa {page} / {Math.max(1, load.data.pageInfo.totalPages)}</span><button className="soft-button" disabled={page >= load.data.pageInfo.totalPages} onClick={() => setPage(page + 1)}>Sonraki</button></div>
+        </>}
+      </section>
+    </>}
+  </>;
+}
+
+function SchedulePriceForm({ ctx, product, canSetPrice, canPublish, onSaved }: { ctx: ViewContext; product: CatalogProductDetail; canSetPrice: boolean; canPublish: boolean; onSaved: () => void }) {
+  const { provider, source } = useCatalogProvider();
+  const [price, setPrice] = useState("");
+  const [effectiveAt, setEffectiveAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const requestId = useRef(crypto.randomUUID());
+  const enabled = source === "http" && canSetPrice && (product.status !== "published" || canPublish);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const amountMinor = parseCatalogPrice(price);
+    const timestamp = new Date(effectiveAt);
+    if (amountMinor === null || !effectiveAt || !Number.isFinite(timestamp.getTime()) || timestamp.getTime() <= Date.now()) { setError("Pozitif bir fiyat ve gelecekteki bir tarih ve saat girin."); return; }
+    if (!enabled || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await provider.schedulePrice({ scope: { firmId: ctx.firmId, branchId: ctx.branchApiId }, requestId: requestId.current, productId: product.id, amountMinor, effectiveAt: timestamp.toISOString(), expectedVersion: product.version });
+      requestId.current = crypto.randomUUID(); setPrice(""); setEffectiveAt(""); setMessage("Fiyat planı kaydedildi."); onSaved();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Fiyat planı kaydedilemedi."); }
+    finally { setBusy(false); }
+  }
+  return <section className="card price-history-panel"><h2>İleri tarihli fiyat</h2><p>Güncel fiyat: <strong>{formatCatalogMoney(product.price)}</strong></p>
+    <form className="scheduled-price-form" onSubmit={event => void submit(event)}>
+      <label>Yeni fiyat (TL)<input inputMode="decimal" placeholder="Örn. 325,50" value={price} disabled={!enabled || busy} onChange={event => { setPrice(event.target.value); requestId.current = crypto.randomUUID(); }} required /></label>
+      <label>Başlangıç tarihi ve saati<input type="datetime-local" value={effectiveAt} disabled={!enabled || busy} onChange={event => { setEffectiveAt(event.target.value); requestId.current = crypto.randomUUID(); }} required /></label>
+      <small>Tarih ve saat cihazınızın yerel saatine göre yorumlanır. Zamanı geldiğinde planlanan fiyat uygulanır.</small>
+      <button className="primary-button" disabled={!enabled || busy}>{busy ? "Kaydediliyor…" : "Fiyatı planla"}</button>
+      {!enabled && <small>Plan oluşturmak için fiyat yönetimi ve yayımlanmış ürünlerde POS yayını etkin olmalı.</small>}
+      {error && <div className="notice" role="alert">{error}</div>}{message && <div className="notice menu-success" role="status">{message}</div>}
+    </form>
+  </section>;
+}
+
+function ScheduledPriceSection({ ctx, product, canSetPrice, canPublish }: { ctx: ViewContext; product: CatalogProductDetail; canSetPrice: boolean; canPublish: boolean }) {
+  const { provider, source } = useCatalogProvider();
+  const [plans, setPlans] = useState<ScheduledPrice[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [cancelling, setCancelling] = useState("");
+  useEffect(() => {
+    if (!ctx.branchApiId || source !== "http") return;
+    let active = true;
+    const reload = () => provider.listScheduledPrices({ firmId: ctx.firmId, branchId: ctx.branchApiId }).then(items => {
+      if (active) { setPlans(items.filter(item => item.productId === product.id)); setError(""); setLoading(false); }
+    }).catch(reason => { if (active) { setError(reason instanceof Error ? reason.message : "Fiyat planları yüklenemedi."); setLoading(false); } });
+    setLoading(true); void reload();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void reload(); }, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [provider, ctx.firmId, ctx.branchApiId, product.id, source, revision]);
+  async function cancelPlan(id: string) {
+    if (cancelling || !window.confirm("Bu fiyat planı iptal edilsin mi?")) return;
+    setCancelling(id); setError("");
+    try { await provider.cancelScheduledPrice({ firmId: ctx.firmId, branchId: ctx.branchApiId }, id); setRevision(value => value + 1); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Fiyat planı iptal edilemedi."); }
+    finally { setCancelling(""); }
+  }
+  return <>
+    <SchedulePriceForm key={`${product.id}:${product.version}`} ctx={ctx} product={product} canSetPrice={canSetPrice} canPublish={canPublish} onSaved={() => setRevision(value => value + 1)} />
+    <section className="card scheduled-price-list"><h2>Bu ürünün fiyat planları</h2><p>Planlanan fiyat, arada elle fiyat değişse de belirlenen zamanda uygulanır.</p>
+      {source !== "http" ? <p>Örnek veride fiyat planları kullanılamaz.</p> : loading ? <p role="status">Planlar yükleniyor…</p> : error ? <p role="alert">{error} <button className="soft-button" onClick={() => setRevision(value => value + 1)}>Tekrar dene</button></p> : !plans.length ? <p>Henüz fiyat planı yok.</p> : plans.map(plan => <div className="scheduled-price-row" key={plan.id}>
+        <div><strong>{formatCatalogMoney({ amountMinor: plan.amountMinor, currency: "TRY" })}</strong><small>{new Date(plan.effectiveAt).toLocaleString("tr-TR")}</small>{plan.detail && <small>{plan.detail}</small>}</div>
+        <StatusPill tone={plan.status === "applied" ? "green" : "neutral"}>{({ pending: "Bekliyor", processing: "İşleniyor", applied: "Uygulandı", failed: "Uygulanamadı", cancelled: "İptal edildi" } as const)[plan.status]}</StatusPill>
+        {plan.status === "pending" && <button className="soft-button" disabled={!canSetPrice || !!cancelling || new Date(plan.effectiveAt).getTime() <= Date.now()} onClick={() => void cancelPlan(plan.id)}>İptal et</button>}
+      </div>)}
+    </section>
+  </>;
+}
+
+function PriceProductPanel({ ctx, productId, canSetPrice, canPublish, onPriceChanged }: { ctx: ViewContext; productId: string; canSetPrice: boolean; canPublish: boolean; onPriceChanged: (message?: string) => void }) {
+  const { notifyChange } = useCatalogProvider();
+  const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
+  const product = useProductDetail(scope, productId);
+  if (product.status !== "success") return <CatalogStatePanel load={product} />;
+  return <div className="price-product-detail"><PricePublicationPanel scope={scope} product={product.data} canSetPrice={canSetPrice} canPublish={canPublish} onChanged={message => { onPriceChanged(message); notifyChange(); }} />
+    <ScheduledPriceSection ctx={ctx} product={product.data} canSetPrice={canSetPrice} canPublish={canPublish} />
+  </div>;
+}
+
+export function PriceManagementPage({ ctx, canSetPrice, canPublish }: { ctx: ViewContext; canSetPrice: boolean; canPublish: boolean }) {
+  const { notifyChange } = useCatalogProvider();
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState("");
+  const [notice, setNotice] = useState("");
+  const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
+  const load = useProductList(scope, query, undefined, page);
+  useEffect(() => { setPage(1); setSelectedId(""); }, [ctx.firmId, ctx.branchApiId]);
+  return <><PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Fiyatlar" description="Ürün fiyatlarını, geçmiş sürümleri ve ileri tarihli fiyat planlarını yönetin." />
+    {notice && <div className="notice menu-success" role="status">{notice}</div>}
+    {!ctx.branchApiId ? <div className="notice">Fiyatları görmek için bir şube seçin.</div> : <div className="price-workspace">
+      <section className="card price-product-list"><label className="category-search"><Search size={17} /><input aria-label="Ürün ara" placeholder="Ürün veya stok kodu ara" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label><button type="button" className="soft-button" onClick={notifyChange}>Fiyatları yenile</button>
+        {load.status !== "success" ? <CatalogStatePanel load={load} /> : <>
+          {load.data.items.map(product => <button type="button" key={product.id} className={`price-product-row${selectedId === product.id ? " selected" : ""}`} aria-pressed={selectedId === product.id} onClick={() => { setSelectedId(product.id); setNotice(""); }}><span><strong>{product.name}</strong><small>{product.category.name} · {product.sku}</small></span><strong>{formatCatalogMoney(product.price)}</strong></button>)}
+          {!load.data.items.length && <p>Ürün bulunamadı.</p>}
+          <div className="catalog-pagination"><button className="soft-button" disabled={page <= 1} onClick={() => setPage(page - 1)}>Önceki</button><span>{page} / {Math.max(1, load.data.pageInfo.totalPages)}</span><button className="soft-button" disabled={page >= load.data.pageInfo.totalPages} onClick={() => setPage(page + 1)}>Sonraki</button></div>
+        </>}
+      </section>
+      {selectedId ? <PriceProductPanel key={selectedId} ctx={ctx} productId={selectedId} canSetPrice={canSetPrice} canPublish={canPublish} onPriceChanged={message => setNotice(message ?? "")} /> : <div className="card price-history-panel">Ayrıntıları görmek için bir ürün seçin.</div>}
+    </div>}
+  </>;
+}
+
+function PublicationProductPanel({ ctx, productId, canSetPrice, canPublish, onChanged }: { ctx: ViewContext; productId: string; canSetPrice: boolean; canPublish: boolean; onChanged: (message?: string) => void }) {
+  const { notifyChange } = useCatalogProvider();
+  const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
+  const load = useProductDetail(scope, productId);
+  if (load.status !== "success") return <CatalogStatePanel load={load} />;
+  const product = load.data;
+  const published = product.status === "published" && product.channels.includes("pos");
+  const posSelected = product.desiredChannels?.includes("pos") ?? true;
+  return <div className="price-product-detail">
+    <section className="card publication-product-summary"><div className="channel-row-product"><span className="channel-product-image"><ProductImage image={product.image} productId={product.id} firmId={ctx.firmId} branchId={ctx.branchApiId} actor={ctx.isMulti ? "manager-multi" : "manager-single"} name={product.name} /></span><div><h2>{product.name}</h2><small>{product.category.name} · {product.sku}</small></div></div>
+      <div className="publication-summary-status"><StatusPill tone={published ? "green" : "neutral"}>{published ? "POS yayın kaydı var" : "Henüz yayınlanmadı"}</StatusPill><StatusPill tone={product.isActive ? "green" : "neutral"}>{product.isActive ? "Aktif ürün" : "Pasif ürün"}</StatusPill><strong>{formatCatalogMoney(product.price)}</strong></div>
+      {!posSelected && <p role="status">POS kanal tercihi kapalı. Ürünü satışta göstermek için yukarıdaki ürün satırından POS’u açın.</p>}
+    </section>
+    <PricePublicationPanel scope={scope} product={product} canSetPrice={canSetPrice} canPublish={canPublish} onChanged={message => { onChanged(message); notifyChange(); }} />
+  </div>;
+}
+
+export function ProductImagesPage({ ctx, canWriteDraft, canPublish }: { ctx: ViewContext; canWriteDraft: boolean; canPublish: boolean }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const scope = { firmId: ctx.firmId, branchId: ctx.branchApiId };
+  const load = useProductList(scope, query, undefined, page);
+  useEffect(() => { setPage(1); }, [ctx.firmId, ctx.branchApiId]);
+  return <>
+    <PageHeading eyebrow="ÜRÜNLER VE MENÜ" title="Ürün Görselleri" description="Ürün görsellerini bir arada inceleyin ve güncelleyin." />
+    {!ctx.branchApiId ? <div className="notice">Görselleri yönetmek için bir şube seçin.</div> : <>
+      <label className="category-search"><Search size={17} /><input aria-label="Ürün ara" placeholder="Ürün veya stok kodu ara" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label>
+      {load.status !== "success" ? <CatalogStatePanel load={load} /> : <>
+        {load.data.items.length === 0 ? <div className="notice">Ürün bulunamadı.</div> : <div className="gallery-products">{load.data.items.map(product => <GalleryProduct key={`${ctx.firmId}:${ctx.branchApiId}:${product.id}`} product={product} ctx={ctx} canWriteDraft={canWriteDraft} canPublish={canPublish} />)}</div>}
+        <div className="catalog-pagination"><button className="soft-button" disabled={page <= 1} onClick={() => setPage(page - 1)}>Önceki</button><span>Sayfa {page} / {Math.max(1, load.data.pageInfo.totalPages)}</span><button className="soft-button" disabled={page >= load.data.pageInfo.totalPages} onClick={() => setPage(page + 1)}>Sonraki</button></div>
+      </>}
+    </>}
   </>;
 }
 
@@ -541,13 +870,20 @@ export function ProductDetail({
   const [activationBusy, setActivationBusy] = useState(false);
   const [activationError, setActivationError] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState("");
   const imageRequest = useRef<{ file: File; version: number; id: string } | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const [activationRequestId, setActivationRequestId] = useState(() => crypto.randomUUID());
   const [recipeState, setRecipeState] = useState<{ status: "loading" } | { status: "loaded"; recipe: InventoryRecipeDetail | null } | { status: "error"; message: string }>({ status: "loading" });
-  useEffect(() => { setEditing(false); setSaveNotice(""); setActivationRequestId(crypto.randomUUID()); setImageFile(null); setImageError(""); imageRequest.current = null; if (imageInput.current) imageInput.current.value = ""; }, [ctx.firmId, ctx.branchApiId, productId]);
+  useEffect(() => { setEditing(false); setSaveNotice(""); setActivationRequestId(crypto.randomUUID()); setImageFile(null); setImagePreviewUrl(null); setImageError(""); imageRequest.current = null; if (imageInput.current) imageInput.current.value = ""; }, [ctx.firmId, ctx.branchApiId, productId]);
+  useEffect(() => {
+    if (!imageFile) { setImagePreviewUrl(null); return; }
+    const url = URL.createObjectURL(imageFile);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
   useEffect(() => {
     if (inventorySource !== "http" || !ctx.branchApiId) { setRecipeState({ status: "loaded", recipe: null }); return; }
     let cancelled = false;
@@ -593,26 +929,31 @@ export function ProductDetail({
         title={product.name}
         description={`Stok kodu: ${product.sku} · ${product.category.name}`}
         action={source === "http" ? <div className="catalog-product-actions">
-          <StatusPill tone={product.isActive ? "green" : "red"}>{product.isActive ? "Ürün aktif" : "Ürün pasif"}</StatusPill>
-          <button className="primary-button" disabled={!canWriteDraft || (product.status === "published" && (!canPublish || product.branchIds.length !== 1))}
-            title={product.status === "published" && product.branchIds.length !== 1 ? "Birden fazla şubedeki ürün bu ekrandan düzenlenemez." : undefined}
-            onClick={() => { setSaveNotice(""); setEditing(true); }}>Ürünü düzenle</button>
-          {product.status === "published" && <StatusPill tone={product.channels.includes("pos") ? "green" : "neutral"}>{product.channels.includes("pos") ? "POS kanalında yayın kaydı var" : "POS'ta yayınlanmadı"}</StatusPill>}
-          <button className="soft-button" disabled={!canWriteDraft || activationBusy} onClick={() => void (async () => {
-            const nextActive = !product.isActive;
-            if (!window.confirm(nextActive
-              ? `“${product.name}” ürününü yeniden etkinleştirelim mi? Yeni işlemlerde fiyat ve POS yayın kuralları yine uygulanacak.`
-              : `“${product.name}” pasife alınsın mı? Yeni sipariş ve yayınlarda kullanılamaz; açık adisyonlar ve geçmiş kayıtlar korunur.`)) return;
-            setActivationBusy(true); setActivationError(""); setSaveNotice("");
-            try {
-              await provider.setProductActive({ scope, productId: product.id, requestId: activationRequestId,
-                expectedVersion: product.version, isActive: nextActive });
-              setActivationRequestId(crypto.randomUUID());
-              notifyChange();
-              setSaveNotice(nextActive ? "Ürün etkinleştirildi; kayıt veritabanında doğrulandı." : "Ürün pasife alındı. Açık adisyonlar ve geçmiş kayıtlar korunuyor.");
-            } catch (reason) { setActivationError(reason instanceof Error ? reason.message : "Ürün durumu değiştirilemedi."); }
-            finally { setActivationBusy(false); }
-          })()}>{activationBusy ? "Güncelleniyor…" : product.isActive ? "Ürünü pasife al" : "Ürünü etkinleştir"}</button>
+          <div className="catalog-product-status-group">
+            <StatusPill tone={product.isActive ? "green" : "red"}>{product.isActive ? "Ürün aktif" : "Ürün pasif"}</StatusPill>
+            {product.status === "published" && <StatusPill tone={product.channels.includes("pos") ? "green" : "neutral"}>{product.channels.includes("pos") ? "POS'ta yayında" : "POS'ta yayınlanmadı"}</StatusPill>}
+          </div>
+          <span className="catalog-product-actions-divider" aria-hidden="true" />
+          <div className="catalog-product-btn-group">
+            <button className="primary-button" disabled={!canWriteDraft || (product.status === "published" && (!canPublish || product.branchIds.length !== 1))}
+              title={product.status === "published" && product.branchIds.length !== 1 ? "Birden fazla şubedeki ürün bu ekrandan düzenlenemez." : undefined}
+              onClick={() => { setSaveNotice(""); setEditing(true); }}><Pencil size={15} />Ürünü düzenle</button>
+            <button className="soft-button" disabled={!canWriteDraft || activationBusy} onClick={() => void (async () => {
+              const nextActive = !product.isActive;
+              if (!window.confirm(nextActive
+                ? `“${product.name}” ürününü yeniden etkinleştirelim mi? Yeni işlemlerde fiyat ve POS yayın kuralları yine uygulanacak.`
+                : `“${product.name}” pasife alınsın mı? Yeni sipariş ve yayınlarda kullanılamaz; açık adisyonlar ve geçmiş kayıtlar korunur.`)) return;
+              setActivationBusy(true); setActivationError(""); setSaveNotice("");
+              try {
+                await provider.setProductActive({ scope, productId: product.id, requestId: activationRequestId,
+                  expectedVersion: product.version, isActive: nextActive });
+                setActivationRequestId(crypto.randomUUID());
+                notifyChange();
+                setSaveNotice(nextActive ? "Ürün etkinleştirildi; kayıt veritabanında doğrulandı." : "Ürün pasife alındı. Açık adisyonlar ve geçmiş kayıtlar korunuyor.");
+              } catch (reason) { setActivationError(reason instanceof Error ? reason.message : "Ürün durumu değiştirilemedi."); }
+              finally { setActivationBusy(false); }
+            })()}>{activationBusy ? "Güncelleniyor…" : product.isActive ? "Ürünü pasife al" : "Ürünü etkinleştir"}</button>
+          </div>
         </div> : <StatusPill tone="purple">Önizleme</StatusPill>}
       />
       {source === "http" && product.status === "draft" && !canWriteDraft && <div className="notice" role="status">
@@ -642,20 +983,140 @@ export function ProductDetail({
                 <p>{product.description || "Açıklama eklenmemiş."}</p>
               </div>
             </div>
-            {source === "http" && ctx.branchApiId && <section className="product-image-upload" aria-label="Ürün görseli"><strong>Ürün görseli</strong><p>Bilgisayarınızdan JPEG, PNG veya WebP seçin (en fazla 2 MB). Görsel, ürün ve menü ekranlarında gösterilir.</p><label>Görsel dosyası<input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp" disabled={imageBusy || !canWriteDraft || (product.status === "published" && !canPublish) || product.branchIds.length !== 1} onChange={(event) => { setImageFile(event.target.files?.[0] ?? null); imageRequest.current = null; setImageError(""); }} /></label><button type="button" className="soft-button" disabled={!imageFile || imageBusy || !canWriteDraft || (product.status === "published" && !canPublish) || product.branchIds.length !== 1} onClick={() => void (async () => {
-              if (!imageFile || !ctx.branchApiId) return;
-              if (imageFile.size > 2 * 1024 * 1024) { setImageError("Görsel en fazla 2 MB olabilir."); return; }
-              if (!imageRequest.current || imageRequest.current.file !== imageFile || imageRequest.current.version !== product.version) imageRequest.current = { file: imageFile, version: product.version, id: crypto.randomUUID() };
-              const { id, version } = imageRequest.current;
-              const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/images?requestId=${id}&expectedVersion=${version}`;
-              setImageBusy(true); setImageError(""); setSaveNotice("");
-              try {
-                const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "X-Demo-Actor": ctx.isMulti ? "manager-multi" : "manager-single", "Content-Type": imageFile.type || "application/octet-stream" }, body: imageFile });
-                if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; throw new Error(problem.detail ?? "Görsel kaydedilemedi."); }
-                imageRequest.current = null; setImageFile(null); if (imageInput.current) imageInput.current.value = ""; notifyChange(); setSaveNotice("Ürün görseli kaydedildi.");
-              } catch (reason) { setImageError(reason instanceof Error ? reason.message : "Görsel kaydedilemedi."); }
-              finally { setImageBusy(false); }
-            })()}>{imageBusy ? "Yükleniyor…" : "Görseli kaydet"}</button>{imageError && <p className="notice" role="alert">{imageError}</p>}</section>}
+            {source === "http" && ctx.branchApiId && (
+              <section className="product-image-upload card" aria-label="Ürün görseli">
+                <div className="product-image-upload-header">
+                  <div>
+                    <strong>Ürün görseli</strong>
+                    <p>JPEG, PNG veya WebP seçin (en fazla 2 MB). Görsel, ürün ve menü ekranlarında gösterilir.</p>
+                  </div>
+                  {imageFile && (
+                    <span className="product-image-selected-badge">
+                      <Check size={14} /> Dosya seçildi
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  className={`product-image-dropzone ${imageFile ? "has-file" : ""}`}
+                  onClick={() => imageInput.current?.click()}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => (e.key === "Enter" || e.key === " ") && imageInput.current?.click()}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const dropped = e.dataTransfer.files?.[0];
+                    if (dropped) {
+                      if (dropped.size > 2 * 1024 * 1024) {
+                        setImageError("Görsel en fazla 2 MB olabilir.");
+                      } else {
+                        setImageFile(dropped);
+                        imageRequest.current = null;
+                        setImageError("");
+                      }
+                    }
+                  }}
+                >
+                  <input
+                    id="product-image-file-input"
+                    ref={imageInput}
+                    type="file"
+                    className="sr-only"
+                    accept="image/jpeg,image/png,image/webp"
+                    aria-label="Ürün görseli seçin"
+                    disabled={imageBusy || !canWriteDraft || (product.status === "published" && !canPublish) || product.branchIds.length !== 1}
+                    onChange={event => {
+                      const selected = event.target.files?.[0];
+                      if (selected) {
+                        if (selected.size > 2 * 1024 * 1024) {
+                          setImageError("Görsel en fazla 2 MB olabilir.");
+                        } else {
+                          setImageFile(selected);
+                          imageRequest.current = null;
+                          setImageError("");
+                        }
+                      }
+                    }}
+                  />
+
+                  {imagePreviewUrl ? (
+                    <div className="product-image-preview-wrap">
+                      <img src={imagePreviewUrl} alt="Seçilen görsel" className="product-image-preview-thumb" />
+                      <div className="product-image-file-info">
+                        <strong>{imageFile?.name}</strong>
+                        <small>{(imageFile!.size / 1024).toFixed(0)} KB · Değiştirmek için tıklayın</small>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="product-image-dropzone-prompt">
+                      <div className="product-image-upload-icon-wrap">
+                        <UploadCloud size={24} />
+                      </div>
+                      <div className="product-image-dropzone-text">
+                        <span>Görsel seçmek için tıklayın veya dosyayı sürükleyin</span>
+                        <small>Maksimum 2 MB · Önerilen oran 1:1 kare</small>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="product-image-upload-actions">
+                  {imageFile && (
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={imageBusy}
+                      onClick={e => {
+                        e.stopPropagation();
+                        setImageFile(null);
+                        imageRequest.current = null;
+                        if (imageInput.current) imageInput.current.value = "";
+                      }}
+                    >
+                      <X size={15} /> Seçimi Kaldır
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="primary-button product-image-save-btn"
+                    disabled={!imageFile || imageBusy || !canWriteDraft || (product.status === "published" && !canPublish) || product.branchIds.length !== 1}
+                    onClick={() => void (async () => {
+                      if (!imageFile || !ctx.branchApiId) return;
+                      if (imageFile.size > 2 * 1024 * 1024) { setImageError("Görsel en fazla 2 MB olabilir."); return; }
+                      if (!imageRequest.current || imageRequest.current.file !== imageFile || imageRequest.current.version !== product.version)
+                        imageRequest.current = { file: imageFile, version: product.version, id: crypto.randomUUID() };
+                      const { id, version } = imageRequest.current;
+                      const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/images?requestId=${id}&expectedVersion=${version}`;
+                      const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : (ctx.isMulti ? "manager-multi" : "manager-single");
+                      setImageBusy(true); setImageError(""); setSaveNotice("");
+                      try {
+                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
+                          method: "PUT",
+                          headers: { "X-Demo-Actor": actor, "Content-Type": imageFile.type || "application/octet-stream" },
+                          body: imageFile,
+                        });
+                        if (!response.ok) {
+                          const problem = await response.json().catch(() => ({})) as { detail?: string };
+                          throw new Error(problem.detail ?? "Görsel kaydedilemedi.");
+                        }
+                        imageRequest.current = null; setImageFile(null); if (imageInput.current) imageInput.current.value = "";
+                        notifyChange(); setSaveNotice("Ürün görseli kaydedildi.");
+                      } catch (reason) {
+                        setImageError(reason instanceof Error ? reason.message : "Görsel kaydedilemedi.");
+                      } finally {
+                        setImageBusy(false);
+                      }
+                    })()}
+                  >
+                    <Check size={16} />
+                    {imageBusy ? "Yükleniyor…" : "Görseli kaydet"}
+                  </button>
+                </div>
+
+                {imageError && <p className="notice" role="alert">{imageError}</p>}
+              </section>
+            )}
             <div className="info-grid">
               <div>
                 <span>Kategori</span>
@@ -678,16 +1139,12 @@ export function ProductDetail({
               </div>
             </div>
           </section>
-          <section className="card detail-card">
+          <section className="card detail-card" aria-label="Satış kanalları">
             <span className="card-kicker">GÖRÜNÜRLÜK</span>
             <h2>Satış kanalları</h2>
-            <div className="detail-row">
-              <span>Satış kanalları</span>
-              <div className="channel-list">
-                {product.channels.map((channel) => (
-                  <span key={channel}>{channelLabels[channel]}</span>
-                ))}
-              </div>
+            <p className="detail-card-desc">Ürünün hangi satış kanallarında yayına alınacağını ve aktif olacağını yönetin.</p>
+            <div className="detail-channel-selection">
+              <ChannelControls product={product} ctx={ctx} canWriteDraft={canWriteDraft} canPublish={canPublish} />
             </div>
           </section>
           <section className="card detail-card">
@@ -729,6 +1186,7 @@ export function ProductDetail({
             key={`price:${ctx.firmId}:${ctx.branchApiId}:${product.id}`}
             scope={scope} product={product} canSetPrice={canSetPrice} canPublish={canPublish}
             onChanged={(message) => { if (message) setSaveNotice(message); notifyChange(); }} />}
+          {source === "http" && ctx.branchApiId && <ScheduledPriceSection key={`scheduled:${ctx.firmId}:${ctx.branchApiId}:${product.id}`} ctx={ctx} product={product} canSetPrice={canSetPrice} canPublish={canPublish} />}
         </div>
         <aside className="detail-aside">
           <section className="card aside-card">

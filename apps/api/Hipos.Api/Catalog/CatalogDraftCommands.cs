@@ -65,6 +65,7 @@ public sealed class CatalogDraftCommands(
             $"SELECT * FROM catalog.products WHERE id = {productId} AND firm_id = {firmId} AND branch_ids @> ARRAY[{branchId}]::text[] FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
         if (product is null) return CatalogDraftResult.Rejected("PRODUCT_NOT_FOUND", 404, "Ürün bu şubede bulunamadı.");
+        if (!category.IsActive && product.CategoryId != category.Id) return CatalogDraftResult.Rejected("CATEGORY_INACTIVE", 409, "Pasif kategoriye yeni ürün atanamaz.");
         if (await ReplayAsync() is { } lockedReplay) return lockedReplay;
         if (product.Status != "published") return CatalogDraftResult.Rejected("PRODUCT_NOT_PUBLISHED", 409, "Ürün henüz yayımlanmadı.");
         if (product.BranchIds.Length != 1) return CatalogDraftResult.Rejected("MULTI_BRANCH_PRODUCT", 409, "Birden fazla şubedeki ürün bu ekrandan düzenlenemez.");
@@ -156,6 +157,7 @@ public sealed class CatalogDraftCommands(
         if (await ExistingAsync() is { } lockedReplay) return lockedReplay;
         var category = await LockCategoryAsync(firmId, branchId, values.CategoryId, cancellationToken);
         if (category is null) return CatalogDraftResult.Rejected("CATEGORY_NOT_FOUND", 409, "Kategori bu şubede bulunamadı.");
+        if (!category.IsActive) return CatalogDraftResult.Rejected("CATEGORY_INACTIVE", 409, "Pasif kategoriye yeni ürün atanamaz.");
         if (category.Name != values.CategoryName) return CatalogDraftResult.Rejected("CATEGORY_NAME_MISMATCH", 409, "Kategori adı değişti; listeyi yenileyin.");
         var now = DateTimeOffset.UtcNow;
         db.Drafts.Add(new CatalogDraftRow { Id = command.DraftId, FirmId = firmId, BranchId = branchId,
@@ -207,6 +209,7 @@ public sealed class CatalogDraftCommands(
         var category = await LockCategoryAsync(firmId, branchId, values.CategoryId, cancellationToken);
         if (category is null)
             return CatalogDraftResult.Rejected("CATEGORY_NOT_FOUND", 409, "Kategori bulunamadı; listeyi yenileyin.");
+        if (!category.IsActive) return CatalogDraftResult.Rejected("CATEGORY_INACTIVE", 409, "Pasif kategoriye yeni ürün atanamaz.");
         if (category.Name != values.CategoryName)
             return CatalogDraftResult.Rejected("CATEGORY_NAME_MISMATCH", 409, "Kategori adı değişti; listeyi yenileyin.");
 
@@ -273,6 +276,7 @@ public sealed class CatalogDraftCommands(
             .SingleOrDefaultAsync(cancellationToken);
         if (draft is null)
             return CatalogDraftResult.Rejected("PRODUCT_NOT_FOUND", 404, "Taslak bu şubede bulunamadı.");
+        if (!category.IsActive && draft.CategoryId != category.Id) return CatalogDraftResult.Rejected("CATEGORY_INACTIVE", 409, "Pasif kategoriye yeni ürün atanamaz.");
         if (draft.Version != command.ExpectedVersion)
             return CatalogDraftResult.Rejected("VERSION_CONFLICT", 409, "Taslak başka bir işlemle değişti.");
         if (category.Name != values.CategoryName)

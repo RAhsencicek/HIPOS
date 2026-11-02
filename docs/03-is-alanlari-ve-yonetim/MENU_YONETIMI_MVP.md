@@ -1,4 +1,4 @@
-# Menü genel bakışı ve düzenleme
+﻿# Menü genel bakışı ve düzenleme
 
 Yönetici `/admin/catalog/menus` sayfasında menülerini, şubede POS'ta kullanılabilir menüleri ve bölüm/ürün sayılarını görür. Yeni menü oluşturur; mevcut menüde ad, açıklama, menüye özel başlıklar, ürünler ve sıralamayı düzenler. Önizleme güncel ürün adını ve şube fiyatını kullanır. Ürün kopyalanmaz, menüden çıkarma katalog ürününü silmez.
 
@@ -16,13 +16,21 @@ API kökü: `/api/v1/firms/{firmId}/branches/{branchId}/catalog/menus`.
 - GET kök: menüler ve tüm şube ürünleri/kategorilerinden oluşan düzenleyici sözlüğü; `source: postgres`.
 - POST kök: `{ requestId, expectedVersion: 0, name, description, sections: [{ sectionId, name, productIds }] }`; requestId yeni menü kimliğidir. sectionId/name menü kapsamındadır, katalog kategorisi değildir.
 - PUT `/{menuId}`: aynı gövde, pozitif expectedVersion. Sıralar dizideki konumdan türetilir.
-- POST `/{menuId}/activation`: `{ requestId, expectedVersion, isActive }`. `isActive: true`, menüyü HIPOS içinde ilgili şubenin POS'ta kullanılabilir menülerine ekler. Aynı şubedeki diğer menülerin aktifliği değişmez. POS, bu aktif menüleri okuyup seçim için sunar; bu işlem QR üretmez ve web sitesinde yayın yapmaz.
+- POST `/{menuId}/activation`: `{ requestId, expectedVersion, isActive }`. `isActive: true`, menüyü ilgili şubenin POS'ta kullanılabilir menülerine ekler. Aynı şubedeki diğer menülerin aktifliği değişmez. Tek QR bağlantısı ayrıca yapılandırılmışsa aynı şubedeki bütün aktif menüler QR'a açık ürünleriyle müşteri menüsünde gösterilir. Aktivasyon QR kodu üretmez.
 
 Her yazma `catalog.menus` capability satırını işlem içinde kilitler. Capability `catalog.products` bağımlılığına sahiptir. Kapanınca yeni kayıt, düzenleme ve aktiflik değişikliği durur; okuma ve geçmiş korunur. Migration modül düğmesiyle çalıştırılmaz.
 
 Eski sürüm `409 VERSION_CONFLICT`, aynı requestId/farklı içerik `409 REQUEST_ID_CONFLICT`. Aynı isteğin tekrarı ikinci kayıt/denetim üretmez. Firma/şube sınırı, özel başlık adı, tekrar ürün ve yayınlanmamış ürün backend'de doğrulanır. Herhangi bir etkin katalog kategorisindeki mevcut şube ürünü, ürün kartı oluşturmadan menüye özel başlık altında gösterilebilir. Aynı ürün bir menüde iki kez kullanılamaz; başka menülerde yeniden kullanılabilir. Aktif menü en az bir ürüne sahip olmalı; her bölümü dolu olmalı ve yalnız aktif, katalogda yayımlanmış, POS kanalında yayımlanmış ve geçerli fiyatlı ürünleri içermelidir. Pasif taslak menü boş tutulabilir.
 
-Şubede etkinleştirme menüyü ilgili şubede POS'tan seçilebilir yapar; aynı şubede birden fazla menü etkinleştirilebilir. POS, aktif menü listesini katalog API'sinden alır. Etkinleştirme öncesinde her bölümde ürün bulunmalı; menüdeki ürünlerin tamamı aktif, katalogda yayımlanmış, POS kanalında yayımlanmış ve geçerli fiyatlı olmalıdır. QR/web yayını ileriki faza kaydedilmiştir; zamanlanmış yayın ve harici POS senkronizasyonu da henüz yoktur. Mevcut ürün/POS yayın akışı ve adisyon fiyat anlık görüntüleri değişmez. Menüye özel fiyat ve paket/kombo ürün bu dilimde yoktur.
+Şubede etkinleştirme menüyü ilgili şubede POS'tan seçilebilir yapar; aynı şubede birden fazla menü etkinleştirilebilir. POS, aktif menü listesini katalog API'sinden alır. Etkinleştirme öncesinde her bölümde ürün bulunmalı; menüdeki ürünlerin tamamı aktif, katalogda yayımlanmış, POS kanalında yayımlanmış ve geçerli fiyatlı olmalıdır. Müşteri QR menüsünde aynı şubenin aktif menülerindeki, aktif ve yayınlanmış, QR tercihi açık ve geçerli fiyatlı ürünler gösterilir. Ayrı QR yayın düğmesi, zamanlanmış menü yayını ve harici POS senkronizasyonu yoktur. Mevcut ürün/POS yayın akışı ve adisyon fiyat anlık görüntüleri değişmez. Menüye özel fiyat ve paket/kombo ürün bu dilimde yoktur.
+
+## Müşteriye açık QR menüsü
+
+Müşteri adresi `/menu/{token}`; yalnızca okuma API'si `GET /api/v1/public/menus/{token}` ve listelenebilir ürünler için herkese açık görsel adresi kullanır. Yönetim veya demo aktör başlığı gerekmez. Tek bağlantı seçili şubedeki tüm aktif menüleri ve bunların QR'a uygun ürünlerini içerir. Yanıt ürün adı, açıklaması, alerjenleri, şube fiyatı ve uygun görselini içerir; yönetim kayıtlarını içermez. Bu akış sepet, sipariş, ödeme veya masa işlemi yapmaz.
+
+API ortamında `HIPOS_PUBLIC_MENU__TOKEN`, `HIPOS_PUBLIC_MENU__FIRM_ID`, `HIPOS_PUBLIC_MENU__BRANCH_ID`, `HIPOS_PUBLIC_MENU__RESTAURANT_NAME` ve `HIPOS_PUBLIC_MENU__BRANCH_NAME` ayarlanmalıdır. İsteğe bağlı `HIPOS_PUBLIC_MENU__LOGO_URL` HTTPS veya aynı alan adındaki `/` ile başlayan yol olabilir. Token yalnız harf, rakam, `-`, `_` içermeli ve URL güvenli biçimde oluşturulmalıdır; herkese açık bağlantıdır, kimlik doğrulama yerine geçmez. Ayarlar eksikse veya token eşleşmezse menü açılmaz. Arayüzdeki isteğe bağlı `?masa=12` yalnızca bağlantıdan gelen etiketi gösterir; masa kimliği doğrulamaz ve hiçbir işleme bağlanmaz. Başka alan adında sunulan API için mevcut CORS köken ayarları ayrıca yapılmalıdır.
+
+Logo adresi belirtilmemişse veya yüklenemezse mevcut HIPOS logosu gösterilir.
 
 ## Kabul
 

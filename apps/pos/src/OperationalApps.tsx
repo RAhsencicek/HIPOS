@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { createRequestId } from "./requestId";
@@ -13,11 +13,11 @@ type ApiProblem = { code?: string; detail?: string; message?: string };
 type ApiRequestError = Error & { status?: number; code?: string };
 type ProductOption = { groupName: string; optionName: string };
 type CartLine = { cartId: string; productId: string; quantity: number; note: string; options: SelectedOption[] };
-type Product = { id: string; name: string; sku?: string; category: { id: string; name: string }; image: string; status: string; isActive: boolean; channels: string[]; price: { amountMinor: number; currency: string } };
+type Product = { id: string; name: string; sku?: string; category: { id: string; name: string }; image: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; price: { amountMinor: number; currency: string } };
 type MenuSection = { sectionId: string; name: string; productIds: string[] };
 type RestaurantMenu = { id: string; name: string; isActive: boolean; sections: MenuSection[] };
 type MenuWorkspace = { items: RestaurantMenu[]; categories: Array<{ id: string; name: string; isActive: boolean }>;
-  products: Array<{ id: string; name: string; sku?: string; categoryId: string; status: string; isActive: boolean; channels: string[]; image: string; price: { amountMinor: number; currency: string } }> };
+  products: Array<{ id: string; name: string; sku?: string; categoryId: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; image: string; price: { amountMinor: number; currency: string } }> };
 type Waiter = { id: string; name: string; isActive: boolean };
 type TableGroup = { id: string; primaryTableId: string; tableIds: string[]; tableNames: string[]; guestCount: number; version: number; closedAt: string | null };
 type CheckAdjustment = { requestId?: string; action: "discount" | "comp" | "void"; valueType?: "percentage" | "fixed" | null; value?: number | null; orderLineId?: number | null; quantity: number; amountMinor: number; reason: string; actor?: string; approvalMode?: string; createdAt?: string };
@@ -202,7 +202,7 @@ export function CashierApp() {
   const cashDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => { const dialog = cashDialogRef.current; if (cashDialog && dialog && !dialog.open) dialog.showModal(); if (!cashDialog && dialog?.open) dialog.close(); }, [cashDialog]);
   const [checks, setChecks] = useState<Record<string, CashierCheck[]>>({});
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get("tableId") ?? "");
   const [selectedCheckId, setSelectedCheckId] = useState("");
   const [amountInput, setAmountInput] = useState("0");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "meal" | "cari" | "transfer" | null>(null);
@@ -279,7 +279,7 @@ export function CashierApp() {
         const activeCategories = menuResult.categories.filter(category => category.isActive);
         const categoryNames = new Map(activeCategories.map((c) => [c.id, c.name]));
         setCatalogCategories(activeCategories);
-        setCatalogProducts(menuResult.products.filter(p => p.status === "published" && p.isActive && p.channels.includes("pos") && p.price.amountMinor > 0 && categoryNames.has(p.categoryId)).map((p) => ({
+        setCatalogProducts(menuResult.products.filter(p => p.status === "published" && p.isActive && p.channels.includes("pos") && p.desiredChannels.includes("pos") && p.price.amountMinor > 0 && categoryNames.has(p.categoryId)).map((p) => ({
           ...p, category: { id: p.categoryId, name: categoryNames.get(p.categoryId) ?? "Kategorisiz" },
         })));
         setCatalogError("");
@@ -287,6 +287,7 @@ export function CashierApp() {
       .catch(cause => { if (live) { setCatalogProducts([]); setCatalogError(cause instanceof Error ? cause.message : "Ürünler yüklenemedi."); } });
     return () => { live = false; };
   }, [catalogRevision]);
+  useEffect(() => { const timer = window.setInterval(() => { if (document.visibilityState === "visible") setCatalogRevision(value => value + 1); }, 5000); return () => window.clearInterval(timer); }, []);
 
   const quickTotalMinor = quickCart.reduce((sum, item) => sum + item.quantity * (item.product.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)), 0);
   const quickCartCount = quickCart.reduce((sum, item) => sum + item.quantity, 0);
@@ -1101,18 +1102,13 @@ export function WaiterApp() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastOrderId, setLastOrderId] = useState("");
   const [retryOrderId, setRetryOrderId] = useState<string | null>(null);
-  const [tableAction, setTableAction] = useState<"transfer" | "merge" | "split" | "payment" | "discount" | "group" | "ungroup" | null>(null);
+  const [tableAction, setTableAction] = useState<"transfer" | "merge" | "split" | "discount" | "group" | "ungroup" | null>(null);
   const [groupMemberIds, setGroupMemberIds] = useState<string[]>([]);
   const [groupGuestCount, setGroupGuestCount] = useState(2);
   const [targetTableId, setTargetTableId] = useState("");
   const [mergeSourceIds, setMergeSourceIds] = useState<string[]>([]);
   const [openChecks, setOpenChecks] = useState<OpenCheck[]>([]);
   const [splitCheckId, setSplitCheckId] = useState("");
-  const [paymentCheckId, setPaymentCheckId] = useState("");
-  const [waiterCashOverview, setWaiterCashOverview] = useState<CashOverview | null>(null);
-  const [waiterPaymentAmount, setWaiterPaymentAmount] = useState("");
-  const [waiterPaymentMethod, setWaiterPaymentMethod] = useState<"cash" | "card">("cash");
-  const waiterPaymentRequest = useRef<{ key: string; ids: string[] } | null>(null);
   const [adjustmentCheckId, setAdjustmentCheckId] = useState("");
   const [splitQuantities, setSplitQuantities] = useState<Record<number, number>>({});
   const [operationError, setOperationError] = useState("");
@@ -1173,7 +1169,7 @@ export function WaiterApp() {
         request<{ items: Table[] }>(`${servicePath}/tables`, "pos-single"),
         request<{ items: Waiter[] }>(`${servicePath}/waiters`, "pos-single"),
         request<MenuWorkspace>(`/api/v1/firms/${firmId}/branches/${branchId}/catalog/menus`, "pos-single"),
-        tableId && (tableAction === "split" || tableAction === "discount" || tableAction === "payment")
+        tableId && (tableAction === "split" || tableAction === "discount")
           ? request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(tableId)}`, "pos-single")
           : Promise.resolve(null),
         tableId ? request<{ items: Order[] }>(ordersPath, "manager-single") : Promise.resolve(null),
@@ -1279,17 +1275,11 @@ export function WaiterApp() {
   }), [products, cart]);
   const normalizedSearch = search.trim().toLocaleLowerCase("tr-TR");
   const catalogGroups = normalizedSearch
-    ? [{ sectionId: "search-results", name: "Arama sonuçları", products: products.filter((product) => selectedMenuProductIds.has(product.id) && product.isActive && product.status === "published" && product.channels.includes("pos") && product.name.toLocaleLowerCase("tr-TR").includes(normalizedSearch)) }]
-    : menuSections.map((section) => ({ ...section, products: products.filter((product) => section.productIds.includes(product.id) && product.isActive && product.status === "published" && product.channels.includes("pos")) }));
+    ? [{ sectionId: "search-results", name: "Arama sonuçları", products: products.filter((product) => selectedMenuProductIds.has(product.id) && product.isActive && product.status === "published" && product.channels.includes("pos") && product.desiredChannels.includes("pos") && product.name.toLocaleLowerCase("tr-TR").includes(normalizedSearch)) }]
+    : menuSections.map((section) => ({ ...section, products: products.filter((product) => section.productIds.includes(product.id) && product.isActive && product.status === "published" && product.channels.includes("pos") && product.desiredChannels.includes("pos")) }));
   const total = cartRows.reduce((sum, item) => sum + (item.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)) * item.quantity, 0);
   const editingCartLine = cart.find((line) => line.cartId === editingCartId);
   const splitCheck = openChecks.find((check) => check.id === splitCheckId);
-  const paymentCheck = openChecks.find((check) => check.id === paymentCheckId);
-  const waiterPaymentMinor = (() => {
-    const [whole = "0", decimal = ""] = waiterPaymentAmount.replace(/\./g, ",").split(",");
-    return /^\d+$/.test(whole) && /^\d{0,2}$/.test(decimal) ? Number(whole) * 100 + Number(decimal.padEnd(2, "0")) : 0;
-  })();
-  const paymentRemainingMinor = paymentCheck?.remainingMinor ?? Math.max(0, paymentCheck?.totalMinor ?? 0);
   const adjustmentCheck = openChecks.find((check) => check.id === adjustmentCheckId);
   const checkAdjustmentTotals = (selectedTable?.assignment?.adjustments ?? []).reduce((totals, adjustment) => {
     totals[adjustment.action] += adjustment.amountMinor;
@@ -1386,124 +1376,6 @@ export function WaiterApp() {
     setRetryOrderId(null); closeCustomization();
   }
 
-  const [printingBill, setPrintingBill] = useState(false);
-  const [settlingTable, setSettlingTable] = useState<"NAKIT" | "KART" | null>(null);
-  const [testPrinting, setTestPrinting] = useState<string | null>(null);
-
-  async function printBillForTable() {
-    if (!selectedTable?.assignment || printingBill) return;
-    setPrintingBill(true); setError(""); setNotice("");
-    try {
-      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
-        `/api/v1/firms/${firmId}/branches/${branchId}/service/tables/${encodeURIComponent(selectedTable.id)}/print-bill`,
-        "pos-single", { openCashDrawer: false }
-      );
-      setNotice(`${selectedTable.name} için ara hesap fişi basıldı (${res.transportUsed}).`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Hesap fişi yazdırılamadı.");
-    } finally {
-      setPrintingBill(false);
-    }
-  }
-
-  async function settleTable(paymentMethod: "NAKIT" | "KART") {
-    if (!selectedTable?.assignment || settlingTable) return;
-    setSettlingTable(paymentMethod); setError(""); setNotice("");
-    try {
-      const res = await request<{ success: boolean; tableId: string; paymentMethod: string; transportUsed: string }>(
-        `/api/v1/firms/${firmId}/branches/${branchId}/service/tables/${encodeURIComponent(selectedTable.id)}/settle`,
-        "pos-single",
-        { paymentMethod }
-      );
-      setNotice(`✅ ${selectedTable.name} hesabı kapatıldı (${paymentMethod === "NAKIT" ? "Nakit" : "Kredi Kartı"}), kasa fişi basıldı (${res.transportUsed}) ve masa boşaltıldı!`);
-      // Masayı hemen yerel listede de boşa düşür
-      setTables((current) => current.map((table) => table.id === selectedTable.id ? {
-        ...table,
-        status: "idle",
-        assignment: undefined,
-        group: undefined,
-        reservedFor: null,
-        reservationGuestName: null
-      } : table));
-      setTableId("");
-      setCart([]);
-      setRetryOrderId(null);
-      setKitchenItems([]);
-      setRefreshTick((tick) => tick + 1);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Hesap kapatılamadı.");
-    } finally {
-      setSettlingTable(null);
-    }
-  }
-
-  const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
-  const [printerConfig, setPrinterConfig] = useState({
-    kitchenIp: "192.168.1.116",
-    kitchenPort: 9100,
-    kitchenType: "Network",
-    cashierType: "Usb"
-  });
-  const [printerSaving, setPrinterSaving] = useState(false);
-
-  async function openPrinterSettings() {
-    setPrinterSettingsOpen(true);
-    try {
-      const res = await request<{
-        kitchenPrinter: { ipAddress: string; port: number; type: string };
-        cashierPrinter: { type: string };
-      }>(`/api/v1/firms/${firmId}/branches/${branchId}/printing/config`, "pos-single");
-      if (res?.kitchenPrinter) {
-        setPrinterConfig({
-          kitchenIp: res.kitchenPrinter.ipAddress ?? "192.168.1.116",
-          kitchenPort: res.kitchenPrinter.port ?? 9100,
-          kitchenType: res.kitchenPrinter.type ?? "Network",
-          cashierType: res.cashierPrinter?.type ?? "Usb"
-        });
-      }
-    } catch {}
-  }
-
-  async function savePrinterConfig() {
-    setPrinterSaving(true); setError("");
-    try {
-      await request(
-        `/api/v1/firms/${firmId}/branches/${branchId}/printing/config`,
-        "pos-single",
-        {
-          kitchenIp: printerConfig.kitchenIp,
-          kitchenPort: Number(printerConfig.kitchenPort) || 9100,
-          kitchenType: printerConfig.kitchenType,
-          cashierType: printerConfig.cashierType,
-          kitchenFallbackToUsb: false,
-          cashierFallbackToUsb: true
-        }
-      );
-      setNotice("✅ Yazıcı ayarları başarıyla kaydedildi!");
-      setPrinterSettingsOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Yazıcı ayarları kaydedilemedi.");
-    } finally {
-      setPrinterSaving(false);
-    }
-  }
-
-  async function triggerTestPrint(target: "kitchen" | "cashier") {
-    if (testPrinting) return;
-    setTestPrinting(target); setError(""); setNotice("");
-    try {
-      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
-        `/api/v1/firms/${firmId}/branches/${branchId}/printing/test?target=${target}`,
-        "pos-single", {}
-      );
-      setNotice(`${target === "kitchen" ? "Mutfak" : "Kasa"} test fişi başarıyla gönderildi (${res.transportUsed}).`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Test fişi gönderilemedi.");
-    } finally {
-      setTestPrinting(null);
-    }
-  }
-
   async function sendOrder() {
     if (!selectedTable || !waiter || cartRows.length === 0 || saving) return;
     setSaving(true); setError(""); setNotice("");
@@ -1587,80 +1459,6 @@ export function WaiterApp() {
       else if (checks[0].payments.length > 0) setOperationError("Ödeme girişimi bulunan adisyon bölünemez.");
     } catch (cause) {
       setOperationError(cause instanceof Error ? cause.message : "Adisyon bilgileri alınamadı.");
-    } finally { setOperationSaving(false); }
-  }
-
-  async function openWaiterPaymentAction() {
-    if (!selectedTable?.assignment || tableActionsBlocked) return;
-    setOperationError(""); setTableActionNotice(""); setTableAction("payment"); setOperationSaving(true);
-    try {
-      const [result, cashResult] = await Promise.all([
-        request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(selectedTable.id)}`, "pos-single"),
-        request<CashOverview>(`/api/v1/firms/${firmId}/branches/${branchId}/cash/overview`, "pos-single"),
-      ]);
-      const checks = result.items.filter((check) => check.status === "open");
-      openChecksRef.current = checks;
-      setOpenChecks(checks);
-      setWaiterCashOverview(cashResult);
-      const first = checks[0];
-      setPaymentCheckId(first?.id ?? "");
-      setWaiterPaymentAmount(first ? `${Math.floor((first.remainingMinor ?? first.totalMinor) / 100)},${String((first.remainingMinor ?? first.totalMinor) % 100).padStart(2, "0")}` : "");
-      setWaiterPaymentMethod("cash");
-      waiterPaymentRequest.current = null;
-      if (!checks.length) setOperationError("Bu masada tahsil edilebilecek açık adisyon yok.");
-      else if (!cashResult.openShifts.length) setOperationError("Tahsilat için önce kasiyer ekranından veya yönetim panelinden vardiya açın.");
-      else if (cashResult.openShifts.length > 1) setOperationError("Birden fazla kasa vardiyası açık. Yanlış kasaya yazılmaması için önce kullanılacak vardiyayı belirleyin.");
-    } catch (cause) {
-      setOperationError(cause instanceof Error ? cause.message : "Açık adisyonlar alınamadı.");
-    } finally { setOperationSaving(false); }
-  }
-
-  async function submitWaiterPayment() {
-    const check = openChecks.find((item) => item.id === paymentCheckId);
-    if (!check || operationSaving || waiterPaymentMinor <= 0) return;
-    const remaining = check.remainingMinor ?? check.totalMinor;
-    if (waiterPaymentMinor > remaining) { setOperationError(`Tutar kalan bakiyeyi aşamaz (${money(remaining)}).`); return; }
-    if (check.paymentStatus === "pending" || check.paymentStatus === "unknown" || check.payments.some((payment) => payment.status === "pending" || payment.status === "unknown")) {
-      setOperationError("Bu adisyonda sonucu bekleyen bir ödeme var. Yeni tahsilat başlatmadan önce kasadan ödeme sonucunu kontrol edin."); return;
-    }
-    let left = waiterPaymentMinor;
-    const parts: Array<{ orderId: string; version: number; remainingMinor: number; amountMinor: number }> = [];
-    for (const order of check.orders) {
-      const orderRemaining = order.remainingMinor ?? 0;
-      const part = Math.min(left, orderRemaining);
-      if (part > 0) { parts.push({ orderId: order.id, version: order.version ?? 0, remainingMinor: orderRemaining, amountMinor: part }); left -= part; }
-      if (left === 0) break;
-    }
-    if (!parts.length || left > 0) { setOperationError("Tutar adisyon siparişlerine dağıtılamadı. Adisyonu yenileyip tekrar deneyin."); return; }
-    const key = JSON.stringify([check.id, waiterPaymentMethod, parts]);
-    if (waiterPaymentRequest.current?.key !== key) waiterPaymentRequest.current = { key, ids: parts.map(() => createRequestId()) };
-    setOperationSaving(true); setOperationError("");
-    try {
-      let latest = check;
-      for (const [index, part] of parts.entries()) {
-        const result = await request<{ attempt: unknown; check: OpenCheck }>(`${checksPath}/${encodeURIComponent(check.id)}/payment-attempts`, "pos-single", {
-          orderId: part.orderId, attemptId: waiterPaymentRequest.current.ids[index], amountMinor: part.amountMinor,
-          method: waiterPaymentMethod, simulatedOutcome: "succeeded", expectedOrderVersion: part.version, postToCash: true,
-        });
-        latest = result.check;
-      }
-      waiterPaymentRequest.current = null;
-      setTableAction(null);
-      const paid = Math.min(waiterPaymentMinor, remaining);
-      setTableActionNotice(latest.status === "closed" || (latest.remainingMinor ?? 0) === 0
-        ? `Adisyon tamamen tahsil edildi (${money(paid)}). İşlem simüle edildi ve kasa vardiyasına kaydedildi; gerçek banka/ÖKC tahsilatı yapılmadı.`
-        : `Kısmi tahsilat kaydedildi: ${money(paid)}. Kalan: ${money(latest.remainingMinor ?? 0)}. İşlem simüle edildi ve kasa vardiyasına kaydedildi; gerçek banka/ÖKC tahsilatı yapılmadı.`);
-      setRefreshTick((tick) => tick + 1);
-    } catch (cause) {
-      const failure = cause as ApiRequestError;
-      if (failure.status === 409) {
-        try {
-          const result = await request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(selectedTable?.id ?? "")}`, "pos-single");
-          const checks = result.items.filter((item) => item.status === "open");
-          openChecksRef.current = checks; setOpenChecks(checks);
-          setOperationError("Adisyon başka bir cihazda değişti. Güncel bakiye yüklendi; kontrol edip yeniden deneyin.");
-        } catch { setOperationError("Adisyon güncellendi ancak yenilenemedi. Masayı yenileyip ödeme durumunu kontrol edin."); }
-      } else setOperationError(cause instanceof Error ? cause.message : "Tahsilat kaydedilemedi. Ödeme geçmişini kontrol edip tekrar deneyin.");
     } finally { setOperationSaving(false); }
   }
 
@@ -1792,7 +1590,7 @@ export function WaiterApp() {
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions">{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
     </section>
@@ -1829,52 +1627,6 @@ export function WaiterApp() {
         <footer><button type="button" className="waiter-cancel-custom" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={tableActionsBlocked || !reservationGuestName.trim() || !reservationDate}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaydet"}</button></footer>
       </form>}
     </dialog>
-    <dialog open={printerSettingsOpen} className="waiter-reservation-dialog" aria-labelledby="printer-settings-title" onClose={() => setPrinterSettingsOpen(false)}>
-      {printerSettingsOpen && <form className="waiter-custom-modal" onSubmit={(e) => { e.preventDefault(); void savePrinterConfig(); }}>
-        <header>
-          <div>
-            <span className="ops-eyebrow">DONANIM & YAZICI MİMARİSİ</span>
-            <h2 id="printer-settings-title">Yazıcı Yapılandırması</h2>
-          </div>
-          <button type="button" className="waiter-modal-close" onClick={() => setPrinterSettingsOpen(false)} aria-label="Kapat">×</button>
-        </header>
-
-        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🍳 Mutfak Yazıcısı (Ağ / Windows PC)</h3>
-          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Windows bilgisayara bağlı termal yazıcı veya doğrudan ağ yazıcısı.</p>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
-            <label className="waiter-note-field">IP Adresi
-              <input value={printerConfig.kitchenIp} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenIp: e.target.value }))} placeholder="192.168.1.116" />
-            </label>
-            <label className="waiter-note-field">Port
-              <input type="number" value={printerConfig.kitchenPort} onChange={(e) => setPrinterConfig(c => ({ ...c, kitchenPort: Number(e.target.value) || 9100 }))} placeholder="9100" />
-            </label>
-          </div>
-          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#e0f2fe", borderColor: "#bae6fd" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>
-            {testPrinting === "kitchen" ? "Deneniyor…" : "🧪 Mutfak Test Fişi Gönder"}
-          </button>
-        </section>
-
-        <section style={{ margin: "16px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <h3 style={{ fontSize: "14px", margin: "0 0 8px", color: "#1e293b" }}>🧾 Kasa / Adisyon Yazıcısı (Mac)</h3>
-          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Kasa bilgisayarına (Mac) USB veya ağ ile bağlı termal fiş yazıcısı.</p>
-          <label className="waiter-select">Bağlantı Türü
-            <select value={printerConfig.cashierType} onChange={(e) => setPrinterConfig(c => ({ ...c, cashierType: e.target.value }))}>
-              <option value="Usb">Yerel USB (Gprinter / KodPOS)</option>
-              <option value="Network">Ağ / TCP Soket (Port 9100)</option>
-            </select>
-          </label>
-          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>
-            {testPrinting === "cashier" ? "Deneniyor…" : "🧪 Kasa Test Fişi Gönder"}
-          </button>
-        </section>
-
-        <footer>
-          <button type="button" className="waiter-cancel-custom" onClick={() => setPrinterSettingsOpen(false)}>Kapat</button>
-          <button type="submit" className="ops-primary" disabled={printerSaving}>{printerSaving ? "Kaydediliyor…" : "Ayarları Kaydet"}</button>
-        </footer>
-      </form>}
-    </dialog>
     {selectedTable && <section className="waiter-order-page" aria-live="polite">
       <div className="waiter-order-heading"><div><span className="ops-eyebrow">MASA DETAYI</span><h1>{selectedTable.group ? selectedTable.group.tableNames.join(" + ") : selectedTable.name}</h1>{selectedTable.group && <p className="waiter-group-info">{selectedTable.group.guestCount} kişi · Ana masa: {selectedTable.name} · Ortak adisyon</p>}</div><span className={`waiter-table-status ${getTableStatus(selectedTable) === "bill_requested" ? "bill-requested" : getTableStatus(selectedTable) === "reserved" ? "reserved" : selectedTable.assignment || selectedTable.group ? "occupied" : "empty"}`}>{getTableStatus(selectedTable) === "bill_requested" ? "Hesap istendi" : selectedTable.group ? "Masa grubu" : getTableStatus(selectedTable) === "reserved" ? "Rezerve" : selectedTable.assignment ? "Dolu" : "Boş"}</span></div>
       {getTableStatus(selectedTable) === "reserved" && !selectedTable.assignment && <section className="waiter-reservation-summary" aria-label="Rezervasyon bilgisi"><div><strong>{selectedTable.reservationGuestName ?? "Masa rezerve"}</strong><span>{selectedTable.reservedFor ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "full", timeStyle: "short" }).format(new Date(selectedTable.reservedFor)) : "Rezervasyon saati belirtilmemiş"}</span></div><div className="waiter-state-actions"><button className="waiter-back" disabled={tableActionsBlocked} onClick={openReservation}>Düzenle</button><button className="waiter-state-danger" disabled={tableActionsBlocked} onClick={() => void updateTableStatus("reservation/cancel")}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaldır"}</button></div></section>}
@@ -1883,9 +1635,6 @@ export function WaiterApp() {
         <div className="waiter-context-actions">
           {getTableStatus(selectedTable) === "idle" && !selectedTable.assignment && !selectedTable.group && <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={openReservation}>Rezerve et</button>}
           {selectedTable.assignment && <button className={`waiter-status-action ${getTableStatus(selectedTable) === "bill_requested" ? "active" : ""}`} disabled={tableStatusSaving} onClick={() => void updateTableStatus(getTableStatus(selectedTable) === "bill_requested" ? "cancel-bill-request" : "request-bill")}>{tableStatusSaving ? "Kaydediliyor…" : getTableStatus(selectedTable) === "bill_requested" ? "Hesap isteğini kaldır" : "Hesap istendi"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>{printingBill ? "Basılıyor…" : "🧾 Ara Hesap Fişi"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>{settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit İle Kapat"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>{settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart İle Kapat"}</button>}
           <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={() => openTableAction(selectedTable.group ? "ungroup" : "group")}>{selectedTable.group ? "Grubu Ayır" : "Masa Grubu Oluştur"}</button>
         </div>
       </div>}
@@ -1915,7 +1664,7 @@ export function WaiterApp() {
           <button disabled={tableActionsBlocked || Boolean(selectedTable.group)} onClick={() => openTableAction("transfer")}><span aria-hidden="true">⇄</span><strong>Masa Taşı</strong><small>Adisyonu boş masaya aktar</small></button>
           <button disabled={tableActionsBlocked || Boolean(selectedTable.group)} onClick={() => openTableAction("merge")}><span aria-hidden="true">⊕</span><strong>Masa Birleştir</strong><small>Başka masanın hesabını ekle</small></button>
           <button disabled={tableActionsBlocked} onClick={() => void openSplitAction()}><span aria-hidden="true">◫</span><strong>Adisyon Böl</strong><small>Ürünleri ayrı hesaba ayır</small></button>
-          <button disabled={tableActionsBlocked} onClick={() => void openWaiterPaymentAction()}><span aria-hidden="true">₺</span><strong>Ödeme Al</strong><small>Tutar girerek kısmi tahsilat yap</small></button>
+          <button disabled={tableActionsBlocked} onClick={() => { window.location.href = `/cashier?tableId=${encodeURIComponent(selectedTable.id)}`; }}><span aria-hidden="true">₺</span><strong>Ödeme Al</strong><small>Kasa ekranını aç</small></button>
           <button disabled={tableActionsBlocked} onClick={() => void openAdjustmentAction()}><span aria-hidden="true">％</span><strong>İndirim / İkram</strong><small>Gerekçeli işlem kaydı</small></button>
         </div>
         {cartRows.length > 0 && <p className="waiter-action-hint">Gönderilmemiş sepet varken masa işlemleri kapalıdır. Önce siparişi mutfağa gönderin veya sepeti boşaltın.</p>}
@@ -1927,17 +1676,6 @@ export function WaiterApp() {
         {selectedTable.assignment && <div><span>Mevcut adisyon</span><strong>{money(selectedTable.assignment.totalMinor)}</strong></div>}
         <div className={`new-order${selectedTable.assignment ? "" : " waiter-order-total-only"}`}><span>{selectedTable.assignment ? "Yeni sipariş" : "Sipariş toplamı"}</span><strong>{money(total)}</strong></div>
       </section>}
-      {selectedTable.assignment && <div className="waiter-checkout-bar" style={{ display: "flex", gap: "10px", marginTop: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
-        <button type="button" className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>
-          {printingBill ? "Baskı alınıyor…" : "🧾 Ara Hesap Fişi Bas"}
-        </button>
-        <button type="button" className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>
-          {settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit Ödeme & Masayı Kapat"}
-        </button>
-        <button type="button" className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>
-          {settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart Ödeme & Masayı Kapat"}
-        </button>
-      </div>}
       {getTableStatus(selectedTable) !== "reserved" && !waiter && <p className="ops-message">Sipariş eklemek için önce garson seçin.</p>}
       {assignedToOtherWaiter && <p className="ops-message">Bu masa {selectedTable.assignment?.waiterName ?? "başka bir garsona"} tarafından yönetiliyor. Sipariş eklemek için o garsonu seçin.</p>}
       {!loading && menuSections.length === 0 && !error && <p className="ops-message">Bu şubede POS’ta kullanılabilir aktif menü bulunmuyor.</p>}
@@ -1980,11 +1718,11 @@ export function WaiterApp() {
         {error && <p className="ops-error" role="alert">{error}</p>}
         {notice && <p className="ops-success" role="status">{notice}{lastOrderId && <small> Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}
       </section></>}
-      {customizingProduct && <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCustomization(); }}><section className="waiter-custom-modal" role="dialog" aria-modal="true" aria-labelledby="customize-title"><header><div><span className="ops-eyebrow">ÜRÜNÜ DÜZENLE</span><h2 id="customize-title">{customizingProduct.name}</h2></div><button className="waiter-modal-close" onClick={closeCustomization} aria-label="Kapat">×</button></header>
+      {customizingProduct && <div className="waiter-modal-backdrop waiter-product-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCustomization(); }}><section className="waiter-custom-modal waiter-product-modal" role="dialog" aria-modal="true" aria-labelledby="customize-title"><header><div><span className="ops-eyebrow">ÜRÜNÜ DÜZENLE</span><h2 id="customize-title">{customizingProduct.name}</h2></div><button className="waiter-modal-close" onClick={closeCustomization} aria-label="Kapat">×</button></header>
         <ProductOptionPicker key={`${customizingProduct.id}:${editingCartId ?? "new"}`} firmId={firmId} branchId={branchId} actor="pos-single" productId={customizingProduct.id} basePriceMinor={customizingProduct.price.amountMinor} initial={editingCartLine?.options ?? []} onChange={setOptionSelection} />
         <label className="waiter-note-field">Ürün notu<textarea value={customNote} onChange={(event) => setCustomNote(event.target.value.slice(0, 500))} placeholder="Örn. sosu ayrı, az tuzlu…" maxLength={500} rows={3} /><small>{customNote.length}/500</small></label><p className="waiter-custom-hint">Seçenekler ve fiyatlar sipariş gönderilirken sunucuda doğrulanır.</p><footer><button className="waiter-cancel-custom" onClick={closeCustomization}>Vazgeç</button><button className="ops-primary" disabled={saving || !optionSelection?.valid} onClick={saveCustomizedProduct}>{editingCartId ? "Değişiklikleri kaydet" : "Sepete ekle"} · {money((optionSelection?.unitPriceMinor ?? customizingProduct.price.amountMinor) * (editingCartLine?.quantity ?? 1))}</button></footer></section></div>}
       {tableAction && <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !operationSaving) { setTableAction(null); setOperationError(""); } }}><section className="waiter-custom-modal waiter-action-modal" role="dialog" aria-modal="true" aria-labelledby="table-action-title">
-        <header><div><span className="ops-eyebrow">{selectedTable.name}</span><h2 id="table-action-title">{tableAction === "transfer" ? "Masa Taşı" : tableAction === "merge" ? "Masa Birleştir" : tableAction === "split" ? "Adisyon Böl" : tableAction === "payment" ? "Ödeme Al" : tableAction === "group" ? "Masa Grubu Oluştur" : tableAction === "ungroup" ? "Grubu Ayır" : "İndirim / İkram"}</h2></div><button className="waiter-modal-close" disabled={operationSaving} onClick={() => { setTableAction(null); setOperationError(""); }} aria-label="Kapat">×</button></header>
+        <header><div><span className="ops-eyebrow">{selectedTable.name}</span><h2 id="table-action-title">{tableAction === "transfer" ? "Masa Taşı" : tableAction === "merge" ? "Masa Birleştir" : tableAction === "split" ? "Adisyon Böl" : tableAction === "group" ? "Masa Grubu Oluştur" : tableAction === "ungroup" ? "Grubu Ayır" : "İndirim / İkram"}</h2></div><button className="waiter-modal-close" disabled={operationSaving} onClick={() => { setTableAction(null); setOperationError(""); }} aria-label="Kapat">×</button></header>
         {tableAction === "group" && <>
           <p className="waiter-action-description">Ana masa: <strong>{selectedTable.name}</strong>. Seçilen masalar birlikte kullanımda görünür. Herhangi birinden aynı sipariş ekranı açılır. Ek masaların boş olması gerekir.</p>
           <label className="waiter-note-field">Kişi sayısı<input className="waiter-discount-input" type="number" min="1" max="999" step="1" value={groupGuestCount} onChange={(event) => setGroupGuestCount(Number(event.target.value))} /></label>
@@ -2013,24 +1751,6 @@ export function WaiterApp() {
           {splitCheck && <><p className="waiter-action-description">Yeni adisyona aktarılacak miktarları girin. Kaynak adisyonda en az bir ürün kalmalıdır.</p><div className="waiter-split-lines">{splitLines.map((line) => <label key={line.id}><span><strong>{line.productName}</strong><small>Mevcut: {line.quantity} · {money(line.unitPriceMinor)} / adet</small></span><input aria-label={`${line.productName} bölünecek miktar`} type="number" min="0" max={line.quantity} value={splitQuantities[line.id] ?? 0} onChange={(event) => { const quantity = Math.max(0, Math.min(line.quantity, Number(event.target.value) || 0)); setSplitQuantities((current) => ({ ...current, [line.id]: quantity })); setOperationError(""); }} /></label>)}</div><div className="waiter-split-total"><span>Yeni adisyon tutarı</span><strong>{money(splitTotal)}</strong></div>{splitCheck.payments.length > 0 && <p className="ops-error">Ödeme girişimi olan adisyon bölünemez.</p>}</>}
           {openChecks.length === 0 && !operationSaving && <p className="ops-message">Bu masada bölünebilecek açık adisyon bulunamadı.</p>}
           <footer><button className="waiter-cancel-custom" disabled={operationSaving} onClick={() => setTableAction(null)}>Vazgeç</button><button className="ops-primary" disabled={!splitCheck || splitCheck.payments.length > 0 || operationSaving || splitTotal <= 0 || splitTotal >= (splitCheck?.totalMinor ?? 0)} onClick={() => void submitSplit()}>{operationSaving ? "Bölünüyor…" : "Adisyonu böl"}</button></footer>
-        </>}
-        {tableAction === "payment" && <>
-          {operationSaving && openChecks.length === 0 && <p className="ops-message">Açık adisyonlar yükleniyor…</p>}
-          {!operationSaving && openChecks.length > 1 && <label className="waiter-note-field">Tahsilat yapılacak adisyon<select className="waiter-action-select" value={paymentCheckId} onChange={(event) => { const check = openChecks.find((item) => item.id === event.target.value); setPaymentCheckId(event.target.value); setWaiterPaymentAmount(check ? `${Math.floor((check.remainingMinor ?? check.totalMinor) / 100)},${String((check.remainingMinor ?? check.totalMinor) % 100).padStart(2, "0")}` : ""); setOperationError(""); waiterPaymentRequest.current = null; }}><option value="">Adisyon seçin</option>{openChecks.map((check, index) => <option key={check.id} value={check.id}>Adisyon {index + 1} · Kalan {money(check.remainingMinor ?? check.totalMinor)}</option>)}</select></label>}
-          {paymentCheck && <>
-            {waiterCashOverview?.openShifts.length === 1 && (() => {
-              const openShift = waiterCashOverview.openShifts[0];
-              const register = waiterCashOverview.registers.find((item) => item.id === openShift.shift.registerId);
-              return <div className="waiter-adjustment-balance"><span>Tahsilatın kaydedileceği kasa</span><strong>{register?.name ?? "Açık kasa"}</strong><small>{register?.code ?? ""} · Beklenen nakit {money(openShift.shift.expectedCashMinor ?? openShift.shift.openingCashMinor)}</small></div>;
-            })()}
-            <div className="waiter-adjustment-balance"><span>Adisyon bakiyesi</span><strong>{money(paymentRemainingMinor)}</strong>{paymentCheck.paidMinor ? <small>Daha önce tahsil edilen: {money(paymentCheck.paidMinor)}</small> : null}</div>
-            <div className="waiter-discount-mode" aria-label="Ödeme yöntemi"><button type="button" className={waiterPaymentMethod === "cash" ? "active" : ""} aria-pressed={waiterPaymentMethod === "cash"} onClick={() => { setWaiterPaymentMethod("cash"); waiterPaymentRequest.current = null; }}>Nakit</button><button type="button" className={waiterPaymentMethod === "card" ? "active" : ""} aria-pressed={waiterPaymentMethod === "card"} onClick={() => { setWaiterPaymentMethod("card"); waiterPaymentRequest.current = null; }}>Kart</button></div>
-            <label className="waiter-note-field">Tahsil edilecek tutar (₺)<input className="waiter-discount-input" inputMode="decimal" type="text" value={waiterPaymentAmount} onChange={(event) => { setWaiterPaymentAmount(event.target.value.replace(/[^0-9,.]/g, "").replace(/\./g, ",").slice(0, 12)); setOperationError(""); waiterPaymentRequest.current = null; }} placeholder="Örn. 250,00" /></label>
-            <div className="waiter-split-total"><span>Bu tahsilat</span><strong>{money(waiterPaymentMinor)}</strong></div>
-            <p className="waiter-action-description">Tutar mevcut adisyon(lar)a sırayla dağıtılır. Kısmi tahsilatta adisyon açık kalır; bakiye sıfırlanınca kapanır. Başarılı tahsilat, açık kasa vardiyasına simüle hareket olarak kaydedilir. Gerçek banka/ÖKC tahsilatı yapılmaz.</p>
-          </>}
-          {!openChecks.length && !operationSaving && <p className="ops-message">Tahsil edilebilecek açık adisyon bulunamadı.</p>}
-          <footer><button className="waiter-cancel-custom" disabled={operationSaving} onClick={() => setTableAction(null)}>Vazgeç</button><button className="ops-primary" disabled={!paymentCheck || waiterCashOverview?.openShifts.length !== 1 || operationSaving || waiterPaymentMinor <= 0 || waiterPaymentMinor > paymentRemainingMinor || paymentCheck?.paymentStatus === "pending" || paymentCheck?.paymentStatus === "unknown"} onClick={() => void submitWaiterPayment()}>{operationSaving ? "Kaydediliyor…" : `${waiterPaymentMethod === "cash" ? "Nakit" : "Kart"} tahsilatını kaydet`}</button></footer>
         </>}
         {tableAction === "discount" && selectedTable.assignment && <>
           <p className="waiter-action-description">İşlem gerekçeyle kaydedilir. Geliştirme ortamında yönetici onayı olmadan uygulanır.</p>

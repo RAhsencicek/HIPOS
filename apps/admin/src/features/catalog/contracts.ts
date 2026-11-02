@@ -23,6 +23,7 @@ export type CatalogProduct = {
   status: ProductStatus;
   isActive: boolean;
   channels: SalesChannel[];
+  desiredChannels?: SalesChannel[];
   image: string;
   recipeLinked: boolean;
   price: Money;
@@ -67,6 +68,9 @@ export type CategoryListResponse = {
 export type CategoryMutationResult = { id: string; name: string; version: number; isActive: boolean; sortOrder: number };
 export type CreateCategoryRequest = { scope: CatalogScope; id: string; name: string };
 export type RenameCategoryRequest = { scope: CatalogScope; categoryId: string; name: string; expectedVersion: number };
+export type DeleteCategoryRequest = { scope: CatalogScope; categoryId: string; expectedVersion: number };
+export type CategoryActiveRequest = DeleteCategoryRequest & { isActive: boolean };
+export type MoveCategoryRequest = DeleteCategoryRequest & { neighborId: string; neighborVersion: number };
 
 export type ProductDetailRequest = {
   scope: CatalogScope;
@@ -103,6 +107,8 @@ export type PriceVersion = {
   currency: "TRY";
   createdAt: string;
 };
+export type ScheduledPrice = { id: string; firmId: string; branchId: string; productId: string; productName: string; amountMinor: number; effectiveAt: string; createdAt: string; status: "pending" | "processing" | "applied" | "failed" | "cancelled"; detail: string | null; finishedAt: string | null };
+export type SchedulePriceRequest = { scope: CatalogScope; requestId: string; productId: string; amountMinor: number; effectiveAt: string; expectedVersion: number };
 
 export type Publication = {
   id: string;
@@ -154,6 +160,9 @@ export interface CatalogProvider {
   listCategories(scope: CatalogScope): Promise<CategoryListResponse>;
   createCategory(request: CreateCategoryRequest): Promise<CategoryMutationResult>;
   renameCategory(request: RenameCategoryRequest): Promise<CategoryMutationResult>;
+  deleteCategory(request: DeleteCategoryRequest): Promise<void>;
+  setCategoryActive(request: CategoryActiveRequest): Promise<CategoryMutationResult>;
+  moveCategory(request: MoveCategoryRequest): Promise<void>;
   getProduct(request: ProductDetailRequest): Promise<CatalogProductDetail>;
   createDraft(request: CreateDraftRequest): Promise<CatalogProductDetail>;
   createPricedProduct(request: CreatePricedProductRequest): Promise<CatalogProductDetail>;
@@ -164,6 +173,9 @@ export interface CatalogProvider {
   publishDraft(request: PublishDraftRequest): Promise<PublicationResult>;
   setProductActive(request: SetProductActiveRequest): Promise<{ isActive: boolean; version: number }>;
   listPriceVersions(request: ProductDetailRequest): Promise<PriceVersion[]>;
+  listScheduledPrices(scope: CatalogScope): Promise<ScheduledPrice[]>;
+  schedulePrice(request: SchedulePriceRequest): Promise<ScheduledPrice>;
+  cancelScheduledPrice(scope: CatalogScope, id: string): Promise<unknown>;
   listPublications(request: ProductDetailRequest): Promise<Publication[]>;
   listOptionGroups(scope: CatalogScope): Promise<CatalogOptionGroup[]>;
   listProductOptionGroups(request: ProductDetailRequest): Promise<ProductOptionGroups>;

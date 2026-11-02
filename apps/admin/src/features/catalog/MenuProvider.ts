@@ -4,7 +4,7 @@ import type { CatalogScope, Money } from "./contracts";
 export type MenuSection = { sectionId: string; name: string; productIds: string[] };
 export type RestaurantMenu = { id: string; name: string; description: string; isActive: boolean;
   version: number; updatedAt: string; sections: MenuSection[] };
-export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; channels: string[]; image: string; price: Money };
+export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; channels: string[]; desiredChannels?: string[]; image: string; price: Money };
 export type MenuWorkspace = { source: "postgres" | "mock"; items: RestaurantMenu[];
   categories: { id: string; name: string; isActive: boolean }[]; products: MenuProduct[] };
 export type MenuSaveInput = { requestId: string; expectedVersion: number; name: string; description: string; sections: MenuSection[] };
@@ -37,6 +37,44 @@ export class HttpMenuProvider {
   activate(scope: CatalogScope, menu: RestaurantMenu, requestId: string) {
     return this.request<{ id: string }>(scope, `/${encodeURIComponent(menu.id)}/activation`, "POST",
       { requestId, expectedVersion: menu.version, isActive: !menu.isActive });
+  }
+  async ensureProductInActiveMenu(scope: CatalogScope, productId: string, categoryName: string): Promise<boolean> {
+    try {
+      const workspace = await this.load(scope);
+      const activeMenu = workspace.items.find(m => m.isActive) ?? workspace.items[0];
+      if (!activeMenu) return false;
+      const catTrimmed = categoryName.trim();
+      const existingSection = activeMenu.sections.find(
+        s => s.name.trim().toLocaleLowerCase("tr-TR") === catTrimmed.toLocaleLowerCase("tr-TR")
+      );
+      let updatedSections: MenuSection[];
+      if (existingSection) {
+        if (existingSection.productIds.includes(productId)) {
+          return true;
+        }
+        updatedSections = activeMenu.sections.map(s =>
+          s.sectionId === existingSection.sectionId
+            ? { ...s, productIds: [...s.productIds, productId] }
+            : s
+        );
+      } else {
+        updatedSections = [
+          ...activeMenu.sections,
+          { sectionId: `cat-${crypto.randomUUID()}`, name: catTrimmed, productIds: [productId] },
+        ];
+      }
+      await this.save(scope, activeMenu.id, {
+        requestId: crypto.randomUUID(),
+        expectedVersion: activeMenu.version,
+        name: activeMenu.name,
+        description: activeMenu.description,
+        sections: updatedSections,
+      });
+      return true;
+    } catch (err) {
+      console.warn("Menü senkronizasyonu başarısız:", err);
+      return false;
+    }
   }
 }
 

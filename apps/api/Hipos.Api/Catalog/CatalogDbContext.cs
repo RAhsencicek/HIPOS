@@ -15,6 +15,7 @@ public sealed class CatalogProductRow
     public string Status { get; set; } = "draft";
     public bool IsActive { get; set; } = true;
     public string[] Channels { get; set; } = [];
+    public string[] DesiredChannels { get; set; } = ["pos", "qr"];
     public string Image { get; set; } = "";
     public bool RecipeLinked { get; set; }
     public long BasePriceMinor { get; set; }
@@ -92,6 +93,22 @@ public sealed class CatalogPriceVersionRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class CatalogScheduledPriceRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid ProductId { get; set; }
+    public long AmountMinor { get; set; }
+    public DateTimeOffset EffectiveAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string Actor { get; set; } = "";
+    public string Status { get; set; } = "pending";
+    public int ExpectedVersion { get; set; }
+    public string? Detail { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+}
+
 public sealed class CatalogPublicationRow
 {
     public Guid Id { get; set; }
@@ -147,6 +164,19 @@ public sealed class CatalogProductActivationAuditRow
     public string Action { get; set; } = "";
     public string Fingerprint { get; set; } = "";
     public bool IsActive { get; set; }
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
+public sealed class CatalogProductChannelAuditRow
+{
+    public Guid RequestId { get; set; }
+    public Guid ProductId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string[] DesiredChannels { get; set; } = [];
     public int Version { get; set; }
     public DateTimeOffset OccurredAt { get; set; }
 }
@@ -222,6 +252,8 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogDraftRow> Drafts => Set<CatalogDraftRow>();
     public DbSet<CatalogDraftAuditRow> DraftAudit => Set<CatalogDraftAuditRow>();
     public DbSet<CatalogProductActivationAuditRow> ProductActivationAudit => Set<CatalogProductActivationAuditRow>();
+    public DbSet<CatalogProductChannelAuditRow> ProductChannelAudit => Set<CatalogProductChannelAuditRow>();
+    public DbSet<CatalogScheduledPriceRow> ScheduledPrices => Set<CatalogScheduledPriceRow>();
     public DbSet<CatalogProductEditAuditRow> ProductEditAudit => Set<CatalogProductEditAuditRow>();
     public DbSet<CatalogMenuRow> Menus => Set<CatalogMenuRow>();
     public DbSet<CatalogMenuSectionRow> MenuSections => Set<CatalogMenuSectionRow>();
@@ -273,6 +305,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
             entity.Property(row => row.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(row => row.Channels).HasColumnName("channels");
+            entity.Property(row => row.DesiredChannels).HasColumnName("desired_channels").HasDefaultValueSql("ARRAY['pos','qr']::text[]");
             entity.Property(row => row.Image).HasColumnName("image").HasMaxLength(512);
             entity.Property(row => row.RecipeLinked).HasColumnName("recipe_linked");
             entity.Property(row => row.BasePriceMinor).HasColumnName("base_price_minor");
@@ -400,6 +433,38 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Id });
+        });
+        modelBuilder.Entity<CatalogScheduledPriceRow>(entity =>
+        {
+            entity.ToTable("scheduled_prices");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
+            entity.Property(row => row.EffectiveAt).HasColumnName("effective_at");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(24);
+            entity.Property(row => row.ExpectedVersion).HasColumnName("expected_version");
+            entity.Property(row => row.Detail).HasColumnName("detail").HasMaxLength(500);
+            entity.Property(row => row.FinishedAt).HasColumnName("finished_at");
+            entity.HasIndex(row => new { row.Status, row.EffectiveAt });
+        });
+        modelBuilder.Entity<CatalogProductChannelAuditRow>(entity =>
+        {
+            entity.ToTable("product_channel_audit");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.DesiredChannels).HasColumnName("desired_channels");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
         });
         modelBuilder.Entity<CatalogProductActivationAuditRow>(entity =>
         {

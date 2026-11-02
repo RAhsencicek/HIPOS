@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Link } from "react-router";
 import { useCatalogProvider, useFeatureProvider } from "../../app/providers";
 import { formatCatalogMoney, parseCatalogPrice } from "./formatters";
+import { HttpMenuProvider } from "./MenuProvider";
 import { CatalogProviderError } from "./contracts";
 import type { CatalogProductDetail, CatalogScope, PriceVersion, Publication } from "./contracts";
 
@@ -96,6 +97,11 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
       await provider.publishDraft({ scope, draftId: product.id, publicationId,
         expectedVersion: product.version });
       setPublicationId(crypto.randomUUID());
+      try {
+        await new HttpMenuProvider().ensureProductInActiveMenu(scope, product.id, product.category.name);
+      } catch (menuErr) {
+        console.warn("Menü senkronizasyonu:", menuErr);
+      }
       onChanged("Ürün POS kanalında yayınlandı; kayıt veritabanında doğrulandı.");
     } catch (unknownError) { failed(unknownError); }
     finally { setBusy(null); }

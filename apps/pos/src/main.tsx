@@ -14,6 +14,7 @@ type Product = {
   status: string;
   isActive: boolean;
   channels: string[];
+  desiredChannels: string[];
   price: { amountMinor: number; currency: string };
 };
 type Problem = { detail?: string; code?: string };
@@ -76,20 +77,22 @@ function App() {
     setRetryId(null);
     setProductId("");
     setOptionSelection(null);
-    api<{ items: Product[] }>(
+    const loadProducts = () => api<{ items: Product[] }>(
       `/api/v1/firms/${scope.firmId}/catalog/products?branchId=${scope.branchId}&page=1&pageSize=100`,
       scope.actor,
     ).then((result) => {
       if (!active) return;
       setProducts(result.items.filter((item) => item.status === "published" &&
-        item.isActive && item.channels.includes("pos") && item.price.amountMinor > 0));
+        item.isActive && item.channels.includes("pos") && item.desiredChannels.includes("pos") && item.price.amountMinor > 0));
       setLoading(false);
     }).catch((cause: unknown) => {
       if (!active) return;
       setError(cause instanceof Error ? cause.message : "Ürünler yüklenemedi.");
       setLoading(false);
     });
-    return () => { active = false; };
+    void loadProducts();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadProducts(); }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [scope.firmId, scope.branchId, scope.actor]);
 
   const selected = products.find((item) => item.id === productId);

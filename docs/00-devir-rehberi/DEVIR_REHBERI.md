@@ -58,7 +58,7 @@ Yeni katılan bir geliştiricinin ilk 30 dakikada sistemin neyinin çalışıp n
 | Modül Adı | Durum | PostgreSQL Şeması | Panel | API (.NET 10) | Test | Üretime Hazır mı? |
 |---|---|---|---|---|---|---|
 | **Ortak Adisyon Çekirdeği** | Kalıcı MVP Çekirdeği | `sales` (`checks`, `orders`) | Kısmi (`apps/pos` `/waiter`, yönetim ekranları) | Var (`SalesDbContext.cs`) | Var (`postgres.test.mjs`) | Hayır (Bağlantı, kapatma ve ödeme yaşam döngüsü eksik) |
-| **Menü Yönetimi** | Kalıcı MVP | `catalog` (`menus`, `menu_sections`, `menu_items`) | Var (`MenusPage.tsx`) | Var (`CatalogDbContext.cs`) | Var (`MenuProvider.test.ts`, `postgres.test.mjs`) | Hayır (Modifiers ve QR yok) |
+| **Menü Yönetimi** | Kalıcı MVP | `catalog` (`menus`, `menu_sections`, `menu_items`) | Var (`MenusPage.tsx`, salt okunur müşteri menüsü) | Var (`CatalogDbContext.cs`) | Var (`MenuProvider.test.ts`, `postgres.test.mjs`) | Hayır (gerçek kimlik/yetki ve QR kod üretimi eksik) |
 | **Cari Yönetimi** | Kalıcı MVP | `cari` (`parties`, `movements`) | Var (`CarilerHttpPage.tsx`) | Var (`CariDbContext.cs`) | Var (`postgres.test.mjs`) | Hayır (Kasadan tediye/tahsilat bağı yok) |
 | **Inventory** | Kalıcı MVP | `inventory` (`warehouses`, `items`, `recipes`, `recipe_items`, `movements`, `counts`, `count_items`) | Var (`InventoryHttpPage.tsx`) | Var (`InventoryDbContext.cs`) | Var (`postgres.test.mjs`) | Hayır (Satıştan otomatik tüketim yok) |
 | **Manuel Kasa** | Manuel MVP | `cash` (`registers`, `shifts`, `movements`, `audit`) | Var (`CashManagementPage.tsx`) | Var (`CashDbContext.cs`) | Var (`KASA_MANUEL_TEST.md`, `postgres.test.mjs`) | Hayır (Gerçek POS/parçalı ödeme yok) |
@@ -86,7 +86,7 @@ Projeye başlayan geliştiricilere modül kapsamı için **7 modül şartnamesi*
 | **[Modül 1] Kasa & Hızlı Satış** | Manuel kasa mevcut; gerçek POS, parçalı ödeme ve Z-Raporu planlanıyor. | 👉 [MODUL_01_KASA_VE_POS.md](MODUL_01_KASA_VE_POS.md) | 2. Adisyon ödeme yaşam döngüsü; 7. ÖKC bağlantısı |
 | **[Modül 2] Masa Servisi & Adisyon** | Ortak adisyon çekirdeği mevcut; panel/operasyon bağlantısı ve yaşam döngüsü eksik. | 👉 [MODUL_02_MASA_VE_ADISYON.md](MODUL_02_MASA_VE_ADISYON.md) | 1–2. adımlar |
 | **[Modül 3] Mutfak (KDS) & Yazıcı** | Salt okunur mutfak önizlemesi mevcut; KDS durumları ve yazıcı eksik. | 👉 [MODUL_03_MUTFAK_VE_KDS.md](MODUL_03_MUTFAK_VE_KDS.md) | 6. adım |
-| **[Modül 4] Ürün Kataloğu & Menü** | Katalog ve menü kalıcı MVP'si mevcut; modifiers ve QR yayınlama eksik. | 👉 [MODUL_04_KATALOG_VE_MENU.md](MODUL_04_KATALOG_VE_MENU.md) | Mevcut MVP; genişletmeler ana sıranın dışında |
+| **[Modül 4] Ürün Kataloğu & Menü** | Katalog, menü ve yapılandırılmış salt okunur QR görünümü mevcut; QR kod üretimi ve dış barındırma eksik. | 👉 [MODUL_04_KATALOG_VE_MENU.md](MODUL_04_KATALOG_VE_MENU.md) | Mevcut MVP; genişletmeler ana sıranın dışında |
 | **[Modül 5] Stok & Reçeteli Üretim** | Stok, reçete ve sayım mevcut; mal kabul ve otomatik tüketim eksik. | 👉 [MODUL_05_STOK_VE_RECETE.md](MODUL_05_STOK_VE_RECETE.md) | 4–5. adımlar |
 | **[Modül 6] Cari Hesaplar & Giderler** | Manuel cari ve gider kayıtları kalıcı MVP'dir; otomatik operasyon bağlantıları eksik. | 👉 [MODUL_06_CARI_VE_GIDER.md](MODUL_06_CARI_VE_GIDER.md) | 2. ve 4. adımlarla kesişir |
 | **[Modül 7] Kimlik & Auth Omurgası** | Gerçek Auth ve yetkilendirme uygulanmamıştır. | 👉 [MODUL_07_KIMLIK_VE_AUTH.md](MODUL_07_KIMLIK_VE_AUTH.md) | 3. adım |
@@ -204,7 +204,7 @@ Restoranın sattığı ürünlerin, reçete bağlarının, fiyat sürümlerinin 
 
 #### C. 🚧 Henüz Yapılmayanlar & Hedef Ekran Davranışları (Geliştirilecek Backlog)
 1. **Ürün Seçenekleri / Modifiers:** "Büyük Boy +20 TL", "Duble Peynir +30 TL", "Acısız/Az Pişmiş" gibi seçenek gruplarının veri modeli, yönetim arayüzü ve POS sipariş akışına eklenmesi.
-2. **Masaya Özel QR Menü:** Masaların karekodunu okutan müşterilerin telefonlarından görebileceği dışa açık salt-okunur menü yayını.
+2. **Masaya Özel QR Kod:** Şube için yapılandırılmış salt okunur müşteri menüsü vardır; masayla doğrulanmış bağlantı, karekod üretimi ve dış barındırma eksiktir.
 
 #### D. Şartname ve İlgili Dokümanlar
 * 🌟 **A'dan Z'ye Modül Devir Şartnamesi:** 👉 [MODUL_04_KATALOG_VE_MENU.md](MODUL_04_KATALOG_VE_MENU.md)

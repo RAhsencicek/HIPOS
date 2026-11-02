@@ -198,7 +198,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             var product = await catalog.GetAsync(new CatalogScope(firmId, branchId),
                 item.ProductId, cancellationToken);
             if (product is null || !product.IsActive || product.Status != "published" ||
-                !product.Channels.Contains("pos") || product.Price.AmountMinor <= 0 ||
+                !product.Channels.Contains("pos") || !product.DesiredChannels.Contains("pos") || product.Price.AmountMinor <= 0 ||
                 product.Price.Currency != "TRY")
                 return SalesOrderResult.Rejected(product is { IsActive: false } ? "PRODUCT_INACTIVE" : "PRODUCT_NOT_SELLABLE", 409,
                     "Ürün bu şubede POS satışına açık değil veya geçerli fiyatı yok.");
