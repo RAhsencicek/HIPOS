@@ -1,6 +1,7 @@
 using Hipos.Api.Features;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Hipos.Api.Printing;
@@ -17,7 +18,7 @@ public static class PrintingEndpoints
             string branchId,
             Guid orderId,
             bool? isReprint,
-            PrintingService printing,
+            [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
             var result = await printing.PrintKitchenOrderAsync(firmId, branchId, orderId, isReprint ?? false, ct);
@@ -32,7 +33,7 @@ public static class PrintingEndpoints
             string branchId,
             string tableId,
             bool? isReprint,
-            PrintingService printing,
+            [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
             var result = await printing.PrintKitchenTableAsync(firmId, branchId, tableId, isReprint ?? false, ct);
@@ -46,7 +47,7 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             Guid checkId,
-            PrintingService printing,
+            [FromServices] PrintingService printing,
             bool openCashDrawer = false,
             string paymentMethod = "NAKIT",
             CancellationToken ct = default) =>
@@ -62,8 +63,8 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             string tableId,
-            SalesDbContext salesDb,
-            PrintingService printing,
+            [FromServices] SalesDbContext salesDb,
+            [FromServices] PrintingService printing,
             bool openCashDrawer = false,
             string paymentMethod = "NAKIT",
             CancellationToken ct = default) =>
@@ -90,9 +91,9 @@ public static class PrintingEndpoints
             string branchId,
             string tableId,
             SettleTableRequest? req,
-            SalesDbContext salesDb,
-            PaidCheckTableSettlement settlement,
-            PrintingService printing,
+            [FromServices] SalesDbContext salesDb,
+            [FromServices] PaidCheckTableSettlement settlement,
+            [FromServices] PrintingService printing,
             HttpContext context,
             CancellationToken ct) =>
         {
@@ -203,7 +204,7 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             string? target,
-            PrintingService printing,
+            [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
             var targetDevice = target ?? "kitchen";
@@ -230,10 +231,10 @@ public static class PrintingEndpoints
         });
 
         // 5. Yazıcı Yapılandırması (Ağ IP'lerini dinamik ayarlama)
-        group.MapGet("/printing/config", (PrintingService printing) =>
+        group.MapGet("/printing/config", ([FromServices] PrintingService printing) =>
             Results.Ok(printing.GetConfig()));
 
-        group.MapPost("/printing/config", (UpdatePrinterConfigRequest request, PrintingService printing) =>
+        group.MapPost("/printing/config", (UpdatePrinterConfigRequest request, [FromServices] PrintingService printing) =>
         {
             printing.UpdateConfig(request);
             return Results.Ok(printing.GetConfig());

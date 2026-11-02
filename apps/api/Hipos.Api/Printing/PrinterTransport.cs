@@ -22,12 +22,23 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
                     config.Name, config.IpAddress, config.Port, data.Length);
                 return new PrintResult(true, config.Name, $"Network ({config.IpAddress}:{config.Port})");
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                logger.LogWarning(ex, "Ağ yazıcısına ({Ip}:{Port}) ulaşılamadı.", config.IpAddress, config.Port);
+                var msg = $"Ağ yazıcısına ({config.IpAddress}:{config.Port}) zaman aşımı (2 sn) nedeniyle ulaşılamadı. Cihaz kapalı veya IP adresi hatalı olabilir.";
+                logger.LogWarning("{Message}", msg);
                 if (!config.FallbackToUsb)
                 {
-                    return new PrintResult(false, config.Name, "Network", ex.Message);
+                    return new PrintResult(false, config.Name, "Network", msg);
+                }
+                logger.LogInformation("USB yedek kanalına geçiliyor...");
+            }
+            catch (Exception ex)
+            {
+                var msg = $"Ağ yazıcısına ({config.IpAddress}:{config.Port}) bağlanırken hata oluştu: {ex.Message}";
+                logger.LogWarning(ex, "{Message}", msg);
+                if (!config.FallbackToUsb)
+                {
+                    return new PrintResult(false, config.Name, "Network", msg);
                 }
                 logger.LogInformation("USB yedek kanalına geçiliyor...");
             }

@@ -230,6 +230,27 @@ public static class FeatureDbInitializer
         if (rows.Count > 0) await db.SaveChangesAsync(cancellationToken);
     }
 
+    public static async Task PromoteInventoryAsync(FeatureDbContext db, CancellationToken cancellationToken)
+    {
+        var inventoryKeys = new[] { "inventory.items", "inventory.recipes", "inventory.counts", "procurement.requests" };
+        var rows = await db.BranchFeatureStates.Where(row =>
+            inventoryKeys.Contains(row.Key) && row.DesiredEnabled &&
+            row.Lifecycle == "ready" && !row.EffectiveForNewWork).ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            row.EffectiveForNewWork = true;
+            row.Version++;
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+            db.FeatureAudit.Add(new FeatureAuditRow
+            {
+                FirmId = row.FirmId, BranchId = row.BranchId, FeatureKey = row.Key,
+                Actor = "system:inventory-ready", DesiredEnabled = true,
+                Version = row.Version, OccurredAt = row.UpdatedAt,
+            });
+        }
+        if (rows.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
     public static async Task EnsureDemoSeedAsync(FeatureDbContext db, CancellationToken cancellationToken)
     {
         if ((await db.Database.GetPendingMigrationsAsync(cancellationToken)).Any())

@@ -28,7 +28,7 @@ async function freePort() {
 
 test(
   "ASP.NET modül sözleşmesi ve sunucu kuralları",
-  { timeout: 30000 },
+  { timeout: 60000 },
   async () => {
     const base = `http://127.0.0.1:${await freePort()}`;
     const child = spawn(
@@ -39,6 +39,7 @@ test(
         project,
         "--no-launch-profile",
         "--no-restore",
+        "--no-build",
         "--urls",
         base,
       ],

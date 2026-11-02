@@ -121,6 +121,7 @@ if (storage == "postgres")
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
+    if (inventoryReady) await FeatureDbInitializer.PromoteInventoryAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
     featureRuntime.PaymentSimulatorReady = salesReady;
@@ -142,7 +143,7 @@ if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
-app.MapPrintingEndpoints();
+if (storage == "postgres") app.MapPrintingEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
