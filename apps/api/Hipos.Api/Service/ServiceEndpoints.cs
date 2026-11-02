@@ -110,7 +110,7 @@ public static class ServiceEndpoints
             var result = await salesOrders.CreateAsync(firmId, branchId,
                 new CreatePosOrder(command.OrderId, command.Items), waiter.Name, context.RequestAborted,
                 requestedCheckId: checkId, checkToCreate: assignment is null ? check : null,
-                source: "waiter_web");
+                featureKey: "sales.checks", source: "waiter_web");
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             return result.Created
                 ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/orders/{command.OrderId}",

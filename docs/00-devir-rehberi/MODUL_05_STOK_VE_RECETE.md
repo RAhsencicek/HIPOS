@@ -2,12 +2,12 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi, Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Otomatik Tüketim & Mal Kabul (Hedef / Sırada)
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Tedarikçi İadesi ve Fire/Zayi (Çalışıyor) · Eksik Teslim Düzeltmesi (Backend/Geçmiş Korunuyor, Yeni UI Yok) · Otomatik Tüketim (Hedef / Sırada)
 > **PostgreSQL Şeması:** `inventory`
 > **Yönetim Paneli:** Var (`InventoryHttpPage.tsx`)
 > **API:** Var (`InventoryDbContext.cs`)
 > **Test:** Var (`STOK_REÇETE_SAYIM_MANUEL_TEST.md`, `postgres.test.mjs`)
-> **Üretime Hazır mı?:** Hayır (Otomatik reçeteli stok düşümü ve mal kabul irsaliyesi eksiktir)
+> **Üretime Hazır mı?:** Hayır (Otomatik reçeteli stok düşümü, gerçek kullanıcı/PIN yetkisi ve çevrimdışı eşitleme eksiktir)
 > **Ana Devir Rehberi:** [DEVIR_REHBERI.md](DEVIR_REHBERI.md) · **Yol Haritası:** [DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
 
 > **Dokümantasyon Hiyerarşisi:**
@@ -28,15 +28,15 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Yok** | Fatura/irsaliye ile toptancı girişi henüz kodlanmadı |
-| **Fire kaydı** | **Yok** | Dökülen/bozulan zayi ve fire hareket ekranı henüz yoktur |
-| **Maliyet hesabı** | **Yok** | FIFO/ağırlıklı ortalama birim maliyet ve kârlılık henüz yoktur |
+| **Satın alma / mal kabul** | **Çalışıyor** | Taslak ve onay ile tedarikçiye iade kalıcıdır; eksik teslim düzeltmesinin backend/geçmişi korunur, yeni form panelde yoktur |
+| **Fire kaydı** | **Çalışıyor** | Gerekçeli fire kaydı stoktan `waste_loss` hareketiyle düşer; gerçek şef PIN onayı auth modülünü bekler |
+| **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır |
 
 ---
 
 ## 🎯 1. Modülün Amacı Nedir?
 
-Bu modülün hedefi; çalışan hammadde, reçete, stok hareketi ve sayım MVP'sinin üzerine satıştan otomatik tüketim (`recipe_consumption`), satın alma/mal kabul ve fire kaydını eklemektir. Bu hedefler mevcut stok ve reçete ekranlarında henüz otomatik yapılmaz.
+Bu modül; hammadde, reçete, stok hareketi, sayım, mal kabul, tedarikçiye iade ve fire/zayi akışlarını kapsar. Satıştan otomatik tüketim (`recipe_consumption`), satın alma talebi/siparişi ve ayrı fiyatlandırma/maliyet alanı henüz tamamlanmamıştır.
 
 Kısacası: **Restoranın hammadde maliyetini, depo güvenliğini ve stok kaçaklarını önleyen envanter motorudur.**
 
@@ -70,7 +70,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * Depodaki mevcut hammaddeler: Adı, Birimi (kg, litre, adet), Sistem Miktarı, Kritik Eşik.
 * **Kritik Eşik Alarmları:**
   * Eğer Mozzarella 2 kg'ın altına düşmüşse kırmızı uyarı rozeti: `⚠️ Kritik Stok: Mozzarella (1.400 g kaldı)`.
-* Satın alma talebi açma, mal kabul ve tedarikçi belgesi bu ekranda henüz yoktur.
+* Satın alma talebi henüz yoktur; mal kabul ve tedarikçi iadesi ayrı mal kabul ekranında çalışır. Önceden oluşturulmuş eksik teslim düzeltmeleri backend ve denetim geçmişinde korunur; yeni düzeltme formu panelden kaldırılmıştır.
 
 ### 🍕 EKRAN 2: Reçeteli Otomatik Stok Düşümü (Satış Olayı Entegrasyonu) (Hedef Arka Plan Servisi — Geliştirilecek)
 * Sistemde tanımlı Margherita Pizza Reçetesi:
@@ -82,20 +82,26 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
   * Arka planda `recipe_consumption` servisi tetiklenir.
   * Depodan ilgili gramajlar düşülerek `inventory.movements` tablosuna otomatik tüketim hareketi yazılır.
 
-### 🚚 EKRAN 3: Mal Kabul ve Alış İrsaliyesi Ekranı (Hedef Ekran — Geliştirilecek)
-* Kritik stok uyarısından tedarikçi/satın alma talebi başlatma ve bu talebi sipariş/irsaliye ile ilişkilendirme hedef akışın parçasıdır.
+### 🚚 EKRAN 3: Mal Kabul ve Alış İrsaliyesi Ekranı (Çalışıyor — `ReceivingPage.tsx`)
+* Belge taslak kaydedilir; taslak stok veya cari bakiyeyi değiştirmez.
+* Onay stok girişini ve tedarikçi borcunu tek işlemde oluşturur. Açık sayım onayı engeller; tekrar onay çift kayıt üretmez.
+* Tedarikçiye iade, özgün mal kabul satırına bağlı stok ve cari ters hareketi oluşturur.
+* Eksik teslim düzeltmesinin backend ve denetim geçmişi korunur; yeni düzeltme formu ekranda gösterilmez.
+* Kritik stok uyarısından satın alma talebi başlatma ve bu talebi sipariş/irsaliye ile ilişkilendirme gelecek kapsamdır.
 * Toptancıdan kamyonla 10 çuval un (500 kg) geldiğinde:
   * Yönetici veya depo sorumlusu faturayı / irsaliyeyi açar.
   * Tedarikçi seçilir: `ABC Gıda Toptan A.Ş.`.
   * Giren Hammadde: `500 kg Pizza Unu` · Birim Fiyat: `22,50 TL/kg`.
   * `[ Mal Kabulü Onayla ]` tıklandığında: Depo stoğu anında 500 kg artar ve tedarikçinin Cari hesabına borç faturası işlenir.
 
-### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Modalı (Hedef Modal — Geliştirilecek)
+### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Ekranı (Çalışıyor)
 * Mutfakta yere dökülen süt, bozulan et veya yanan pizza için:
   * Hammadde: `Dana Kıyma (1.5 kg)`.
   * Fire Türü: `Bozulma / Son Kullanma Tarihi Geçti`.
   * Açıklama: `"Dolap arızası sebebiyle bozuldu"`.
-  * Onaylayan Şef PIN'i ile stoktan düşülür; maliyet zayi raporuna işlenir.
+  * Kayıt mevcut yönetici aktörüyle stoktan düşülür ve denetim izi oluşturur.
+  * Fire/zayi ekranı fiyat veya maliyet bilgisi istemez; fiyatlandırma ve maliyet raporu ayrı modüle ertelenmiştir.
+  * Gerçek şef PIN onayı auth modülünü; reçeteli ürün zayisi ise ürün/reçete giriş türünü bekler.
 
 ### 📋 EKRAN 5: Depo Fiziksel Sayım ve Onay Ekranı (Mevcut Çalışan Ekran — `InventoryHttpPage.tsx` sayım görünümü)
 * Sayım Taslağı Açma -> Fiziksel miktarları sayıp girme -> Fark Analizi (`Sayılan - Sistem`) -> Yönetici onayıyla tek hareketle stoku eşitleme.
@@ -106,8 +112,9 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 
 ```mermaid
 graph TD
-    A[1. Adım: Satıştan Otomatik Reçete Tüketim Motoru] --> B[2. Adım: Mal Kabul İrsaliyesi Giriş Ekranı]
-    B --> C[3. Adım: Gerekçeli Fire Kaydı Altyapısı]
+    A[1. Adım: Satıştan Otomatik Reçete Tüketim Motoru] --> B[2. Adım: Satın Alma Talebi ve Siparişi]
+    B --> C[3. Adım: Gerçek Rol ve Şef PIN Onayı]
+    C --> D[4. Adım: Ayrı Fiyatlandırma ve Maliyet Modülü]
 ```
 
 1. **1. Adım: `recipe_consumption` Tüketim Motoru:**

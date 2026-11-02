@@ -92,7 +92,7 @@ export HIPOS_FEATURES_CONNECTION='Host=127.0.0.1;Port=5433;Database=hipos_featur
 export HIPOS_DEMO_DATABASE_URL='postgresql://hipos:hipos-dev-only@127.0.0.1:5433/hipos_features'
 
 printf '\n[3/6] Veritabanı migration’ları uygulanıyor…\n'
-for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext; do
+for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext KitchenDbContext; do
   printf '  • %s\n' "$context"
   dotnet tool run dotnet-ef database update \
     --project apps/api/Hipos.Api/Hipos.Api.csproj \
