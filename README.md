@@ -28,6 +28,23 @@ Proje monorepo mimarisindedir:
 
 ## 2. Hızlı Başlatma (Quickstart)
 
+### Docker Compose ile Tam Yığın (Windows / macOS / Linux)
+Docker Desktop çalışırken repo kökünde:
+```bash
+docker compose up --build -d
+```
+
+Bu komut PostgreSQL migration'larını ve demo seed'lerini uygular; API, Admin ve POS'u da konteynerlerde başlatır.
+
+* Yönetim paneli: `http://localhost:5173/admin`
+* Test POS: `http://localhost:5176`
+* API sağlık: `http://localhost:5180/health`
+
+Durdurmak için (veritabanı volume'u korunur):
+```bash
+docker compose down
+```
+
 ### macOS Kolay Başlatma (Önerilen)
 Repo kök dizinindeki script'e çift tıklayın veya terminalden çalıştırın:
 ```bash

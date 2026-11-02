@@ -17,23 +17,24 @@ export class HttpFeatureProvider implements FeatureProvider {
     return scope?.firmId === "11111111-1111-4111-8111-111111111111"
       ? "manager-single"
       : "manager-multi";
-  }
-
-  private async request<T>(
-    path: string,
-    scope?: FeatureScope,
-    body?: unknown,
-  ): Promise<T> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}${path}`, {
-        method: body ? "PUT" : "GET",
-        headers: {
-          "X-Demo-Actor": this.actor(scope),
-          ...(body ? { "Content-Type": "application/json" } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      });
+    }
+    private async request<T>(
+        path: string,
+        scope?: FeatureScope,
+        body?: unknown,
+    ): Promise<T> {
+        let response: Response;
+        const token = localStorage.getItem("hipos_token");
+        try {
+            response = await fetch(`${this.baseUrl}${path}`, {
+                method: body ? "PUT" : "GET",
+                headers: {
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    "X-Demo-Actor": this.actor(scope),
+                    ...(body ? { "Content-Type": "application/json" } : {}),
+                },
+                ...(body ? { body: JSON.stringify(body) } : {}),
+            });
     } catch {
       throw new FeatureProviderError(
         "LOAD_FAILED",

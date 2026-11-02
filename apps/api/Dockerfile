@@ -1,8 +1,13 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Önce contract dosyasını kopyala (csproj buna referans veriyor)
-COPY contracts/ /src/contracts/
+# Migration konteynerinin repo-yerel dotnet-ef aracını kullanabilmesi için
+# araç manifestini build aşamasına dahil et.
+COPY .config/dotnet-tools.json /src/.config/dotnet-tools.json
+RUN dotnet tool restore
+
+# Proje dosyasındaki ../../../contracts göreli yolu konteynerde /contracts'e çözülür.
+COPY contracts/ /contracts/
 
 # Proje dosyasını kopyala ve bağımlılıkları indir
 COPY apps/api/Hipos.Api/Hipos.Api.csproj ./Hipos.Api/

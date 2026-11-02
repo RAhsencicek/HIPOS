@@ -107,3 +107,7 @@ Tarihsel ürün kararları ve ilk aşama taslakları:
 * [URUN_TANIMI.md](05-gecmis-ve-arsiv/URUN_TANIMI.md): İlk aşama ürün tanımı (eski panel öncelikleri).
 * [ILK_UC_ASAMA.md](05-gecmis-ve-arsiv/ILK_UC_ASAMA.md): Tarihsel ilk 3 aşama geliştirme planı.
 * [YENI_URUN_YONU_TASLAK.md](05-gecmis-ve-arsiv/YENI_URUN_YONU_TASLAK.md): 19 Ekim öncesi ürün yönü tartışma taslağı.
+
+### 6. [06-busra-auth](06-busra-auth/) — Büşra Branch (Kimlik, PIN ve Auth Geliştirme Rehberi)
+Kimlik, oturum, 4 haneli PIN ve Manager'sız tek yetkili Owner modelinin kapsamlı analiz ve geliştirme rehberi:
+* [KAPSAMLI_ANALIZ_VE_YOL_HARITASI.md](06-busra-auth/KAPSAMLI_ANALIZ_VE_YOL_HARITASI.md): Tüm proje mimarisi, modül analizleri, RBAC yetki tablosu ve adım adım Auth uygulama rehberi.

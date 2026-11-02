@@ -6,6 +6,7 @@ using Hipos.Api.Service;
 using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
 using Hipos.Api.Expenses;
+using Hipos.Api.Auth;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -37,6 +38,9 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "cash")));
     builder.Services.AddDbContext<ExpenseDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "finance")));
+    builder.Services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(connection,
+    npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
+    builder.Services.AddSingleton<AuthTokenService>();
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -69,7 +73,7 @@ builder.Services.AddCors(options => options.AddPolicy("LocalPreview", policy =>
     if (!string.IsNullOrWhiteSpace(extra))
         origins.AddRange(extra.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     policy.WithOrigins(origins.ToArray())
-        .WithHeaders("Content-Type", "X-Demo-Actor")
+        .WithHeaders("Content-Type", "X-Demo-Actor" , "Authorization")
         .WithMethods("GET", "PUT", "POST", "DELETE");
 }));
 var app = builder.Build();
@@ -80,6 +84,7 @@ var serviceReady = false;
 var inventoryReady = false;
 var cashReady = false;
 var expensesReady = false;
+var authReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -104,6 +109,9 @@ if (storage == "postgres")
     cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
     var expenseDb = scope.ServiceProvider.GetRequiredService<ExpenseDbContext>();
     expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
+    var authDb = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+    authReady = !(await authDb.Database.GetPendingMigrationsAsync()).Any();
+    if (authReady) await AuthDbInitializer.SeedDemoUsersAsync(authDb, CancellationToken.None);
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -124,6 +132,7 @@ if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
+if (storage == "postgres") app.MapAuthEndpoints(authReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

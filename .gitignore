@@ -9,3 +9,6 @@ playwright-report/
 test-results/
 **/bin/
 **/obj/
+
+.vs/
+.agents/
