@@ -198,6 +198,11 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("source");
 
+                    b.Property<string>("TenderMethod")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("tender_method");
+
                     b.HasKey("Id");
 
                     b.HasIndex("FirmId", "BranchId", "Provider", "ProviderEventId")
@@ -224,9 +229,13 @@ namespace Hipos.Api.Cash.Migrations
 
                             t.HasCheckConstraint("ck_cash_movement_external_identity", "(source = 'manual' AND provider IS NULL AND external_reference IS NULL AND provider_event_id IS NULL) OR (source = 'pos' AND provider IS NOT NULL AND provider_event_id IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_cash_movement_kind", "kind IN ('opening_float', 'manual_in', 'manual_out')");
+                            t.HasCheckConstraint("ck_cash_movement_kind", "kind IN ('opening_float', 'manual_in', 'manual_out', 'pos_sale')");
+
+                            t.HasCheckConstraint("ck_cash_movement_pos_sale", "kind <> 'pos_sale' OR (source = 'pos' AND category = 'cash_sale' AND tender_method IN ('cash', 'card'))");
 
                             t.HasCheckConstraint("ck_cash_movement_source", "source IN ('manual', 'pos')");
+
+                            t.HasCheckConstraint("ck_cash_movement_tender_method", "tender_method IS NULL OR tender_method IN ('cash', 'card')");
                         });
                 });
 
@@ -288,6 +297,48 @@ namespace Hipos.Api.Cash.Migrations
                             t.HasCheckConstraint("ck_cash_register_provider", "provider_mode IN ('manual', 'external_pos')");
 
                             t.HasCheckConstraint("ck_cash_register_version_positive", "version > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Cash.CashShiftDenominationRow", b =>
+                {
+                    b.Property<Guid>("ShiftId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("shift_id");
+
+                    b.Property<int>("DenominationMinor")
+                        .HasColumnType("integer")
+                        .HasColumnName("denomination_minor");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<Guid>("RegisterId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("register_id");
+
+                    b.HasKey("ShiftId", "DenominationMinor");
+
+                    b.HasIndex("FirmId", "BranchId", "RegisterId", "ShiftId");
+
+                    b.ToTable("shift_denominations", "cash", t =>
+                        {
+                            t.HasCheckConstraint("ck_cash_shift_denomination_quantity", "quantity BETWEEN 0 AND 1000000");
+
+                            t.HasCheckConstraint("ck_cash_shift_denomination_value", "denomination_minor IN (20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5, 1)");
                         });
                 });
 
@@ -354,6 +405,11 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("opening_cash_minor");
 
+                    b.Property<string>("OpeningNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("opening_note");
+
                     b.Property<Guid>("RegisterId")
                         .HasColumnType("uuid")
                         .HasColumnName("register_id");
@@ -416,6 +472,18 @@ namespace Hipos.Api.Cash.Migrations
                     b.Navigation("Shift");
                 });
 
+            modelBuilder.Entity("Hipos.Api.Cash.CashShiftDenominationRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Cash.CashShiftRow", "Shift")
+                        .WithMany("Denominations")
+                        .HasForeignKey("FirmId", "BranchId", "RegisterId", "ShiftId")
+                        .HasPrincipalKey("FirmId", "BranchId", "RegisterId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Shift");
+                });
+
             modelBuilder.Entity("Hipos.Api.Cash.CashShiftRow", b =>
                 {
                     b.HasOne("Hipos.Api.Cash.CashRegisterRow", "Register")
@@ -435,6 +503,8 @@ namespace Hipos.Api.Cash.Migrations
 
             modelBuilder.Entity("Hipos.Api.Cash.CashShiftRow", b =>
                 {
+                    b.Navigation("Denominations");
+
                     b.Navigation("Movements");
                 });
 #pragma warning restore 612, 618

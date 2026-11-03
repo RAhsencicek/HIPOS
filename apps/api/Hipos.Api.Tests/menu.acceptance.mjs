@@ -49,11 +49,11 @@ export async function verifyMenuApi({ request, firm, branch, otherBranch, pizzaI
   assert.equal((await request(menus, "POST", { ...update, requestId: secondId, expectedVersion: 0, name: "İkinci Menü" })).status, 200);
   assert.equal((await request(`${menus}/${secondId}/activation`, "POST", { requestId: randomUUID(), expectedVersion: 1, isActive: true })).status, 200);
   let list = (await request(menus)).data.items;
-  assert.equal(list.filter(x => x.isActive).length, 1);
-  assert.equal(list.find(x => x.id === id).isActive, false);
-  assert.equal(list.find(x => x.id === id).version, 4);
+  assert.equal(list.filter(x => x.isActive).length, 2, "Aynı şubede birden fazla menü aktif kalabilmeli.");
+  assert.equal(list.find(x => x.id === id).isActive, true);
+  assert.equal(list.find(x => x.id === id).version, 3, "Başka menüyü aktifleştirmek bu menünün sürümünü değiştirmemeli.");
   const racing = await Promise.all(["A", "B"].map(suffix => request(`${menus}/${id}`, "PUT",
-    { ...update, requestId: randomUUID(), expectedVersion: 4, name: `Yarış Menüsü ${suffix}` })));
+    { ...update, requestId: randomUUID(), expectedVersion: 3, name: `Yarış Menüsü ${suffix}` })));
   assert.deepEqual(racing.map(x => x.status).sort(), [200, 409]);
   list = (await request(menus)).data.items;
   assert.deepEqual(list.find(x => x.id === id).sections, update.sections);
@@ -96,9 +96,9 @@ export async function verifyMenuPanel({ browser, uiBase, request, single, single
   await page.getByRole("button", { name: "San Sebastian Cheesecake ürününü bu bölümden çıkar" }).click();
   await page.getByRole("button", { name: "Değişiklikleri kaydet" }).click();
   await expect(page.getByText("Menü kaydedildi. Değişiklikler kalıcı olarak saklanıyor.")).toBeVisible();
-  await page.getByRole("button", { name: "Şubede yayına al", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Şubede yayına al", exact: true }).click();
-  await expect(page.getByText("Menü bu şubede yayına alındı.")).toBeVisible();
+  await page.getByRole("button", { name: "POS’ta kullanıma aç", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "POS’ta kullanıma aç", exact: true }).click();
+  await expect(page.getByText("Menü POS’ta kullanılabilir menülere eklendi.")).toBeVisible();
   await page.getByRole("button", { name: "Menülere dön" }).click();
   await expect(page.getByRole("heading", { name: "Panel Kabul Menüsü", exact: true, level: 2 })).toBeVisible();
   const menus = (await request(`/api/v1/firms/${single}/branches/${singleBranch}/catalog/menus`, "GET", undefined, "manager-single")).data;

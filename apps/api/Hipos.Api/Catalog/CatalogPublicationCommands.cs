@@ -171,6 +171,98 @@ public sealed class CatalogPublicationCommands(
         return new CatalogPublicationResult(detail, ToPublicationInfo(publication), null, true);
     }
 
+    public async Task<CatalogPriceResult> RepricePublishedAsync(
+        string firmId, string branchId, Guid productId, SetDraftPrice command,
+        string actor, CancellationToken cancellationToken)
+    {
+        if (command.PriceVersionId == Guid.Empty || command.AmountMinor is < 1 or > 1_000_000_000)
+            return CatalogPriceResult.Rejected("INVALID_PRICE", 400, "Fiyat sürümü kimliği veya tutarı geçersiz.");
+        if (command.ExpectedVersion < 1)
+            return CatalogPriceResult.Rejected("INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+
+        var previous = await db.PriceVersions.AsNoTracking().SingleOrDefaultAsync(
+            row => row.Id == command.PriceVersionId, cancellationToken);
+        if (previous is not null)
+            return await ExistingPublishedPriceAsync(previous, firmId, branchId, productId, command.AmountMinor, cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+            transaction.GetDbTransaction(), firmId, branchId, "catalog.price_drafts", cancellationToken);
+        if (blocked is not null) return new CatalogPriceResult(null, null, blocked, false);
+        blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+            transaction.GetDbTransaction(), firmId, branchId, "catalog.publishing", cancellationToken);
+        if (blocked is not null) return new CatalogPriceResult(null, null, blocked, false);
+
+        var product = await db.Products.FromSqlInterpolated(
+            $"SELECT * FROM catalog.products WHERE id = {productId} AND firm_id = {firmId} AND branch_ids @> ARRAY[{branchId}]::text[] FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (product is null) return CatalogPriceResult.Rejected("PRODUCT_NOT_FOUND", 404, "Ürün bu şubede bulunamadı.");
+        previous = await db.PriceVersions.AsNoTracking().SingleOrDefaultAsync(
+            row => row.Id == command.PriceVersionId, cancellationToken);
+        if (previous is not null)
+            return await ExistingPublishedPriceAsync(previous, firmId, branchId, productId, command.AmountMinor, cancellationToken);
+        if (product.Status != "published" || !product.Channels.Contains("pos"))
+            return CatalogPriceResult.Rejected("PRODUCT_NOT_PUBLISHED", 409, "Fiyatı güncellemek için ürün POS'a yayımlanmış olmalı.");
+        if (product.Currency != "TRY")
+            return CatalogPriceResult.Rejected("INVALID_PRICE", 400, "Bu ekrandan yalnız TRY fiyatı güncellenebilir.");
+        if (product.Version != command.ExpectedVersion)
+            return CatalogPriceResult.Rejected("VERSION_CONFLICT", 409, "Ürün başka bir işlemle değişti.");
+
+        var latestPrice = await db.PriceVersions.AsNoTracking().Where(row => row.FirmId == firmId && row.ProductId == productId)
+            .MaxAsync(row => (int?)row.Number, cancellationToken) ?? 0;
+        var latestPublication = await db.Publications.AsNoTracking().Where(row => row.FirmId == firmId && row.ProductId == productId)
+            .MaxAsync(row => (int?)row.Number, cancellationToken) ?? 0;
+        var branchPrice = await db.BranchPrices.SingleOrDefaultAsync(row => row.ProductId == productId && row.BranchId == branchId, cancellationToken);
+        if (product.BranchIds.Length == 1) product.BasePriceMinor = command.AmountMinor;
+        if (branchPrice is not null) branchPrice.AmountMinor = command.AmountMinor;
+        else if (product.BranchIds.Length > 1)
+            db.BranchPrices.Add(new CatalogBranchPriceRow { ProductId = productId, BranchId = branchId, AmountMinor = command.AmountMinor });
+
+        var now = DateTimeOffset.UtcNow;
+        var price = new CatalogPriceVersionRow
+        {
+            Id = command.PriceVersionId, FirmId = firmId, BranchId = branchId, ProductId = productId,
+            Number = latestPrice + 1, AmountMinor = command.AmountMinor, Currency = product.Currency, Actor = actor, CreatedAt = now,
+        };
+        var categoryName = await db.Categories.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && row.Id == product.CategoryId)
+            .Select(row => row.Name).SingleOrDefaultAsync(cancellationToken);
+        db.PriceVersions.Add(price);
+        db.Publications.Add(new CatalogPublicationRow
+        {
+            Id = command.PriceVersionId, FirmId = firmId, BranchId = branchId, ProductId = productId,
+            Number = latestPublication + 1, PriceVersionId = price.Id, ProductName = product.Name, Sku = product.Sku,
+            CategoryId = product.CategoryId, CategoryName = categoryName ?? product.CategoryName,
+            AmountMinor = command.AmountMinor, Currency = product.Currency, Channels = ["pos"], Actor = actor, PublishedAt = now,
+        });
+        product.Version++; product.UpdatedAt = now;
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return CatalogPriceResult.Rejected("VERSION_CONFLICT", 409, "Ürün başka bir işlemle değişti.");
+        }
+        catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return CatalogPriceResult.Rejected("PRICE_VERSION_CONFLICT", 409, "Fiyat sürümü veya yayın kimliği zaten kullanılıyor.");
+        }
+        var detail = await queries.GetAsync(new CatalogScope(firmId, branchId), productId, cancellationToken);
+        return new CatalogPriceResult(detail, ToPriceInfo(price), null, true);
+    }
+
+    private async Task<CatalogPriceResult> ExistingPublishedPriceAsync(
+        CatalogPriceVersionRow price, string firmId, string branchId, Guid productId, long amountMinor, CancellationToken cancellationToken)
+    {
+        var publication = await db.Publications.AsNoTracking().AnyAsync(row =>
+            row.Id == price.Id && row.PriceVersionId == price.Id && row.FirmId == firmId && row.BranchId == branchId && row.ProductId == productId,
+            cancellationToken);
+        return !publication
+            ? CatalogPriceResult.Rejected("PRICE_VERSION_CONFLICT", 409, "Fiyat sürümü kimliği başka bir işlem için kullanılıyor.")
+            : await ExistingPriceAsync(price, firmId, branchId, productId, amountMinor, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<CatalogPriceVersionInfo>> PriceHistoryAsync(
         string firmId, string branchId, Guid productId, CancellationToken cancellationToken) =>
         (await db.PriceVersions.AsNoTracking()

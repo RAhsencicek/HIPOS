@@ -69,6 +69,8 @@ describe("MockCatalogProvider", () => {
     const besiktasCategories = await provider.listCategories(besiktas);
     expect(besiktasCategories.items.some((item) => item.name === "Tatlılar")).toBe(false);
     expect(besiktasCategories.items.find((item) => item.id === "pizza")?.productCount).toBe(2);
+    const besiktasProducts = await provider.listProducts(list(besiktas));
+    expect(besiktasProducts.categories.some((item) => item.name === "Tatlılar")).toBe(false);
     await expect(provider.listCategories({ firmId: catalogIds.singleFirm, branchId: catalogIds.moda }))
       .rejects.toMatchObject({ code: "UNAUTHORIZED_SCOPE" });
   });

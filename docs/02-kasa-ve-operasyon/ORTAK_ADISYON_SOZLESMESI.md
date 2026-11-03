@@ -30,7 +30,9 @@ Durum: `sales.checks` veri modeli ve listelenen API dilimleri uygulanmış durum
 
 `sales.checks` her satışın ortak adisyon kaydıdır. Bir adisyon bir veya daha fazla `sales.orders` siparişi taşır. Ürün kalemleri siparişe bağlı kalır; `sales.payment_attempts` ödeme girişimleri siparişin kaynak bağlantısını korurken adisyona da bağlanır. Birleştirilen kaynak adisyon `status='merged'` ve `merged_into_check_id` ile korunur; siparişleri hedef adisyona taşınır. Firma ve şube kapsamı her okumada ve yazmada doğrulanır.
 
-Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis için üçü de boş olabilir. İlk sürümde adisyon, sipariş ve ödeme simülasyonu kasa, cari veya muhasebe hareketi üretmez.
+Adisyon ayrıntısındaki her siparişin `remainingMinor` değeri, ürün iptali/ikramı ve genel indirimin siparişe dağıtılan payı düşüldükten sonra başarılı simüle ödemeler çıkarılarak hesaplanır. Bu değer ödeme simülatörünün aynı sipariş için kullandığı ödenebilir tutarla aynı dağıtım kuralını kullanır; sipariş `totalMinor` ve kalem fiyatları brüt geçmiş bilgisi olarak korunur.
+
+Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis için üçü de boş olabilir. Adisyon/sipariş oluşturma kasa, cari veya muhasebe hareketi üretmez. Ödeme simülatörü varsayılan olarak kasa hareketi üretmez; yalnız garson check tahsilatının `postToCash=true` yolu başarılı olduğunda açık vardiyaya satış hareketi ekler. Cari veya muhasebe hareketi bu akışta da oluşmaz.
 
 ## Capability sahipliği
 
@@ -41,6 +43,7 @@ Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis i�
 - `branches.tables`, masa kartı ve masa atamasının sahibidir. Bu kapı kapalıyken `table_id` içeren yeni işlem reddedilir; null masa ile self servis çalışır.
 - Masa taşıma ve birleştirme servis endpoint'leri `branches.tables` ile `sales.checks` yeteneklerini birlikte gerektirir. Birleştirme, ödeme girişimi olmayan açık adisyonlarla sınırlıdır.
 - `payments.simulator`, yeni simüle ödeme girişimini yönetir. Check uçlarında ödeme başlatmak için ayrıca `sales.checks` açık olmalıdır. Başlamış bekleyen/belirsiz girişim mevcut sonuçlandırma kurallarıyla tamamlanabilir.
+- Check tahsilat endpoint'inde `postToCash=true` yalnız garsonun başarılı nakit/kart tahsilatı için kullanılır ve `cash.management` capability'sini de gerektirir. Aynı firma/şubede tam bir etkin açık vardiya kilitlenir; yoksa veya birden fazlaysa tahsilat reddedilir. Kasa hareketi ve audit, ödeme attempt'i/adisyon kapanışıyla aynı PostgreSQL transaction'ında kaydedilir. Nakit hareketi beklenen nakde eklenir; kart hareketi yalnız gelir/tahsilat geçmişinde görünür. Diğer Payment Simulator çağrıları varsayılan olarak kasa hareketi oluşturmaz.
 
 ## Masa bağının anlamı
 
@@ -53,10 +56,13 @@ Adisyonda `customer_id`, `table_id` ve `waiter_id` nullable'dır. Self servis i�
 - Sipariş `items` kalemi isteğe bağlı `note` (en fazla 500 karakter) ve `options: [{ groupId, optionId, quantity }]` alanlarını kabul eder. İstemci grup/seçenek kimlikleri ve adet gönderir; ad/fiyat kaynağı katalogdur. Sunucu ürünün güncel grup bağlarını, seçim sınırlarını ve seçenek adetini doğrular; grup/seçenek pasifliği tek başına reddetme nedeni değildir. Ürün pasifse sipariş reddedilir. Temel birim fiyatına seçilen seçenek farkları (adetle çarpılarak) eklenir; sonuç negatifse reddedilir, sıfır kabul edilir. `sales.order_lines.base_unit_price_minor`, `unit_price_minor` ve `options_json` satış anı değerlerini saklar; adisyon/kalem ve mutfak yanıtları seçenek snapshot'larını döndürür.
 - `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks`: filtresiz çağrıda son 100 adisyonu listeler. `?tableId={tableId}` verildiğinde seçilen masanın tüm açık adisyonlarını döndürür; masa operasyonları bu sorguyu kullanarak genel liste sınırından etkilenmez.
 - `GET /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}`: adisyon, sipariş/kalemler, toplanmış TRY tutarları ve ödeme girişimlerini döndürür.
-- `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts`: gövdedeki `orderId` adisyana bağlı olmalı; ödeme girişimi mevcut simülatör durum makinesini kullanır.
+- `GET /api/v1/firms/{firmId}/sales/orders?branchId={branchId}`: garson/POS demo aktörü yalnız erişebildiği belirtilmiş şubenin siparişlerini okuyabilir; şubesiz veya başka şube isteği reddedilir. Yönetici ve salt okunur demo aktörleri mevcut kapsam kurallarına tabidir.
+- `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts`: gövdedeki `orderId` adisyana bağlı olmalı; ödeme girişimi mevcut simülatör durum makinesini kullanır. Opsiyonel `postToCash=true`, başarılı garson tahsilatını açık kasa vardiyasına idempotent kasa hareketi olarak bağlar; yalnız UI'dan gelen istemci beyanı değil, sunucu vardiya/capability kontrolü de gerekir.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts/{attemptId}/resolve`: adisyana ait bekleyen/belirsiz girişimi mevcut simülatör kurallarıyla sonuçlandırır.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{sourceTableId}/transfer`: `requestId`, `targetTableId` ve `expectedVersion` ile mevcut açık adisyonu boş hedef masaya taşır.
 - `POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{targetTableId}/merge`: `requestId`, `sourceTableIds` ve kaynak/hedef assignment sürümlerini içeren `expectedVersions` ile kaynak siparişleri hedef masanın mevcut açık adisyonına taşır. Kaynak adisyonlar `merged` durumunda, hedef adisyon kimliğiyle geçmişte tutulur. Herhangi bir kaynak veya hedef adisyonda ödeme girişimi varsa işlem reddedilir.
+
+Masa birleştirmede indirim, ikram ve iptal kayıtları aynı transaction içinde hedef adisyona taşınır; tutar, gerekçe, aktör, işlem kimliği ve kalem ilişkisi korunur. Kaynağın ilk adisyon kimliği `original_check_id` ile saklanır; mevcut hedef işlemleri yerinde kalır. Genel indirimlerin tutarı değişmez; birleştirilmiş adisyonun siparişlerine mevcut orantılı dağıtım kuralı uygulanır. Ödeme girişimi bulunan adisyon yasağı sürer. Bunun için `PreserveMergedAdjustmentOrigin` migration'ı gerekir.
 
 Yeni yazılarda istek kimliği idempotenttir. Aynı kimlik ve aynı içerik mevcut kaydı döndürür; başka içerikle tekrar kullanım `409` ile reddedilir. Sipariş ve ödeme kimlikleri de kendi mevcut idempotency kurallarını korur.
 
@@ -83,4 +89,5 @@ Mevcut satırlar veya kapsam eşleşmeleri eksikse migration hata vererek durmal
 - Açık adisyonu boş masaya taşıma; dolu hedefi ve eski sürümü reddetme; aynı `requestId` tekrarını idempotent yanıtlama.
 - Ödemesiz kaynak adisyonları hedef açık adisyona birleştirme; kaynak adisyonun `merged_into_check_id` bağını, sipariş geçmişini ve assignment/audit kayıtlarını koruma; ödeme denemesi olan birleştirmeyi reddetme.
 - Backfill sonrası sipariş, ödeme, audit ve assignment satırlarının kimlik ve sayılarının korunduğunu doğrulama.
-- Simüle ödemenin yalnız sales verisi üretmesi; kasa, cari veya muhasebe hareketi üretmemesi.
+- Genel ödeme simülatörünün ve kasiyer test ödemelerinin yalnız sales verisi üretmesi; kasa, cari veya muhasebe hareketi üretmemesi.
+- Garson check ödemesinde `postToCash=true` ile başarılı nakit/kartın tek kasa hareketi ve audit üretmesi; nakdin beklenen çekmeceyi artırması, kartın artırmaması; başarısız/bekleyen/belirsiz sonucun hareket üretmemesi; aynı attempt tekrarında yinelenmemesi; vardiya yok/çokluysa ödeme girişiminin de kaydedilmeden reddedilmesi.

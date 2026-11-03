@@ -40,6 +40,9 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/admin" replace />} />
         <Route path="/admin" element={<Dashboard ctx={ctx} />} />
+        <Route path="/admin/catalog/price-versions" element={<Navigate to="/admin/catalog/prices" replace />} />
+        <Route path="/admin/catalog/scheduled-prices" element={<Navigate to="/admin/catalog/prices" replace />} />
+        <Route path="/admin/catalog/publishing" element={<Navigate to="/admin/catalog/channels" replace />} />
         <Route path="/admin/:section" element={<RouteView ctx={ctx} />} />
         <Route path="/admin/:section/:item" element={<RouteView ctx={ctx} />} />
         <Route

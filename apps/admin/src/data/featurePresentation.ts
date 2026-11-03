@@ -1,4 +1,4 @@
-import { featureStory } from "./featureStories";
+﻿import { featureStory } from "./featureStories";
 
 export type FeatureStage = "working" | "demo" | "inactive" | "setup" | "future";
 
@@ -26,6 +26,9 @@ const demoRoutes = new Set([
   "branches/list", "branches/tables",
   "kitchen/personnel",
   "catalog/menus", "catalog/categories", "catalog/products",
+  "catalog/images",
+  "catalog/channels",
+  "catalog/prices",
   "sales/summary", "sales/checks", "sales/open",
   "customers/customers", "customers/accounts", "customers/history",
   "inventory/summary", "inventory/critical", "inventory/ingredients",
@@ -36,7 +39,6 @@ const demoRoutes = new Set([
 
 // İlk üç aşamanın hedefi: menüde görünür, fakat henüz işlem başlatmaz.
 const inactiveRoutes = new Set([
-  "catalog/prices", "catalog/price-versions", "catalog/publishing", "catalog/publish-history",
   "customers/groups", "customers/consents",
   "inventory/items", "inventory/units", "inventory/warehouses", "inventory/warehouse-stock",
   "inventory/recipe-versions", "inventory/adjustments",
@@ -47,6 +49,14 @@ export function featurePresentation(section: string, item: string, sources: Sour
   const key = `${section}/${item}`;
   const description = featureStory(section, item).description;
   if (section === "finance" && ["expenses", "expense-categories"].includes(item) && sources.expenseSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
+  if (key === "catalog/options" && sources.catalogSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
+  if (key === "catalog/images" && sources.catalogSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
+  if (key === "catalog/channels" && sources.catalogSource === "http")
+    return { stage: "working", label: "Çalışıyor", description };
+  if (key === "catalog/prices" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "catalog/menus" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };

@@ -84,6 +84,12 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 ("firm", firmId), ("branch", branchId), ("actor", actor), ("at", now));
 
             await ExecuteAsync(connection, transaction, """
+                UPDATE sales.check_adjustments SET original_check_id=COALESCE(original_check_id,check_id), check_id=@target
+                WHERE check_id=@source AND firm_id=@firm AND branch_id=@branch
+                """, cancellationToken, ("target", targetCheckId), ("source", source.CheckId),
+                ("firm", firmId), ("branch", branchId));
+
+            await ExecuteAsync(connection, transaction, """
                 UPDATE sales.checks SET status='merged', table_id=NULL, waiter_id=NULL,
                     merged_into_check_id=@target, version=version+1
                 WHERE id=@source AND firm_id=@firm AND branch_id=@branch AND status='open'
@@ -192,7 +198,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             var product = await catalog.GetAsync(new CatalogScope(firmId, branchId),
                 item.ProductId, cancellationToken);
             if (product is null || !product.IsActive || product.Status != "published" ||
-                !product.Channels.Contains("pos") || product.Price.AmountMinor <= 0 ||
+                !product.Channels.Contains("pos") || !product.DesiredChannels.Contains("pos") || product.Price.AmountMinor <= 0 ||
                 product.Price.Currency != "TRY")
                 return SalesOrderResult.Rejected(product is { IsActive: false } ? "PRODUCT_INACTIVE" : "PRODUCT_NOT_SELLABLE", 409,
                     "Ürün bu şubede POS satışına açık değil veya geçerli fiyatı yok.");

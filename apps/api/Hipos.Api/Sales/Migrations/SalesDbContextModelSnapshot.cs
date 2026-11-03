@@ -244,6 +244,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("order_line_id");
 
+                    b.Property<Guid?>("OriginalCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("original_check_id");
+
                     b.Property<int>("Quantity")
                         .HasColumnType("integer")
                         .HasColumnName("quantity");

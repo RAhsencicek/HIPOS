@@ -10,6 +10,7 @@ public sealed class ServiceTableRow
     public string BranchId { get; set; } = "";
     public int Number { get; set; }
     public string Name { get; set; } = "";
+    public string? Floor { get; set; }
     public bool IsActive { get; set; } = true;
     public string Status { get; set; } = "idle";
     public DateTimeOffset? ReservedFor { get; set; }
@@ -118,6 +119,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.ToTable("tables", table =>
             {
                 table.HasCheckConstraint("ck_table_number", "number BETWEEN 1 AND 999");
+                table.HasCheckConstraint("ck_table_floor", "floor IS NULL OR floor IN ('lower','upper')");
                 table.HasCheckConstraint("ck_table_status", "status IN ('idle','occupied','bill_requested','reserved')");
                 table.HasCheckConstraint("ck_table_reserved_for", "(status = 'reserved') = (reserved_for IS NOT NULL)");
             });
@@ -127,6 +129,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.Number).HasColumnName("number");
             entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(80);
+            entity.Property(row => row.Floor).HasColumnName("floor").HasMaxLength(16);
             entity.Property(row => row.IsActive).HasColumnName("is_active");
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(24).HasDefaultValue("idle");
             entity.Property(row => row.ReservedFor).HasColumnName("reserved_for");

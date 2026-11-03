@@ -53,7 +53,7 @@ Bu akışın tek bir dağıtık transaction gibi sunulması doğru olmaz. Firma/
 
 ### Kabul edilmiş sınırlar
 
-- Mevcut ödeme simülatörü yalnız satış ödeme durumunu gösterir; kasa veya cari hareketi üretmez. Bu davranış korunur.
+- Bu taslak harici sağlayıcı olaylarının gerçek POS bağlantısını kapsar; o olay akışında istemcinin/simülatörün `succeeded` beyanı kasa hareketi üretmek için yeterli değildir. Garson ekranındaki iç geliştirme simülasyonunun açık vardiyaya yazılması, ayrı olarak Kasa/POS operasyon sözleşmesinde tanımlanmıştır; harici sağlayıcı entegrasyonu sayılmaz.
 - Gerçek entegrasyon diliminde yalnız sağlayıcı imzası sunucuda doğrulanmış, kesinleşmiş ve `method=cash` olan bağımsız ödeme olayı kasa hareketi oluşturabilir.
 - Genel checkout/adisyon karma olsa bile sağlayıcı nakit parçasını bağımsız, imzalı, kesinleşmiş `cash` olayı olarak ayırıp kimliklendirebiliyorsa yalnız o nakit olayı işlenebilir. Ayrıştırılamayan karma olay `pending/review_required` saklanır ve kasa hareketi oluşturmaz.
 - Kart/yemek kartı/online ödeme, pending/bekleyen, failed/başarısız, unknown/belirsiz parçalar kasayı etkilemez. Simüle ödeme olayları hiçbir durumda kasa hareketi oluşturmaz.
@@ -92,7 +92,7 @@ Bu alanlar sözleşme taslağıdır; mevcut API request'i değildir:
 2. Yalnız imzalı/doğrulanmış, `status=succeeded`, bağımsız `method=cash`, pozitif tutarlı ve desteklenen para birimindeki olay kabul adayıdır. Simüle işaretli olay daima reddedilir/yoksayılır.
 3. İlk aşamada firma/şube kapsamı tek tenant + tek şube ve etkin `MAIN` kasası ile sınırlandırılır. Olay uygun açık vardiyaya güvenle bağlanmadan `cash.movements` yazılmaz. Kasa hareketi ve audit aynı transaction'da oluşturulur; hareket `source=pos` ve sağlayıcı alanlarını taşır. Olayı manuel hareket gibi etiketlememek için hareket türü (`kind`) genişletmesinin migration ihtiyacı uygulama öncesi teyit edilir.
 4. Aynı providerEventId ve aynı normalize edilmiş payload ikinci hareket yaratmaz; önceki sonuç döner. Aynı providerEventId farklı tutar, tender, satış referansı veya kapsam ile gelirse `409 PROVIDER_EVENT_CONFLICT` önerilir; mevcut defter satırı değişmez.
-5. Kart ve diğer nakit dışı parçalar kasa hareketi yaratmaz. Tek ve ayrıştırılamayan karma olay bekleyen/inceleme gereken olarak saklanır; bağımsız ve doğrulanmış nakit parçası ise kendi olay kimliğiyle değerlendirilebilir. Pending, unknown, başarısız ve simüle olay kasa hareketi yaratmaz. İade orijinal satırı değiştirmeden ayrı telafi hareketi üretir. Hiçbir olay cari deftere otomatik yansımaz.
+5. Kart ve diğer nakit dışı sağlayıcı olayları kasa hareketi yaratmaz. Tek ve ayrıştırılamayan karma olay bekleyen/inceleme gereken olarak saklanır; bağımsız ve doğrulanmış nakit parçası ise kendi olay kimliğiyle değerlendirilebilir. Harici sağlayıcıdan doğrulanmamış pending, unknown, başarısız veya simüle olay kasa hareketi yaratmaz. İade orijinal satırı değiştirmeden ayrı telafi hareketi üretir. Hiçbir olay cari deftere otomatik yansımaz.
 
 ### Ekipçe onaylanan olay, karma ödeme ve vardiya davranışları
 
@@ -124,7 +124,7 @@ Bu belirsizlikler çözülmeden olay endpoint'i veya migration yazılmamalı:
 
 - Doğrulanmış tek tender nakit olayı bir kasa hareketi ve bir audit üretir; satış kaydı değişmeden kalır.
 - Aynı olay aynı payload ile tekrarlandığında ikinci hareket/audit oluşmaz; farklı payload aynı event kimliğiyle gelirse 409 olur.
-- Kart, simüle, bekleyen, başarısız ve belirsiz ödeme parçaları kasa hareketi üretmez. Ayrıştırılamayan karma olay bekler; yalnız bağımsız ve doğrulanmış nakit olayı yazılır.
+- Harici sağlayıcının kart, simüle, bekleyen, başarısız ve belirsiz olayları kasa hareketi üretmez. Ayrıştırılamayan karma olay bekler; yalnız bağımsız ve doğrulanmış nakit olayı yazılır. İç garson simülasyonu bu sağlayıcı entegrasyon kapsamının dışındadır.
 - İade, orijinal hareketi değiştirmeden orijinal provider event'ine bağlı tekil bir telafi hareketi üretir.
 - İlk gerçek entegrasyonda yalnız tek şubenin etkin MAIN kasası hedeflenir.
 - Cari hareket sayısı ve cari bakiyesi olay öncesi/sonrası değişmez.

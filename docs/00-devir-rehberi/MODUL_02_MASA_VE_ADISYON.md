@@ -28,14 +28,13 @@
 * **Kısmen Hazır / Bekleyenler:**
   - Garson ekranında yüzde/sabit adisyon indirimi ile gerekçeli miktar bazlı ikram/kalem iptali API'ye kaydedilir. Her kayıt actor, gerekçe ve zaman bilgisiyle denetim izi taşır. Yönetici onayı yalnız `Development` ortamında test amacıyla atlanır; diğer ortamlarda onaysız işlem reddedilir. Gerçek kimlik doğrulama/PIN onayı yönetim ekranı aşamasında tamamlanacaktır.
   - Ücret etkili ürün modifier seçenekleri Modül 4 kapsamındadır; mevcut garson seçenekleri demo amaçlı ve ücretsizdir.
-  - Development simüle ödeme akışında adisyonun tam tahsilat sonrası kapanması, bağlı masanın boşaltılması ve fiziksel masa grubunun son açık adisyon ödendiğinde kapatılması uygulanmıştır. Migration uygulanıp API yeniden başlatılmalıdır.
-  - Gerçek kasa/POS tahsilatı ve ödeme hareketinin kasa kaydıyla ilişkilendirilmesi henüz yoktur; garson ekranı ödeme almaz, tahsilat sonucunu gösterir.
+  - Garson ekranındaki Ödeme Al düğmesi seçilen masayla kasa ekranını açar. Tahsilat işlemi kasa ekranında yürütülür; gerçek kart/POS entegrasyonu ve üretim yetkilendirmesi henüz yoktur.
 
 ---
 
 ## 🎯 1. Modülün Amacı Nedir?
 
-Bu modül; garson sipariş girişi, masa taşıma/birleştirme, adisyon bölme ve gerekçeli indirim/ikram kayıtlarını ortak adisyon çekirdeğine bağlar. Simüle tahsilat tamamlandığında adisyon kapanır; açık hesap kalmamışsa masa veya fiziksel masa grubu boşaltılır. Gerçek ödeme/kasa entegrasyonu ve yönetici onayı henüz tamamlanmamıştır.
+Bu modül; garson sipariş girişi, masa taşıma/birleştirme, adisyon bölme ve gerekçeli indirim/ikramı ortak adisyon çekirdeğine bağlar. Garson ödeme için kasa ekranını açar. Simüle tahsilat tamamlandığında adisyon kapanır; açık hesap kalmamışsa masa veya fiziksel masa grubu boşaltılır. Gerçek ödeme/ÖKC entegrasyonu ve yönetici onayı henüz tamamlanmamıştır.
 
 Kısacası: **Restoran salonunun ve masadaki açık hesapların (adisyonların) kalbidir.**
 
@@ -76,6 +75,10 @@ Sizin çalışma alanınız temel olarak şuralardır (doğrudan kod satırına 
 * Hesap isteme ve rezervasyon durumları bu adımla kalıcı Service masa durumlarına ve garson ekranına eklenmiştir. Kalem iptali adisyon kaydına ek olarak mutfak sipariş anlık görüntüsüne iptal bildirimi satırı yazar. Development simüle tahsilatında tam ödenen adisyon kapanır; masadaki/gruptaki diğer açık adisyonlar da bitince salon masaları boşaltılır. Gerçek kasa/POS tahsilatı henüz yoktur.
 
 ### 🗺️ Salon Masa Planı ve Durumları
+
+* Masa katı yönetim panelindeki Masa Planı ekranından **Alt kat**, **Üst kat** veya **Kat seçilmedi** olarak belirlenir. Kayıt şubeye bağlıdır; mevcut ve yeni masalar otomatik bir kata atanmaz. Garson ekranı seçilmiş katları ayrı başlık ve çizgilerle, atanmamış masaları ayrı gösterir.
+* Kat güncellemesi yönetici kapsamı, `branches.tables` ve güncel masa sürümü gerektirir. `PUT /service/tables/{tableId}/floor` `{ floor: "lower" | "upper" | null, expectedVersion }` kabul eder; masa ve adisyon kimliklerini değiştirmez. `AddTableFloor` Service migration'ı uygulanmalıdır.
+
 * **Boş masa:** Açık adisyon yok; hedef akışta seçilince yeni ortak adisyon başlatılır.
 * **Dolu masa / açık hesap:** Açık adisyon ve tutar görünür.
 * **Hesap istendi:** Müşteri hesabı istemiştir; Service veritabanına yazılır, tahsilat tamamlanana veya istek kaldırılana kadar masa dolu kalır.
