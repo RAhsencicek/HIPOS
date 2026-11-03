@@ -196,7 +196,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   if (productId) {
     content = <ProductDetail ctx={ctx} productId={productId} canWriteDraft={canWriteDraft}
       canSetPrice={canSetPrice} canPublish={canPublish} inventorySource={inventorySource} />;
-  } else if (!section || (section === "overview" && (!item || item === "dashboard" || item === "summary"))) {
+  } else if (!section || (section === "overview" && !item)) {
     content = <Dashboard ctx={ctx} />;
   } else if (section === "overview" && item === "daily") {
     content = <DailyStatusPage ctx={ctx} />;
@@ -293,7 +293,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
   }
 
   const presentationSection = productId ? "catalog" : section ?? "overview";
-  const rootItem: Record<string, string> = { overview: "dashboard", branches: "list", sales: "summary", inventory: "summary", reports: "sales", settings: "modules" };
+  const rootItem: Record<string, string> = { overview: "daily", branches: "list", sales: "summary", inventory: "summary", reports: "sales", settings: "modules" };
   const presentationItem = productId ? "products" : item ?? rootItem[presentationSection] ?? "daily";
   const basePresentation = featurePresentation(presentationSection, presentationItem, sources);
   const presentation = state?.lifecycle === "setup_required" &&
@@ -326,7 +326,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
           görünümünde yeni işlem için önce hedef şubeyi seçin.
         </div>
       )}
-      {!generic && !(presentationSection === "overview" && (presentationItem === "dashboard" || presentationItem === "daily" || presentationItem === "turnover" || presentationItem === "alerts" || presentationItem === "activity")) && <div className="notice feature-stage-notice" role="status">
+      {!generic && !(presentationSection === "overview" && (presentationItem === "daily" || presentationItem === "turnover" || presentationItem === "alerts" || presentationItem === "activity")) && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>
       </div>}

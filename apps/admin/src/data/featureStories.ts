@@ -9,11 +9,6 @@ type StoryDraft = readonly [string, string, readonly [string, string, string]];
 // Müşteriye gösterilen içerik, özelliğin teknik hazırlık durumundan bağımsız tutulur.
 const storyGroups: Record<string, Record<string, StoryDraft>> = {
   overview: {
-    dashboard: [
-      "İşletmenizin genel bakışı ve performansı",
-      "Kümülatif satışlar, en çok satan lezzetler, ciro ritmi ve stratejik işletme metriklerini tek ekrandan inceleyin.",
-      ["En çok satan lezzetleri görün", "Satış ritmini ve ciroları takip edin", "Tüm işletme performansını değerlendirin"],
-    ],
     turnover: [
       "Aylık ve günlük ciro analizi",
       "Her ayın ve her günün cirosunu, sipariş adedini ve ortalama sepet tutarını inceleyin.",

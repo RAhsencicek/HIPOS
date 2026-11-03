@@ -76,11 +76,13 @@ Genel Bakış (`overview`), restoran sahibinin veya şube müdürünün sisteme 
 
 ### 2.7. "Genel Bakış" ve "Günlük Durum" Sayfalarının Kesin Olarak Ayrıştırılması
 - **Mimari Ayrım:**
-  - **Genel Bakış (`/admin`, `/admin/overview`, `/admin/overview/dashboard`):** İşletmenin makro yönetim merkezidir (`OverviewPage.tsx`). Karşılama kokpiti, kümülatif metrikler, kasa kâr oranı, 3 günlük ciro ritmi, **En Çok Satan Yiyecekler (Top Selling Dishes)** ve menü analitiği burada yer alır.
+  - **Genel Bakış (`/admin`, `/admin/overview`):** İşletmenin makro yönetim merkezidir (`OverviewPage.tsx`). Sol menüdeki ana "Genel Bakış" başlığı doğrudan bu sayfayı açar. Karşılama kokpiti, kümülatif metrikler, kasa kâr oranı, 3 günlük ciro ritmi, **En Çok Satan Yiyecekler (Top Selling Dishes)** ve menü analitiği burada yer alır.
   - **Günlük Durum (`/admin/overview/daily`):** Sadece ve kesin olarak **o günkü canlı operasyonel verilere** odaklanan bağımsız sayfadır (`DailyStatusPage.tsx`). Bugünün açık siparişleri, servisteki masaları, kritik hammadde uyarıları ve açık vardiya durumunu gösterir.
   - **Kümülatif Analitik İzolasyonu:** "Top Selling Dishes" ve makro ciro grafikleri Günlük Durum ekranında kesinlikle yer almaz; yalnızca Genel Bakış'ta çalışır.
-- **Navigasyon ve Rota Ayrımı:**
-  - Yan menüde (`catalog.ts` ve `AdminShell.tsx`) hem bağımsız "Genel Bakış" hem de "Günlük Durum" bağlantıları tanımlanarak doğrudan iki ayrı bileşene (`Dashboard` ve `DailyStatusPage`) bağlandı.
+- **Yalın Menü Hiyerarşisi:**
+  - Sol yan menüde üst ana başlık **"Genel Bakış"** (`/admin/overview`) doğrudan ana kokpiti açar.
+  - Mükerrerliği önlemek adına alt menüden gereksiz ikinci Genel Bakış (`/admin/overview/dashboard`) kaldırılmıştır.
+  - Alt menü yalın olarak `Günlük Durum`, `Aylık ve Günlük Ciro`, `Uyarılar` ve `Son İşlemler` maddelerini listeler.
 
 ---
 

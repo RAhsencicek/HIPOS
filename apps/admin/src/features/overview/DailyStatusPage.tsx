@@ -287,7 +287,7 @@ export function DailyStatusPage({ ctx }: { ctx: ViewContext }) {
             >
               <RefreshCw size={15} /> Yenile
             </button>
-            <Link to="/admin/overview/dashboard" className="daily-to-overview-link">
+            <Link to="/admin/overview" className="daily-to-overview-link">
               <Sparkles size={15} /> Genel Bakış'a Git <ArrowRight size={14} />
             </Link>
           </div>
