@@ -1,4 +1,5 @@
 using Hipos.Api.Cari;
+using Hipos.Api.Cash;
 using Hipos.Api.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -9,8 +10,9 @@ namespace Hipos.Api.Inventory;
 public sealed record PurchaseLineInput(string IngredientId, decimal Quantity, long UnitPriceMinor,
     int DiscountRateBps, int TaxRateBps);
 public sealed record CreatePurchaseDraft(string RequestId, string WarehouseId, string SupplierCariId,
-    string DocumentNumber, DateOnly DocumentDate, PurchaseLineInput[] Lines);
-public sealed record ApprovePurchase(string RequestId, int ExpectedVersion);
+    string DocumentNumber, DateOnly DocumentDate, PurchaseLineInput[] Lines, string? PurchaseOrderId = null);
+public sealed record CashPaymentAllocation(string RegisterId, long AmountMinor);
+public sealed record ApprovePurchase(string RequestId, int ExpectedVersion, string? PaymentMode = "on_account", List<CashPaymentAllocation>? CashPayments = null);
 public sealed record CorrectPurchaseDelivery(string RequestId, string PurchaseLineId, decimal Quantity, string Reason);
 public sealed record ReturnPurchaseDelivery(string RequestId, string PurchaseLineId, string DocumentNumber,
     DateOnly DocumentDate, decimal Quantity, string Reason);
@@ -78,10 +80,33 @@ public static class ProcurementEndpoints
                 row.IsActive && ids.Contains(row.Id)).ToDictionaryAsync(row => row.Id, context.RequestAborted);
             if (ingredients.Count != ids.Length) return Fail(context, "INGREDIENT_NOT_FOUND", 404, "Belgedeki hammaddelerden biri bulunamadı veya pasif.");
 
+            InventoryPurchaseOrderRow? linkedOrder = null;
+            if (!string.IsNullOrWhiteSpace(command.PurchaseOrderId))
+            {
+                linkedOrder = await db.PurchaseOrders.Include(row => row.Lines)
+                    .SingleOrDefaultAsync(row => row.Id == command.PurchaseOrderId && row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
+                if (linkedOrder is null)
+                    return Fail(context, "PURCHASE_ORDER_NOT_FOUND", 404, "Bağlı satın alma siparişi bulunamadı.");
+                if (linkedOrder.Status != "approved")
+                    return Fail(context, "PURCHASE_ORDER_NOT_APPROVED", 409, "Yalnız onaylı satın alma siparişi mal kabule bağlanabilir.");
+                if (linkedOrder.WarehouseId != warehouse.Id || linkedOrder.SupplierCariId != supplier.Id)
+                    return Fail(context, "PURCHASE_ORDER_MISMATCH", 409, "Sipariş depo veya tedarikçisi mal kabul ile uyuşmuyor.");
+
+                if (linkedOrder.Lines.Count != command.Lines.Length)
+                    return Fail(context, "PURCHASE_ORDER_LINES_MISMATCH", 409, "Sipariş satırları mal kabul satırları ile tam olarak eşleşmelidir.");
+
+                foreach (var oLine in linkedOrder.Lines)
+                {
+                    var matchedReceiptLine = command.Lines.SingleOrDefault(l => l.IngredientId == oLine.IngredientId);
+                    if (matchedReceiptLine is null || matchedReceiptLine.Quantity != oLine.Quantity)
+                        return Fail(context, "PURCHASE_ORDER_LINES_MISMATCH", 409, "Sipariş miktarları mal kabul miktarları ile birebir eşleşmelidir.");
+                }
+            }
+
             var now = DateTimeOffset.UtcNow;
             var purchase = new InventoryPurchaseRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
                 WarehouseId = warehouse.Id, SupplierCariId = supplier.Id, DocumentNumber = documentNumber,
-                DocumentDate = command.DocumentDate, CreatedAt = now, CreatedBy = DemoAccess.Resolve(context)!.Name };
+                DocumentDate = command.DocumentDate, PurchaseOrderId = linkedOrder?.Id, CreatedAt = now, CreatedBy = DemoAccess.Resolve(context)!.Name };
             foreach (var input in command.Lines)
             {
                 var amounts = Amounts(input);
@@ -108,7 +133,7 @@ public static class ProcurementEndpoints
 
         group.MapPost("/{purchaseId}/approve", async (string firmId, string branchId, string purchaseId,
             ApprovePurchase command, HttpContext context, InventoryDbContext db, CariDbContext cari,
-            FeatureNewWorkGate gate) =>
+            CashDbContext cash, FeatureNewWorkGate gate) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -137,6 +162,8 @@ public static class ProcurementEndpoints
 
             cari.Database.SetDbConnection(db.Database.GetDbConnection(), false);
             await cari.Database.UseTransactionAsync(transaction.GetDbTransaction(), context.RequestAborted);
+            cash.Database.SetDbConnection(db.Database.GetDbConnection(), false);
+            await cash.Database.UseTransactionAsync(transaction.GetDbTransaction(), context.RequestAborted);
             var supplier = await cari.Parties.FromSqlInterpolated($"SELECT * FROM cari.parties WHERE id = {purchase.SupplierCariId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (supplier is null || !supplier.IsActive || !supplier.Types.Contains("supplier"))
@@ -165,9 +192,118 @@ public static class ProcurementEndpoints
                 Action = "movement_added", Actor = actor, Detail = $"supplier_debt · {purchase.TotalMinor} · {purchase.DocumentNumber}", OccurredAt = now });
             purchase.Status = "approved"; purchase.Version++; purchase.ApprovedAt = now;
             purchase.ApprovedBy = actor; purchase.ApprovalRequestId = command.RequestId;
+            if (!string.IsNullOrWhiteSpace(purchase.PurchaseOrderId))
+            {
+                var linkedOrder = await db.PurchaseOrders.FromSqlInterpolated($"SELECT * FROM inventory.purchase_orders WHERE id = {purchase.PurchaseOrderId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
+                    .SingleOrDefaultAsync(context.RequestAborted);
+                if (linkedOrder is not null)
+                {
+                    linkedOrder.Status = "completed";
+                    linkedOrder.CompletedAt = now;
+                    linkedOrder.CompletedByPurchaseId = purchase.Id;
+                }
+            }
             db.Audit.Add(new InventoryAuditRow { FirmId = firmId, BranchId = branchId, WarehouseId = purchase.WarehouseId,
                 EntityId = purchase.Id, Action = "purchase_approved", RequestId = command.RequestId, Actor = actor,
                 Detail = $"{purchase.DocumentNumber} · {purchase.TotalMinor} kuruş", OccurredAt = now });
+                        if (command.PaymentMode == "immediate_cash" && command.CashPayments is { Count: > 0 })
+            {
+                var positivePayments = command.CashPayments.Where(p => p.AmountMinor > 0).ToList();
+                var totalCashPaidMinor = positivePayments.Sum(p => p.AmountMinor);
+                if (totalCashPaidMinor > purchase.TotalMinor)
+                    return Fail(context, "EXCESSIVE_CASH_PAYMENT", 400, "Kasalardan çekilecek tutarlar toplamı, mal kabul toplamını aşamaz.");
+
+                foreach (var allocation in positivePayments)
+                {
+                    if (!Guid.TryParse(allocation.RegisterId, out var regId))
+                        return Fail(context, "INVALID_REGISTER_ID", 400, "Geçersiz kasa kimliği.");
+
+                    var register = await cash.Registers.FromSqlInterpolated($"SELECT * FROM cash.registers WHERE firm_id = {firmId} AND branch_id = {branchId} AND id = {regId} FOR UPDATE")
+                        .SingleOrDefaultAsync(context.RequestAborted);
+                    if (register is null || !register.IsActive)
+                        return Fail(context, "REGISTER_NOT_AVAILABLE", 409, "Seçilen kasa bulunamadı veya etkin değil.");
+
+                    var shift = await cash.Shifts.FromSqlInterpolated($"SELECT * FROM cash.shifts WHERE firm_id = {firmId} AND branch_id = {branchId} AND register_id = {register.Id} AND status = 'open' FOR UPDATE")
+                        .SingleOrDefaultAsync(context.RequestAborted);
+                    if (shift is null)
+                        return Fail(context, "CASH_SHIFT_NOT_OPEN", 409, $"'{register.Name}' kasasında açık bir vardiya bulunmuyor.");
+
+                    var shiftMovements = await cash.Movements.Where(m => m.FirmId == firmId && m.BranchId == branchId && m.ShiftId == shift.Id)
+                        .ToListAsync(context.RequestAborted);
+                    var availableCashMinor = shiftMovements.Sum(row => row.Kind switch
+                    {
+                        "opening_float" or "manual_in" => row.AmountMinor,
+                        "manual_out" => -row.AmountMinor,
+                        _ => 0L,
+                    });
+
+                    if (allocation.AmountMinor > availableCashMinor)
+                        return Fail(context, "INSUFFICIENT_CASH", 409, $"'{register.Name}' kasasında yeterli nakit yok (Mevcut: {availableCashMinor / 100.0:N2} TL, Talep: {allocation.AmountMinor / 100.0:N2} TL).");
+
+                    var cashMovementId = Guid.NewGuid();
+                    cash.Movements.Add(new CashMovementRow
+                    {
+                        Id = cashMovementId,
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        RegisterId = register.Id,
+                        ShiftId = shift.Id,
+                        Kind = "manual_out",
+                        Category = "expense",
+                        AmountMinor = allocation.AmountMinor,
+                        Currency = "TRY",
+                        Description = $"Tedarikçi ödemesi · {purchase.DocumentNumber} · {supplier.Name}",
+                        Source = "manual",
+                        Actor = actor,
+                        CreatedAt = now
+                    });
+
+                    cash.Audit.Add(new CashAuditRow
+                    {
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        RegisterId = register.Id,
+                        ShiftId = shift.Id,
+                        RequestId = Guid.NewGuid(),
+                        EntityType = "movement",
+                        EntityId = cashMovementId,
+                        Action = "movement_added",
+                        Actor = actor,
+                        Detail = $"Tedarikçi ödemesi · {purchase.DocumentNumber} · {allocation.AmountMinor} kuruş",
+                        OccurredAt = now
+                    });
+
+                    cari.Movements.Add(new CariMovementRow
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        PartyId = supplier.Id,
+                        Kind = "supplier",
+                        EntryType = "supplier_payment",
+                        DeltaMinor = -allocation.AmountMinor,
+                        Currency = "TRY",
+                        Description = $"Kasadan tediye ödemesi ({register.Name}) · {purchase.DocumentNumber}",
+                        Reference = purchase.DocumentNumber,
+                        EffectiveDate = purchase.DocumentDate,
+                        Source = "purchase",
+                        Actor = actor,
+                        CreatedAt = now
+                    });
+
+                    cari.Audit.Add(new CariAuditRow
+                    {
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        PartyId = supplier.Id,
+                        Action = "movement_added",
+                        Actor = actor,
+                        Detail = $"supplier_payment · {allocation.AmountMinor} · {purchase.DocumentNumber} · {register.Code}",
+                        OccurredAt = now
+                    });
+                }
+            }
+            await cash.SaveChangesAsync(context.RequestAborted);
             await db.SaveChangesAsync(context.RequestAborted);
             await cari.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
@@ -405,7 +541,7 @@ public static class ProcurementEndpoints
     }
     private static object View(InventoryPurchaseRow row, string supplierName, IReadOnlyDictionary<string, string> ingredients) => new
     {
-        row.Id, row.WarehouseId, row.SupplierCariId, supplierName, row.DocumentNumber, row.DocumentDate, row.Status,
+        row.Id, row.WarehouseId, row.SupplierCariId, supplierName, row.DocumentNumber, row.DocumentDate, row.PurchaseOrderId, row.Status,
         row.Currency, row.SubtotalMinor, row.DiscountMinor, row.TaxMinor, row.TotalMinor, row.Version,
         row.CreatedAt, row.CreatedBy, row.ApprovedAt, row.ApprovedBy,
         corrections = row.Corrections.OrderByDescending(item => item.CreatedAt).Select(CorrectionView).ToArray(),

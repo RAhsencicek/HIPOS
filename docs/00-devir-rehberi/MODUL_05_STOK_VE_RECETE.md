@@ -2,7 +2,7 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi, Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Tedarikçi İadesi ve Fire/Zayi (Çalışıyor) · Eksik Teslim Düzeltmesi (Backend/Geçmiş Korunuyor, Yeni UI Yok) · Otomatik Tüketim (Hedef / Sırada)
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Tek Teslimli Satın Alma Siparişi, Tedarikçi İadesi, Hammadde ve Reçeteli Ürün Zayisi (Çalışıyor) · Otomatik Satış Tüketimi (Hedef)
 > **PostgreSQL Şeması:** `inventory`
 > **Yönetim Paneli:** Var (`InventoryHttpPage.tsx`)
 > **API:** Var (`InventoryDbContext.cs`)
@@ -28,15 +28,15 @@
 | **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
 | **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
 | **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Çalışıyor** | Taslak ve onay ile tedarikçiye iade kalıcıdır; eksik teslim düzeltmesinin backend/geçmişi korunur, yeni form panelde yoktur |
-| **Fire kaydı** | **Çalışıyor** | Gerekçeli fire kaydı stoktan `waste_loss` hareketiyle düşer; gerçek şef PIN onayı auth modülünü bekler |
+| **Satın alma / mal kabul** | **Çalışıyor** | Fiyatsız sipariş taslağı/onayı tek teslimle mal kabule bağlanır; mal kabul stok+cari etkisi, eksik teslim düzeltmesi ve tedarikçiye iade kalıcıdır |
+| **Fire kaydı** | **Çalışıyor** | Hammadde firesi ve aktif reçete sürümünü snapshot alan ürün zayisi atomik `waste_loss` hareketleri oluşturur |
 | **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır |
 
 ---
 
 ## 🎯 1. Modülün Amacı Nedir?
 
-Bu modül; hammadde, reçete, stok hareketi, sayım, mal kabul, tedarikçiye iade ve fire/zayi akışlarını kapsar. Satıştan otomatik tüketim (`recipe_consumption`), satın alma talebi/siparişi ve ayrı fiyatlandırma/maliyet alanı henüz tamamlanmamıştır.
+Bu modül; hammadde, reçete, stok hareketi, sayım, fiyatsız satın alma siparişi, mal kabul, tedarikçiye iade ve hammadde/reçeteli ürün zayisi akışlarını kapsar. Satıştan otomatik tüketim (`recipe_consumption`), satın alma talebi ve ayrı fiyatlandırma/maliyet alanı henüz tamamlanmamıştır.
 
 Kısacası: **Restoranın hammadde maliyetini, depo güvenliğini ve stok kaçaklarını önleyen envanter motorudur.**
 
@@ -70,7 +70,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * Depodaki mevcut hammaddeler: Adı, Birimi (kg, litre, adet), Sistem Miktarı, Kritik Eşik.
 * **Kritik Eşik Alarmları:**
   * Eğer Mozzarella 2 kg'ın altına düşmüşse kırmızı uyarı rozeti: `⚠️ Kritik Stok: Mozzarella (1.400 g kaldı)`.
-* Satın alma talebi henüz yoktur; mal kabul ve tedarikçi iadesi ayrı mal kabul ekranında çalışır. Önceden oluşturulmuş eksik teslim düzeltmeleri backend ve denetim geçmişinde korunur; yeni düzeltme formu panelden kaldırılmıştır.
+* Satın alma talebi henüz yoktur. Fiyat içermeyen satın alma siparişi taslak/onay akışı çalışır; onaylı sipariş aynı hammadde ve miktarlarla tek seferde mal kabule bağlanır. Kısmi teslim desteklenmez.
 
 ### 🍕 EKRAN 2: Reçeteli Otomatik Stok Düşümü (Satış Olayı Entegrasyonu) (Hedef Arka Plan Servisi — Geliştirilecek)
 * Sistemde tanımlı Margherita Pizza Reçetesi:
@@ -84,15 +84,19 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 
 ### 🚚 EKRAN 3: Mal Kabul ve Alış İrsaliyesi Ekranı (Çalışıyor — `ReceivingPage.tsx`)
 * Belge taslak kaydedilir; taslak stok veya cari bakiyeyi değiştirmez.
-* Onay stok girişini ve tedarikçi borcunu tek işlemde oluşturur. Açık sayım onayı engeller; tekrar onay çift kayıt üretmez.
+* Fiyatsız satın alma siparişi `Taslak → Onaylandı → Teslim alındı` durumlarını taşır. Sipariş seçildiğinde tedarikçi/depo kilitlenir, kalem ve miktarlar forma otomatik dolar. Sağ üstteki `[+ Yeni Satın Alma Siparişi]` modalı ile hızlı sipariş oluşturulup hemen onaylanabilir.
+* `[ Onayla ]` tıklandığında **Onay ve Ödeme Modalı** açılır:
+  * **Borç Olarak Yaz (on_account):** Tutar tedarikçinin cari hesabına borç (`supplier_debt`) yazılır.
+  * **Hemen Ödensin (immediate_cash):** Şubedeki açık kasalar ve çekmecedeki nakit bakiyeleri listelenir. Tekil veya birden fazla kasadan parçalı nakit çıkışı (`cash.movements` `manual_out`) yapılır ve aynı atomik işlemde tedarikçi borcu (`cari.movements` `supplier_payment`) kapatılır. Kısmi ödemede kalan tutar cari borç kalır.
+* Açık depo sayımı mal kabul onayını engeller (`COUNT_IN_PROGRESS`); tekrar onay çift kayıt üretmez.
 * Tedarikçiye iade, özgün mal kabul satırına bağlı stok ve cari ters hareketi oluşturur.
-* Eksik teslim düzeltmesinin backend ve denetim geçmişi korunur; yeni düzeltme formu ekranda gösterilmez.
-* Kritik stok uyarısından satın alma talebi başlatma ve bu talebi sipariş/irsaliye ile ilişkilendirme gelecek kapsamdır.
+* Eksik teslim düzeltmesi (`purchase_correction`): Onaylı belge detayında hammadde satırı, eksik miktar ve açıklama girilerek stoktan ve cari borçtan aynı anda düşen düzeltme fişi kaydedilebilir.
+* Mobil uyum: Mal kabul satırları ve geçmiş belgeler tabloları dar ekranlarda taşmayan, tam genişlikli girdi ve hizalı değerler sunan responsive kart düzenindedir.
 * Toptancıdan kamyonla 10 çuval un (500 kg) geldiğinde:
   * Yönetici veya depo sorumlusu faturayı / irsaliyeyi açar.
   * Tedarikçi seçilir: `ABC Gıda Toptan A.Ş.`.
   * Giren Hammadde: `500 kg Pizza Unu` · Birim Fiyat: `22,50 TL/kg`.
-  * `[ Mal Kabulü Onayla ]` tıklandığında: Depo stoğu anında 500 kg artar ve tedarikçinin Cari hesabına borç faturası işlenir.
+  * `[ Mal Kabulü Onayla ]` tıklandığında: Depo stoğu anında 500 kg artar ve tercihe göre cari borç veya kasadan nakit tediye işlenir.
 
 ### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Ekranı (Çalışıyor)
 * Mutfakta yere dökülen süt, bozulan et veya yanan pizza için:
@@ -101,7 +105,8 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
   * Açıklama: `"Dolap arızası sebebiyle bozuldu"`.
   * Kayıt mevcut yönetici aktörüyle stoktan düşülür ve denetim izi oluşturur.
   * Fire/zayi ekranı fiyat veya maliyet bilgisi istemez; fiyatlandırma ve maliyet raporu ayrı modüle ertelenmiştir.
-  * Gerçek şef PIN onayı auth modülünü; reçeteli ürün zayisi ise ürün/reçete giriş türünü bekler.
+  * Reçeteli ürün zayisi kayıt anındaki en güncel reçete sürümünü ve bileşen miktarlarını snapshot alır. Porsiyon sayısı ile çarpılan bütün hammaddeler tek işlemde düşer; biri yetersizse hiçbir hareket oluşmaz.
+  * Gerçek şef PIN onayı auth modülünü bekler.
 
 ### 📋 EKRAN 5: Depo Fiziksel Sayım ve Onay Ekranı (Mevcut Çalışan Ekran — `InventoryHttpPage.tsx` sayım görünümü)
 * Sayım Taslağı Açma -> Fiziksel miktarları sayıp girme -> Fark Analizi (`Sayılan - Sistem`) -> Yönetici onayıyla tek hareketle stoku eşitleme.

@@ -40,10 +40,13 @@ Tek şube **Mahalle Fırını / Kadıköy** bağlamını seçin. **Ayarlar → M
 ## 5. Mal kabul ve tedarikçiye iade
 
 1. **Mal Kabul** ekranında tedarikçi, depo, belge numarası/tarihi ve en az bir hammadde satırıyla taslak oluşturun. Taslak stok veya cari bakiyeyi değiştirmemeli.
-2. Taslağı onaylayın. Hammadde stoğu `receiving` hareketiyle artmalı ve tedarikçi carisinde `supplier_debt` oluşmalı. Aynı onay tekrarında ikinci hareket oluşmamalı.
-3. Açık sayım varken mal kabul onayını deneyin; `409 COUNT_IN_PROGRESS` dönmeli.
-4. Onaylı satır için tedarikçiye iade kaydedin. Stok `supplier_return` ile azalmalı, tedarikçi borcu bağlı ters cari hareketle düşmeli.
-5. Eksik teslim için yeni düzeltme formu panelde görünmemeli. Önceden oluşturulmuş düzeltmeler ve backend denetim geçmişi korunmalı.
+2. Taslağın yanındaki **Onayla** butonuna tıklayın. Açılan modalda ödeme yöntemi seçin:
+   - **Borç Olarak Yaz:** Onaylandığında hammadde stoğu `receiving` hareketiyle artmalı ve tedarikçi carisinde `supplier_debt` oluşmalı.
+   - **Hemen Ödensin:** Şubedeki açık kasalar ve çekmecedeki nakit görünmeli; seçilen kasalardan girilen tutarlar kadar `cash.movements` (`manual_out`) düşmeli ve tedarikçi carisinde `supplier_payment` tediye hareketi oluşmalı.
+3. Aynı onay tekrarında ikinci hareket oluşmamalı (idempotent).
+4. Açık sayım varken mal kabul onayını deneyin; `409 COUNT_IN_PROGRESS` dönmeli.
+6. Onaylı satır için **Tedarikçiye İade** kaydedin. Stok `supplier_return` ile azalmalı, tedarikçi borcu bağlı ters cari hareketle düşmeli. Kalan miktarı aşan iade engellenmeli.
+5. Onaylı belge detayında **Eksik Teslim** düzeltme fişini doldurun (satır, eksik miktar, gerekçe). Stok `purchase_correction` ile düşmeli ve tedarikçi borcu `adjustment_decrease` ile azalmalı. Kalan miktardan fazla düzeltme engellenmeli.
 
 ## 6. Fire ve zayi
 
@@ -53,7 +56,23 @@ Tek şube **Mahalle Fırını / Kadıköy** bağlamını seçin. **Ayarlar → M
 4. Ekranda birim maliyet, açılış maliyeti veya parasal zayi özeti görünmemeli. Maliyet bilgisi bulunmaması fire kaydını engellememeli.
 5. Gerçek şef PIN onayı henüz yoktur; ekrandaki demo aktörü üretim yetkilendirmesi sayılmamalı.
 
-## 7. Modül sınırı
+## 7. Reçeteli ürün zayisi
+
+1. **Fire Kayıtları** ekranında kayıt türünü **Reçeteli ürün zayisi** seçin; Margherita Pizza ve 2 porsiyon girin.
+2. Ekranda aktif reçete sürümü ve düşecek Un, Domates sosu ve Mozzarella miktarları görünmeli.
+3. Kaydı tamamlayın. Üç hammadde `reçete miktarı × 2` kadar ve aynı işlemde `waste_loss` hareketleriyle azalmalı; geçmiş kayıt reçete sürümünü göstermeli.
+4. Aynı istek kimliğini API'de tekrarlayın; ikinci stok düşümü oluşmamalı.
+5. Hammaddelerden birinin karşılayamayacağı porsiyon sayısını deneyin; işlem reddedilmeli ve hiçbir reçete bileşeni düşmemeli.
+
+## 8. Satın alma siparişi → tek teslimli mal kabul
+
+1. Mal kabul ekranında fiyat girmeden tedarikçi, depo, sipariş no/tarihi ve hammadde miktarlarıyla sipariş taslağı oluşturun; taslak stok veya cari hareket üretmemeli.
+2. Siparişi onaylayın; durum **Onaylandı** olmalı, yine stok/cari etkisi oluşmamalı.
+3. Onaylı siparişi mal kabul formunda seçin. Tedarikçi, depo, hammaddeler ve miktarlar siparişten gelmeli; miktarlar değiştirilememeli. Fiyat, iskonto ve KDV mal kabulde girilmeli.
+4. Sipariş miktarından eksik veya fazla mal kabulü API üzerinden deneyin; `PURCHASE_ORDER_LINES_MISMATCH` ile reddedilmeli.
+5. Eşleşen mal kabulü onaylayın. Stok ve tedarikçi borcu bir kez oluşmalı; sipariş **Teslim alındı** durumuna geçmeli ve ikinci bir mal kabul belgesine bağlanamamalı.
+
+## 9. Modül sınırı
 
 1. Sayım açıkken **Stok Takibi** veya **Stok Sayımı** kapatmayı deneyin. API `409 INVENTORY_COUNT_OPEN` vermeli; tercih açık kalmalı.
 2. Sayımı onaylayın veya iptal edin; sonra modülü kapatın. Geçmiş kayıtlar okunur kalmalı, yeni yazmalar reddedilmeli.
