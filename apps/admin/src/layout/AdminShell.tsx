@@ -110,7 +110,7 @@ export function Shell({
                       <Link
                         key={item.slug}
                         to={`/admin/${section.id}/${item.slug}`}
-                        className={location.pathname === `/admin/${section.id}/${item.slug}` ? "active" : ""}
+                        className={location.pathname === `/admin/${section.id}/${item.slug}` || (section.id === "overview" && item.slug === "dashboard" && (location.pathname === "/admin" || location.pathname === "/admin/" || location.pathname === "/admin/overview")) ? "active" : ""}
                       >
                         {item.label}
                       </Link>

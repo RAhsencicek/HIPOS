@@ -74,17 +74,26 @@ Genel Bakış (`overview`), restoran sahibinin veya şube müdürünün sisteme 
 - **4 Kolonlu Hero Stats:** Masaüstünde 4 eşit kolon, tablette 2x2 ve mobilde tek kolon olarak esneyen responsive ızgara kurgulandı.
 - **Auto-Fit Gündem Izgarası:** Siparişler, Masalar, Stok ve Kasalar kartları ekran genişliğine göre taşma yapmadan yerleşecek şekilde güncellendi.
 
+### 2.7. "Genel Bakış" ve "Günlük Durum" Sayfalarının Kesin Olarak Ayrıştırılması
+- **Mimari Ayrım:**
+  - **Genel Bakış (`/admin`, `/admin/overview`, `/admin/overview/dashboard`):** İşletmenin makro yönetim merkezidir (`OverviewPage.tsx`). Karşılama kokpiti, kümülatif metrikler, kasa kâr oranı, 3 günlük ciro ritmi, **En Çok Satan Yiyecekler (Top Selling Dishes)** ve menü analitiği burada yer alır.
+  - **Günlük Durum (`/admin/overview/daily`):** Sadece ve kesin olarak **o günkü canlı operasyonel verilere** odaklanan bağımsız sayfadır (`DailyStatusPage.tsx`). Bugünün açık siparişleri, servisteki masaları, kritik hammadde uyarıları ve açık vardiya durumunu gösterir.
+  - **Kümülatif Analitik İzolasyonu:** "Top Selling Dishes" ve makro ciro grafikleri Günlük Durum ekranında kesinlikle yer almaz; yalnızca Genel Bakış'ta çalışır.
+- **Navigasyon ve Rota Ayrımı:**
+  - Yan menüde (`catalog.ts` ve `AdminShell.tsx`) hem bağımsız "Genel Bakış" hem de "Günlük Durum" bağlantıları tanımlanarak doğrudan iki ayrı bileşene (`Dashboard` ve `DailyStatusPage`) bağlandı.
+
 ---
 
 ## 3. İlgili Dosya ve Bileşen Dizini
 
 | Katman | Dosya / Dizin | Görev ve Açıklama |
 | :--- | :--- | :--- |
-| **Ön Yüz (Ana Sayfa)** | [`apps/admin/src/features/overview/OverviewPage.tsx`](../../apps/admin/src/features/overview/OverviewPage.tsx) | Genel bakış karşılama, kâr oranı kartı, ciro grafiği, En Çok Satan Yiyecekler listesi ve gündem kartları |
+| **Ön Yüz (Genel Bakış)** | [`apps/admin/src/features/overview/OverviewPage.tsx`](../../apps/admin/src/features/overview/OverviewPage.tsx) | Genel bakış karşılama, kâr oranı kartı, ciro grafiği, En Çok Satan Yiyecekler ve menü özeti |
+| **Ön Yüz (Günlük Durum)** | [`apps/admin/src/features/overview/DailyStatusPage.tsx`](../../apps/admin/src/features/overview/DailyStatusPage.tsx) | Yalnızca o günün açık siparişleri, masa servis durumu, kritik stok ve açık kasa vardiyaları |
 | **Ön Yüz (Uyarılar)** | [`apps/admin/src/features/overview/AlertsPage.tsx`](../../apps/admin/src/features/overview/AlertsPage.tsx) | Operasyonel uyarılar listesi, PostgreSQL onay/arşivleme arayüzü |
 | **Ön Yüz (Son İşlemler)**| [`apps/admin/src/features/overview/ActivityPage.tsx`](../../apps/admin/src/features/overview/ActivityPage.tsx) | Tüm modüllerden derlenen kronolojik canlı aktivite zaman tüneli |
 | **Ön Yüz (Ciro Analizi)**| [`apps/admin/src/features/overview/MonthlyDailyTurnoverPage.tsx`](../../apps/admin/src/features/overview/MonthlyDailyTurnoverPage.tsx) | Aylık ve günlük ciro detay analiz sayfası |
-| **Ön Yüz Stilleri** | [`apps/admin/src/styles.css`](../../apps/admin/src/styles.css) | 4 kolonlu stats ızgarası, kârlılık kartı, Top Selling Dishes listesi ve uyarı stilleri |
+| **Ön Yüz Stilleri** | [`apps/admin/src/styles.css`](../../apps/admin/src/styles.css) | 4 kolonlu stats ızgarası, kârlılık kartı, Top Selling Dishes listesi ve günlük durum stilleri |
 | **Backend API** | [`apps/api/Hipos.Api/Overview/OverviewEndpoints.cs`](../../apps/api/Hipos.Api/Overview/OverviewEndpoints.cs) | `/overview/alerts`, `/overview/activities`, `/overview/cash-profit` ve `/overview/top-dishes` endpoint'leri |
 | **Backend DB Context** | [`apps/api/Hipos.Api/Overview/OverviewDbContext.cs`](../../apps/api/Hipos.Api/Overview/OverviewDbContext.cs) | EF Core `overview` şeması ve `alert_acknowledgments` tablosu |
 | **EF Migration** | [`apps/api/Hipos.Api/Overview/Migrations/`](../../apps/api/Hipos.Api/Overview/Migrations/) | `InitialOverviewAlerts` veritabanı göç dosyası |
