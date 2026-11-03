@@ -56,7 +56,21 @@ Genel Bakış (`overview`), restoran sahibinin veya şube müdürünün sisteme 
 - **Önceki 3 İşlem Gününün Cirosu:** Ana sayfadaki grafik bileşeni doğrudan gerçek satış verilerinden beslenerek son 3 günün cirosunu ve sipariş adetlerini karşılaştırmalı bar grafik olarak çizdi.
 - **Detaylı Ciro Sayfası (`MonthlyDailyTurnoverPage.tsx`):** Kullanıcının her ayın ve her günün cirosunu detaylı inceleyebileceği, ortalama sepet tutarı ve işlem hacmini filtreleyebileceği alt sayfa bağlandı.
 
-### 2.5. Tasarım ve Mobil Uyumluluk
+### 2.5. En Çok Satan Yiyecekler (Top Selling Dishes) Bileşeni
+- **Görsel Tasarım & Liste Formatı:** Kullanıcının sağladığı referans arayüze sadık kalınarak geliştirildi:
+  - `Top Selling Dishes` başlığı ve alt başlığı,
+  - `1.`, `2.`, `3.`, `4.`, `5.` koyu sıralama numaraları,
+  - 52×52px yuvarlatılmış (14px radius) yüksek çözünürlüklü lezzet fotoğrafları ve çevrimdışı/yüklenememe durumları için emoji fallback desteği,
+  - Kalın ürün adı ve `{soldCount} sold ({soldCount} adet satıldı)` satış adedi ve ciro bilgisi,
+  - Satırlar arasında ince yatay ayraç çizgileri.
+- **Backend Analitik Uç Noktası (`/overview/top-dishes`):**
+  - PostgreSQL veritabanındaki sipariş satırlarını (`sales.order_lines` ve `sales.orders`) ürün bazında toplayarak satış adedi ve toplam ciro hacmini hesaplar.
+  - `catalog.products` tablosuyla eşleşerek kategori, kategori adı ve ürün görsellerini zenginleştirir.
+  - `category=food` (varsayılan: yiyecek ve tatlılar) ve `category=all` (tüm menü kalemleri) filtreleme parametrelerini destekler.
+- **Kategori Filtreleme Çipleri:** Kart üstünde `🍕 Yiyecekler` ve `Tüm Menü` geçişi sunarak hem doğrudan lezzet sıralamasını hem de içecekler dahil tüm menü performansını gösterir.
+- **Sağ Kolon Menü Özeti:** Toplam satılan porsiyon adedi, lider lezzet ve menü/ürün yönetimine doğrudan hızlı aksiyon bağlantıları sunar.
+
+### 2.6. Tasarım ve Mobil Uyumluluk
 - **4 Kolonlu Hero Stats:** Masaüstünde 4 eşit kolon, tablette 2x2 ve mobilde tek kolon olarak esneyen responsive ızgara kurgulandı.
 - **Auto-Fit Gündem Izgarası:** Siparişler, Masalar, Stok ve Kasalar kartları ekran genişliğine göre taşma yapmadan yerleşecek şekilde güncellendi.
 
@@ -66,12 +80,12 @@ Genel Bakış (`overview`), restoran sahibinin veya şube müdürünün sisteme 
 
 | Katman | Dosya / Dizin | Görev ve Açıklama |
 | :--- | :--- | :--- |
-| **Ön Yüz (Ana Sayfa)** | [`apps/admin/src/features/overview/OverviewPage.tsx`](../../apps/admin/src/features/overview/OverviewPage.tsx) | Genel bakış karşılama, kâr oranı kartı, ciro grafiği ve gündem kartları |
+| **Ön Yüz (Ana Sayfa)** | [`apps/admin/src/features/overview/OverviewPage.tsx`](../../apps/admin/src/features/overview/OverviewPage.tsx) | Genel bakış karşılama, kâr oranı kartı, ciro grafiği, En Çok Satan Yiyecekler listesi ve gündem kartları |
 | **Ön Yüz (Uyarılar)** | [`apps/admin/src/features/overview/AlertsPage.tsx`](../../apps/admin/src/features/overview/AlertsPage.tsx) | Operasyonel uyarılar listesi, PostgreSQL onay/arşivleme arayüzü |
 | **Ön Yüz (Son İşlemler)**| [`apps/admin/src/features/overview/ActivityPage.tsx`](../../apps/admin/src/features/overview/ActivityPage.tsx) | Tüm modüllerden derlenen kronolojik canlı aktivite zaman tüneli |
 | **Ön Yüz (Ciro Analizi)**| [`apps/admin/src/features/overview/MonthlyDailyTurnoverPage.tsx`](../../apps/admin/src/features/overview/MonthlyDailyTurnoverPage.tsx) | Aylık ve günlük ciro detay analiz sayfası |
-| **Ön Yüz Stilleri** | [`apps/admin/src/styles.css`](../../apps/admin/src/styles.css) | 4 kolonlu stats ızgarası, kârlılık kartı ve uyarı stilleri |
-| **Backend API** | [`apps/api/Hipos.Api/Overview/OverviewEndpoints.cs`](../../apps/api/Hipos.Api/Overview/OverviewEndpoints.cs) | `/overview/alerts`, `/overview/activities` ve `/overview/cash-profit` endpoint'leri |
+| **Ön Yüz Stilleri** | [`apps/admin/src/styles.css`](../../apps/admin/src/styles.css) | 4 kolonlu stats ızgarası, kârlılık kartı, Top Selling Dishes listesi ve uyarı stilleri |
+| **Backend API** | [`apps/api/Hipos.Api/Overview/OverviewEndpoints.cs`](../../apps/api/Hipos.Api/Overview/OverviewEndpoints.cs) | `/overview/alerts`, `/overview/activities`, `/overview/cash-profit` ve `/overview/top-dishes` endpoint'leri |
 | **Backend DB Context** | [`apps/api/Hipos.Api/Overview/OverviewDbContext.cs`](../../apps/api/Hipos.Api/Overview/OverviewDbContext.cs) | EF Core `overview` şeması ve `alert_acknowledgments` tablosu |
 | **EF Migration** | [`apps/api/Hipos.Api/Overview/Migrations/`](../../apps/api/Hipos.Api/Overview/Migrations/) | `InitialOverviewAlerts` veritabanı göç dosyası |
 

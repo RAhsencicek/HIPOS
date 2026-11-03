@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Sparkles,
   UsersRound,
+  TrendingUp,
+  UtensilsCrossed,
   Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -20,6 +22,28 @@ import { checks } from "../../data/catalog";
 import { mockCriticalStock } from "./overview.fixtures";
 
 /* ── Types ── */
+type TopDishItem = {
+  rank: number;
+  productId: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  isDish: boolean;
+  soldCount: number;
+  totalRevenueMinor: number;
+  currency: string;
+  imageUrl: string;
+  emoji: string;
+};
+type TopDishesResponse = {
+  source: "postgres";
+  firmId: string;
+  branchId: string | null;
+  category: string;
+  totalSold: number;
+  items: TopDishItem[];
+};
+
 type SalesOrder = { id: string; status: string; source: string; createdAt: string; totalMinor: number; items: Array<{ productName: string; quantity: number }> };
 type SalesSummaryResponse = { items: SalesOrder[] };
 type ServiceTable = { id: string; name: string; isActive: boolean; assignment: { orderStatus: string } | null };
@@ -77,6 +101,9 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
   const [serviceState, setServiceState] = useState<LoadState<ServiceSummaryResponse>>({ status: "loading" });
   const [criticalStockState, setCriticalStockState] = useState<LoadState<CriticalStockResponse>>({ status: "loading" });
   const [cashProfitState, setCashProfitState] = useState<LoadState<CashProfitResponse>>({ status: "loading" });
+  const [topDishesState, setTopDishesState] = useState<LoadState<TopDishesResponse>>({ status: "loading" });
+  const [dishesCategory, setDishesCategory] = useState<"food" | "all">("food");
+
   const [refreshKey, setRefreshKey] = useState(0);
   const [spinning, setSpinning] = useState(false);
 
@@ -110,9 +137,16 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
     void getApi<CashProfitResponse>(cashProfitPath, actor)
       .then((d) => { if (active) setCashProfitState({ status: "ready", data: d }); })
       .catch(() => { if (active) setCashProfitState({ status: "error" }); });
+    setTopDishesState({ status: "loading" });
+    const topDishesPath = branchId
+      ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/top-dishes?category=${dishesCategory}`
+      : `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/overview/top-dishes?category=${dishesCategory}`;
+    void getApi<TopDishesResponse>(topDishesPath, actor)
+      .then((d) => { if (active) setTopDishesState({ status: "ready", data: d }); })
+      .catch(() => { if (active) setTopDishesState({ status: "error" }); });
     const t = setTimeout(() => { if (active) setSpinning(false); }, 500);
     return () => { active = false; clearTimeout(t); };
-  }, [actor, branchId, ctx.firmId, inventoryHttp, salesHttp, serviceHttp, refreshKey]);
+  }, [actor, branchId, ctx.firmId, inventoryHttp, salesHttp, serviceHttp, refreshKey, dishesCategory]);
 
   /* Derived data */
   const branches = ctx.selectedBranch ? [ctx.selectedBranch] : ctx.branches;
@@ -272,6 +306,137 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
             </span>
           </div>
         </Link>
+      </div>
+    </section>
+
+        {/* ━━━━ 2. LEZZETLER & MENÜ PERFORMANSI: EN ÇOK SATAN YİYECEKLER ━━━━ */}
+    <section className="overview-dishes-section" aria-labelledby="overview-top-dishes-title">
+      <header className="overview-dishes-section-header">
+        <div>
+          <span className="overview-spotlight-section-label"><UtensilsCrossed size={16} /> MENÜ ANALİTİĞİ</span>
+          <h2 id="overview-top-dishes-title">Popüler Lezzetler & Ürünler</h2>
+        </div>
+        <p>İşletmenizin tüm siparişlerindeki satış hacmine göre ürün sıralaması.</p>
+      </header>
+
+      <div className="overview-dishes-grid">
+        {/* Sol Kolon: Top Selling Dishes (Görsel Referansı İle Birebir Kart) */}
+        <div className="overview-top-dishes-card">
+          <div className="overview-top-dishes-header">
+            <div>
+              <h3 className="overview-top-dishes-heading">Top Selling Dishes</h3>
+              <span className="overview-top-dishes-sub">En çok satan lezzetler</span>
+            </div>
+            <div className="overview-dishes-filter-pill" role="tablist" aria-label="Menü filtresi">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={dishesCategory === "food"}
+                className={dishesCategory === "food" ? "is-active" : ""}
+                onClick={() => setDishesCategory("food")}
+              >
+                🍕 Yiyecekler
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={dishesCategory === "all"}
+                className={dishesCategory === "all" ? "is-active" : ""}
+                onClick={() => setDishesCategory("all")}
+              >
+                Tüm Menü
+              </button>
+            </div>
+          </div>
+
+          {topDishesState.status === "ready" && topDishesState.data.items.length > 0 ? (
+            <div className="overview-top-dishes-list" role="list">
+              {topDishesState.data.items.map((dish) => (
+                <div key={dish.productId} className="overview-top-dish-row" role="listitem">
+                  <span className="overview-top-dish-rank">{dish.rank}.</span>
+                  <div className="overview-top-dish-thumb-wrap">
+                    <img
+                      src={dish.imageUrl}
+                      alt={dish.name}
+                      className="overview-top-dish-thumb"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        const fallback = e.currentTarget.parentElement?.querySelector(".overview-dish-thumb-emoji");
+                        if (fallback) (fallback as HTMLElement).style.display = "grid";
+                      }}
+                    />
+                    <span className="overview-dish-thumb-emoji" aria-hidden="true" style={{ display: "none" }}>
+                      {dish.emoji || "🍽️"}
+                    </span>
+                  </div>
+                  <div className="overview-top-dish-info">
+                    <strong className="overview-top-dish-name" title={dish.name}>
+                      {dish.name}
+                    </strong>
+                    <span className="overview-top-dish-sold">
+                      {dish.soldCount} sold ({dish.soldCount} adet satıldı)
+                    </span>
+                  </div>
+                  <div className="overview-top-dish-rev" title="Toplam ciro katkısı">
+                    <span>{money(dish.totalRevenueMinor)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : topDishesState.status === "loading" ? (
+            <div className="overview-top-dishes-loading">
+              <p>Lezzet sıralaması hesaplanıyor…</p>
+            </div>
+          ) : (
+            <div className="overview-top-dishes-empty">
+              <p>Henüz sipariş kaydı bulunmuyor.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Sağ Kolon: Menü Dağılımı & Hızlı Özet */}
+        <div className="overview-dishes-summary-card">
+          <div className="overview-dishes-summary-header">
+            <span className="overview-summary-badge"><TrendingUp size={16} /> Satış Paylaşımı</span>
+            <h3>Menü & Kategori Durumu</h3>
+            <p>Satış adetlerinin menü gruplarına dağılımı ve hızlı katalog yönetimi.</p>
+          </div>
+
+          <div className="overview-dishes-summary-stats">
+            <div className="overview-summary-stat-box">
+              <span className="stat-label">Toplam Satış</span>
+              <strong className="stat-value">
+                {topDishesState.status === "ready" ? `${topDishesState.data.totalSold} Adet` : "—"}
+              </strong>
+              <small className="stat-hint">
+                {dishesCategory === "food" ? "Yiyecek ve tatlı porsiyonu" : "Tüm menü kalemleri"}
+              </small>
+            </div>
+            <div className="overview-summary-stat-box">
+              <span className="stat-label">Lider Lezzet</span>
+              <strong className="stat-value">
+                {topDishesState.status === "ready" && topDishesState.data.items[0]
+                  ? topDishesState.data.items[0].name
+                  : "—"}
+              </strong>
+              <small className="stat-hint">
+                {topDishesState.status === "ready" && topDishesState.data.items[0]
+                  ? `${topDishesState.data.items[0].soldCount} adet satıldı`
+                  : "Sipariş verisi"}
+              </small>
+            </div>
+          </div>
+
+          <div className="overview-dishes-summary-links">
+            <Link to="/admin/catalog/products" className="overview-dish-action-link">
+              <BookOpen size={16} /> Ürünleri ve Fiyatları Yönet <ArrowRight size={15} />
+            </Link>
+            <Link to="/admin/catalog/menus" className="overview-dish-action-link">
+              <Sparkles size={16} /> Menü ve Kategori Sıralaması <ArrowRight size={15} />
+            </Link>
+          </div>
+        </div>
       </div>
     </section>
 

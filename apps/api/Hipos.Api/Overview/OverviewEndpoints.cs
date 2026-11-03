@@ -3,6 +3,7 @@ using Hipos.Api.Cash;
 using Hipos.Api.Inventory;
 using Hipos.Api.Sales;
 using Hipos.Api.Expenses;
+using Hipos.Api.Catalog;
 
 namespace Hipos.Api.Overview;
 
@@ -579,5 +580,198 @@ public static class OverviewEndpoints
                 registers = registerDetails
             });
         });
+
+        // ━━━━ EN ÇOK SATAN YİYECEKLER (TOP SELLING DISHES) ━━━━
+        cashProfitGroup.MapGet("/branches/{branchId}/overview/top-dishes", async (
+            string firmId,
+            string branchId,
+            string? category,
+            int? limit,
+            SalesDbContext salesDb,
+            CatalogDbContext catalogDb,
+            CancellationToken ct) =>
+        {
+            return await GetTopDishesAsync(firmId, branchId, category, limit, salesDb, catalogDb, ct);
+        });
+
+        cashProfitGroup.MapGet("/overview/top-dishes", async (
+            string firmId,
+            string? category,
+            int? limit,
+            SalesDbContext salesDb,
+            CatalogDbContext catalogDb,
+            CancellationToken ct) =>
+        {
+            return await GetTopDishesAsync(firmId, null, category, limit, salesDb, catalogDb, ct);
+        });
+    }
+
+    private static async Task<IResult> GetTopDishesAsync(
+        string firmId,
+        string? branchId,
+        string? category,
+        int? limit,
+        SalesDbContext salesDb,
+        CatalogDbContext catalogDb,
+        CancellationToken ct)
+    {
+        var maxLimit = Math.Clamp(limit ?? 5, 1, 20);
+        var targetCat = (category ?? "food").Trim().ToLowerInvariant();
+
+        var linesQuery = from o in salesDb.Orders.AsNoTracking()
+                         where o.FirmId == firmId && (branchId == null || o.BranchId == branchId)
+                         from l in o.Lines
+                         select new
+                         {
+                             l.ProductId,
+                             l.ProductName,
+                             l.Quantity,
+                             l.LineTotalMinor,
+                             l.Currency
+                         };
+
+        var rawLines = await linesQuery.ToListAsync(ct);
+
+        var grouped = rawLines
+            .GroupBy(l => l.ProductId)
+            .Select(g => new
+            {
+                ProductId = g.Key,
+                ProductName = g.First().ProductName,
+                Quantity = g.Sum(x => x.Quantity),
+                TotalRevenueMinor = g.Sum(x => x.LineTotalMinor),
+                Currency = g.First().Currency
+            })
+            .ToList();
+
+        var products = await catalogDb.Products.AsNoTracking()
+            .Where(p => p.FirmId == firmId)
+            .ToListAsync(ct);
+        var productMap = products.ToDictionary(p => p.Id, p => p);
+
+        var enriched = grouped.Select(item =>
+        {
+            productMap.TryGetValue(item.ProductId, out var catalogProd);
+            var catId = catalogProd?.CategoryId ?? "";
+            var catName = catalogProd?.CategoryName ?? "";
+            var rawImg = catalogProd?.Image ?? "";
+
+            var isDish = !catId.Equals("drinks", StringComparison.OrdinalIgnoreCase) &&
+                         !catId.Contains("drink", StringComparison.OrdinalIgnoreCase) &&
+                         !catId.Contains("icecek", StringComparison.OrdinalIgnoreCase);
+
+            var photoUrl = GetDishPhotoUrl(item.ProductName, catId, rawImg);
+            var emoji = GetDishEmoji(rawImg, catId, isDish);
+
+            return new
+            {
+                productId = item.ProductId.ToString(),
+                name = item.ProductName,
+                categoryId = catId,
+                categoryName = catName,
+                isDish,
+                soldCount = item.Quantity,
+                totalRevenueMinor = item.TotalRevenueMinor,
+                currency = item.Currency,
+                imageUrl = photoUrl,
+                emoji
+            };
+        }).ToList();
+
+        if (targetCat == "food" || targetCat == "dishes" || targetCat == "yiyecek")
+        {
+            enriched = enriched.Where(x => x.isDish).ToList();
+        }
+        else if (targetCat == "drinks" || targetCat == "icecek")
+        {
+            enriched = enriched.Where(x => !x.isDish).ToList();
+        }
+
+        var topList = enriched
+            .OrderByDescending(x => x.soldCount)
+            .ThenByDescending(x => x.totalRevenueMinor)
+            .Take(maxLimit)
+            .Select((x, idx) => new
+            {
+                rank = idx + 1,
+                x.productId,
+                x.name,
+                x.categoryId,
+                x.categoryName,
+                x.isDish,
+                x.soldCount,
+                x.totalRevenueMinor,
+                x.currency,
+                x.imageUrl,
+                x.emoji
+            })
+            .ToList();
+
+        return Results.Ok(new
+        {
+            source = "postgres",
+            firmId,
+            branchId,
+            category = targetCat,
+            totalSold = enriched.Sum(x => x.soldCount),
+            items = topList
+        });
+    }
+
+    private static string GetDishPhotoUrl(string productName, string categoryId, string existingImage)
+    {
+        if (!string.IsNullOrWhiteSpace(existingImage) &&
+            (existingImage.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+             existingImage.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+             existingImage.StartsWith("/")))
+        {
+            return existingImage;
+        }
+
+        var lower = productName.ToLowerInvariant();
+        if (lower.Contains("truffle") || lower.Contains("burger"))
+            return "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("margherita"))
+            return "https://images.unsplash.com/photo-1604382355076-af4b0eb60143?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("karışık") || lower.Contains("pizza"))
+            return "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("sandviç") || lower.Contains("sandwich") || lower.Contains("tavuk"))
+            return "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("cheesecake") || lower.Contains("sebastian") || lower.Contains("tatlı") || lower.Contains("dessert"))
+            return "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("pasta") || lower.Contains("makarna"))
+            return "https://images.unsplash.com/photo-1621996346565-e3d5d6281292?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("salad") || lower.Contains("salata"))
+            return "https://images.unsplash.com/photo-1546793665-c74683f339c1?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("kahve") || lower.Contains("coffee") || lower.Contains("cappuccino") || lower.Contains("filtre"))
+            return "https://images.unsplash.com/photo-1534778101976-62847782c213?w=200&auto=format&fit=crop&q=80";
+        if (lower.Contains("limonata") || lower.Contains("lemonade"))
+            return "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=200&auto=format&fit=crop&q=80";
+
+        return categoryId.ToLowerInvariant() switch
+        {
+            "pizza" => "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=200&auto=format&fit=crop&q=80",
+            "sandwich" => "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=200&auto=format&fit=crop&q=80",
+            "dessert" => "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=200&auto=format&fit=crop&q=80",
+            "drinks" => "https://images.unsplash.com/photo-1534778101976-62847782c213?w=200&auto=format&fit=crop&q=80",
+            _ => "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&auto=format&fit=crop&q=80"
+        };
+    }
+
+    private static string GetDishEmoji(string rawImage, string categoryId, bool isDish)
+    {
+        if (!string.IsNullOrWhiteSpace(rawImage) && rawImage.Length <= 4 && !rawImage.StartsWith("http") && !rawImage.StartsWith("/"))
+        {
+            return rawImage;
+        }
+
+        return categoryId.ToLowerInvariant() switch
+        {
+            "pizza" => "🍕",
+            "sandwich" => "🥪",
+            "dessert" => "🍰",
+            "drinks" => "☕",
+            _ => isDish ? "🍽️" : "🥤"
+        };
     }
 }

@@ -13088,6 +13088,324 @@ td.strong {
   color: #51362e;
 }
 
+/* ━━━━ 2. LEZZETLER & MENÜ PERFORMANSI (TOP SELLING DISHES) ━━━━ */
+.overview-dishes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.overview-dishes-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.overview-dishes-section-header h2 {
+  margin: 4px 0 0;
+  color: #342e30;
+  font-size: 24px;
+  letter-spacing: -0.6px;
+  font-weight: 800;
+}
+
+.overview-dishes-section-header p {
+  margin: 0;
+  color: #908580;
+  font-size: 13px;
+}
+
+.overview-dishes-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 480px) minmax(280px, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+@media (max-width: 960px) {
+  .overview-dishes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.overview-top-dishes-card {
+  background: #ffffff;
+  border: 1px solid #ebdcd0;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 5px 20px rgba(88, 71, 62, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-top-dishes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f6eee8;
+  margin-bottom: 6px;
+}
+
+.overview-top-dishes-heading {
+  font-size: 21px;
+  font-weight: 800;
+  color: #1c1917;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.overview-top-dishes-sub {
+  font-size: 12.5px;
+  color: #826f63;
+  font-weight: 500;
+  display: block;
+  margin-top: 2px;
+}
+
+.overview-dishes-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  background: #f5ede6;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid #ebe0d6;
+}
+
+.overview-dishes-filter-pill button {
+  border: none;
+  background: transparent;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6e5e57;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.overview-dishes-filter-pill button:hover {
+  color: #2e2421;
+}
+
+.overview-dishes-filter-pill button.is-active {
+  background: #2e2421;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(46, 36, 33, 0.2);
+}
+
+.overview-top-dishes-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-top-dish-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 4px;
+  border-bottom: 1px solid #f3ece6;
+  transition: background 0.15s;
+}
+
+.overview-top-dish-row:last-child {
+  border-bottom: none;
+}
+
+.overview-top-dish-rank {
+  font-size: 19px;
+  font-weight: 800;
+  color: #1c1917;
+  min-width: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-top-dish-thumb-wrap {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #f7efe8;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  position: relative;
+  border: 1px solid #ebdcd0;
+}
+
+.overview-top-dish-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.overview-dish-thumb-emoji {
+  font-size: 26px;
+  line-height: 1;
+  user-select: none;
+}
+
+.overview-top-dish-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.overview-top-dish-name {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #1c1917;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-top-dish-sold {
+  font-size: 13px;
+  font-weight: 500;
+  color: #78716c;
+}
+
+.overview-top-dish-rev {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #884224;
+  background: #fdf5f0;
+  border: 1px solid #fae2d6;
+  padding: 4px 9px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.overview-top-dishes-loading,
+.overview-top-dishes-empty {
+  padding: 36px 16px;
+  text-align: center;
+  color: #8c766e;
+  font-size: 13.5px;
+}
+
+/* Sağ Kolon: Menü Dağılımı ve Yönetim */
+.overview-dishes-summary-card {
+  background: #fffdfa;
+  border: 1px solid #ebdcd0;
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  box-shadow: 0 5px 20px rgba(88, 71, 62, 0.05);
+}
+
+.overview-dishes-summary-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.overview-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 750;
+  color: #a85834;
+  background: #faede6;
+  padding: 4px 10px;
+  border-radius: 999px;
+  width: fit-content;
+  border: 1px solid #f2ddd2;
+}
+
+.overview-dishes-summary-header h3 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #242424;
+  letter-spacing: -0.4px;
+}
+
+.overview-dishes-summary-header p {
+  margin: 0;
+  font-size: 13px;
+  color: #826f63;
+  line-height: 1.45;
+}
+
+.overview-dishes-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.overview-summary-stat-box {
+  background: #ffffff;
+  border: 1px solid #eedfd4;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overview-summary-stat-box .stat-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8c766e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.overview-summary-stat-box .stat-value {
+  font-size: 22px;
+  font-weight: 850;
+  color: #242424;
+  letter-spacing: -0.5px;
+}
+
+.overview-summary-stat-box .stat-hint {
+  font-size: 11.5px;
+  color: #9c8a82;
+}
+
+.overview-dishes-summary-links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.overview-dish-action-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #ebdcd0;
+  color: #4a342d;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.overview-dish-action-link:hover {
+  background: #fbf4ee;
+  border-color: #dfcebf;
+  color: #884224;
+  transform: translateX(2px);
+}
+
 /* ━━━━ 3. GÜNDEM BÖLÜMÜ (SİPARİŞLER / MASA / STOK) ━━━━ */
 .overview-spotlight-insights {
   display: flex;
