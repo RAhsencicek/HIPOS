@@ -12,14 +12,21 @@ namespace Hipos.Api.Sales;
 public sealed record CreatePosOrder(Guid OrderId, IReadOnlyList<PosOrderItem> Items);
 public sealed record CreateWaiterOrder(Guid OrderId, string WaiterId, IReadOnlyList<PosOrderItem> Items);
 public sealed record PosOrderItem(Guid ProductId, int Quantity, string? Note = null,
-    IReadOnlyList<PosOrderOptionSelection>? Options = null);
+    IReadOnlyList<PosOrderOptionSelection>? Options = null, string? Notes = null)
+{
+    public string? EffectiveNote =>
+        !string.IsNullOrWhiteSpace(Notes) ? Notes.Trim() : (!string.IsNullOrWhiteSpace(Note) ? Note.Trim() : null);
+}
 public sealed record PosOrderOptionSelection(Guid GroupId, Guid OptionId, int Quantity = 1);
 public sealed record SalesOrderOptionSnapshot(Guid? GroupId, Guid? OptionId, string GroupName, string OptionName,
     int Quantity = 1, long PriceDeltaMinor = 0);
 public sealed record SalesOrderLine(
     long Id, string ProductId, string ProductName, string Sku, int Quantity,
     long BaseUnitPriceMinor, long UnitPriceMinor, long LineTotalMinor, string Currency, string? Note,
-    IReadOnlyList<SalesOrderOptionSnapshot> Options);
+    IReadOnlyList<SalesOrderOptionSnapshot> Options)
+{
+    public string? Notes => Note;
+}
 public sealed record SalesKitchenLine(
     string ProductId, string ProductName, int Quantity, string? Note,
     IReadOnlyList<SalesOrderOptionSnapshot> Options);
@@ -124,19 +131,19 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         if (command.OrderId == Guid.Empty || command.Items is null ||
             command.Items.Count is < 1 or > 20 ||
             command.Items.Any(item => item.ProductId == Guid.Empty || item.Quantity is < 1 or > 99 ||
-                item.Note?.Length > 500 || item.Options is { Count: > 100 } ||
+                item.EffectiveNote?.Length > 500 || item.Options is { Count: > 100 } ||
                 item.Options?.Any(option => option is null || option.GroupId == Guid.Empty || option.OptionId == Guid.Empty ||
                     option.Quantity is < 1 or > 99) == true ||
                 item.Options?.Select(option => option.OptionId).Distinct().Count() != item.Options?.Count))
             return SalesOrderResult.Rejected("INVALID_ORDER", 400, "Sipariş kimliği veya kalemleri geçersiz.");
 
-        var sorted = command.Items.OrderBy(item => item.ProductId).ThenBy(item => item.Note)
+        var sorted = command.Items.OrderBy(item => item.ProductId).ThenBy(item => item.EffectiveNote)
             .ThenBy(item => System.Text.Json.JsonSerializer.Serialize((item.Options ?? []).OrderBy(option => option.GroupId)
                 .ThenBy(option => option.OptionId))).ToArray();
         if (source is not ("test_pos" or "waiter_web"))
             return SalesOrderResult.Rejected("INVALID_ORDER_SOURCE", 400, "Sipariş kaynağı geçersiz.");
         var itemFingerprint = string.Join("|", sorted.Select(item =>
-            $"{item.ProductId:N}:{item.Quantity}:{item.Note?.Trim()}:{System.Text.Json.JsonSerializer.Serialize((item.Options ?? [])
+            $"{item.ProductId:N}:{item.Quantity}:{item.EffectiveNote}:{System.Text.Json.JsonSerializer.Serialize((item.Options ?? [])
                 .OrderBy(option => option.GroupId).ThenBy(option => option.OptionId))}"));
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             source == "test_pos" ? itemFingerprint : $"{source}|{itemFingerprint}")));
@@ -256,7 +263,8 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 ProductName = product.Name, Sku = product.Sku, Quantity = item.Quantity,
                 BaseUnitPriceMinor = product.Price.AmountMinor, UnitPriceMinor = unitPrice,
                 LineTotalMinor = lineTotal, Currency = "TRY",
-                Note = string.IsNullOrWhiteSpace(item.Note) ? null : item.Note.Trim(),
+                Note = item.EffectiveNote,
+                Notes = item.EffectiveNote,
                 OptionsJson = System.Text.Json.JsonSerializer.Serialize(snapshots),
             });
         }
@@ -433,8 +441,8 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             await ExecuteAsync(db.Database.GetDbConnection(), transaction, """
                 WITH inserted AS (
                     INSERT INTO kitchen.tasks
-                        (id,firm_id,branch_id,order_id,order_line_id,station_id,product_name,quantity,status,version,submitted_at)
-                    SELECT @id,@firm,@branch,@order,@line,mapping.station_id,@product,@quantity,'submitted',1,@submitted
+                        (id,firm_id,branch_id,order_id,order_line_id,station_id,product_name,quantity,notes,status,version,submitted_at)
+                    SELECT @id,@firm,@branch,@order,@line,mapping.station_id,@product,@quantity,@notes,'submitted',1,@submitted
                     FROM (SELECT 1) AS seed
                     LEFT JOIN catalog.products AS product ON product.id = @productId AND product.firm_id = @firm
                     LEFT JOIN kitchen.station_categories AS mapping ON mapping.firm_id = @firm
@@ -447,7 +455,8 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 SELECT @id,id,@firm,@branch,@actor,'created','submitted',1,@submitted FROM inserted
                 """, cancellationToken, ("id", taskId), ("firm", order.FirmId), ("branch", order.BranchId),
                 ("order", order.Id), ("line", line.Id), ("product", line.ProductName),
-                ("productId", line.ProductId), ("quantity", line.Quantity), ("submitted", order.CreatedAt), ("actor", actor));
+                ("productId", line.ProductId), ("quantity", line.Quantity), ("notes", line.Notes ?? line.Note),
+                ("submitted", order.CreatedAt), ("actor", actor));
         }
     }
 
@@ -490,6 +499,12 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         command.Parameters.Add(parameter);
     }
 
+    private static string? NormalizeNotes(string? notes)
+    {
+        var value = notes?.Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
+
     public static SalesOrderDetail ToDetail(SalesOrderRow row) =>
         new(row.Id.ToString(), row.FirmId, row.BranchId, row.Source, row.Status,
             row.PaymentStatus, row.TotalMinor,
@@ -498,7 +513,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
             row.Currency, row.CreatedAt, row.Version,
             row.Lines.OrderBy(line => line.ProductId).Select(line =>
                 new SalesOrderLine(line.Id, line.ProductId.ToString(), line.ProductName, line.Sku,
-                    line.Quantity, line.BaseUnitPriceMinor, line.UnitPriceMinor, line.LineTotalMinor, line.Currency, line.Note,
+                    line.Quantity, line.BaseUnitPriceMinor, line.UnitPriceMinor, line.LineTotalMinor, line.Currency, line.Notes ?? line.Note,
                     DeserializeOptions(line.OptionsJson))).ToArray(),
             System.Text.Json.JsonSerializer.Deserialize<SalesKitchenLine[]>(row.KitchenItemsJson) ?? []);
 

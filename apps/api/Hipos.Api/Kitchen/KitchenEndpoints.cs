@@ -131,7 +131,7 @@ public static class KitchenEndpoints
     private static object ToView(KitchenTask task, string? tableName, string? waiterName, KitchenStation? station) => new
     {
         id = task.Id.ToString(), orderId = task.OrderId.ToString(), orderLineId = task.OrderLineId,
-        task.ProductName, task.Quantity, task.Status, task.Version, task.SubmittedAt,
+        task.ProductName, task.Quantity, task.Notes, task.Status, task.Version, task.SubmittedAt,
         task.PreparedAt, task.ReadyAt, task.ServedAt, tableName, waiterName,
         task.CancelledAt, task.CancellationReason, task.CancelledBy,
         stationId = station?.Id.ToString(), stationCode = station?.Code ?? "unassigned",

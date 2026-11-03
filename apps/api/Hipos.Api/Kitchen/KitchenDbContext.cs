@@ -63,6 +63,7 @@ public sealed class KitchenDbContext(DbContextOptions<KitchenDbContext> options)
             entity.Property(row => row.StationId).HasColumnName("station_id");
             entity.Property(row => row.ProductName).HasColumnName("product_name").HasMaxLength(160);
             entity.Property(row => row.Quantity).HasColumnName("quantity");
+            entity.Property(row => row.Notes).HasColumnName("notes").HasMaxLength(500);
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(20);
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.SubmittedAt).HasColumnName("submitted_at");

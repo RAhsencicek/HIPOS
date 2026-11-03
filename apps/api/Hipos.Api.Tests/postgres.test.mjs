@@ -383,6 +383,11 @@ test(
       );
       await execFile(
         "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "SalesDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
         { cwd: repo, env },
       );

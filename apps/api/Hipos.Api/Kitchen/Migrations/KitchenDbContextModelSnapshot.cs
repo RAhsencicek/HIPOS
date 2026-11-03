@@ -127,6 +127,11 @@ namespace Hipos.Api.Kitchen.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("firm_id");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("notes");
+
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uuid")
                         .HasColumnName("order_id");
