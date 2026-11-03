@@ -20,7 +20,9 @@ const { chromium, expect } = await import("@playwright/test");
 const project = fileURLToPath(
   new URL("../Hipos.Api/Hipos.Api.csproj", import.meta.url),
 );
-const pgBin = process.env.HIPOS_POSTGRES_BIN ?? "/opt/homebrew/opt/postgresql@18/bin";
+const pgBin = process.env.HIPOS_POSTGRES_BIN ?? (process.platform === "win32"
+  ? "C:/Program Files/PostgreSQL/15/bin"
+  : "/opt/homebrew/opt/postgresql@18/bin");
 const useDockerPostgres = process.env.HIPOS_TEST_POSTGRES === "docker" ||
   (process.platform === "win32" && !process.env.HIPOS_POSTGRES_BIN);
 const firm = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -50,7 +52,7 @@ async function freePort() {
 }
 
 async function waitForHealth(base, child, output) {
-  for (let attempt = 0; attempt < 120; attempt++) {
+  for (let attempt = 0; attempt < 600; attempt++) {
     if (child.exitCode !== null) break;
     try {
       const response = await fetch(`${base}/health`);
@@ -81,7 +83,7 @@ async function launchBrowser() {
 
 test(
   "PostgreSQL modül tercihini yeniden başlatma ve eşzamanlı istekte korur",
-  { timeout: 300000 },
+  { timeout: 600000 },
   async () => {
     const temporary = await mkdtemp(join(tmpdir(), "hipos-postgres-test-"));
     const data = join(temporary, "data");
@@ -103,6 +105,10 @@ test(
       HIPOS_FEATURE_STORAGE: "postgres",
       HIPOS_FEATURES_CONNECTION: connection,
     };
+    // Keep the Windows psql client encoding workaround out of .NET/Npgsql.
+    // The CLI fixture may need WIN1254 to pass Turkish literals on Windows,
+    // while PostgreSQL and Npgsql should continue using the database's UTF8.
+    delete env.PGCLIENTENCODING;
     let postgresStarted = false;
     let api;
     let ui;
@@ -205,6 +211,11 @@ test(
           env,
         },
       );
+      const featureHistorySchema = await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
+        "-d", "hipos_features", "-t", "-A", "-c",
+        "SELECT COALESCE(string_agg(schemaname, ',' ORDER BY schemaname), 'missing') FROM pg_tables WHERE tablename='__EFMigrationsHistory'"]);
+      assert.equal(featureHistorySchema.stdout.trim(), "public",
+        "Feature migration history runtime ile aynı public şemasında bulunmalı.");
       await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
         `INSERT INTO modules.branch_feature_states
@@ -360,6 +371,11 @@ test(
         `1,${legacySalesOrder},legacy-migration-table,,${legacySalesOrder},true`,
         "Legacy service assignment ve açık masa bağlamı korunmalı.");
       if (process.env.HIPOS_MIGRATION_BACKFILL_ONLY === "1") return;
+      // Backfill uyumluluğu doğrulandı; kalan güncel Sales/Service migration'larıyla API'yi başlat.
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "SalesDbContext"], { cwd: repo, env });
+      await execFile("dotnet", ["tool", "run", "dotnet-ef", "database", "update", "--project", project,
+        "--context", "ServiceDbContext"], { cwd: repo, env });
       await execFile(
         "dotnet",
         ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "InventoryDbContext"],
@@ -2325,6 +2341,187 @@ test(
         "-d", "hipos_features", "-t", "-A", "-c", `SELECT count(*) FROM catalog.menus WHERE firm_id='${single}'`]);
       assert.equal(menuSeeds.stdout.trim(), "2");
       await verifyMenuPanel({ browser, uiBase, request, single, singleBranch });
+      // Garson ilk siparişi ve ek sipariş aynı adisyonda kalmalı; test POS kapısına bağlı olmamalı.
+      {
+        const root = `/api/v1/firms/${single}/branches/${singleBranch}`;
+        for (const key of ["staff.records", "branches.tables", "service.waiters", "sales.checks"]) {
+          const state = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === key);
+          if (!state.desiredEnabled) assert.equal((await request(`${root}/features/${key}`, "PUT", {
+            desiredEnabled: true, expectedVersion: state.version,
+          }, "manager-single")).status, 200);
+        }
+        const posState = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === "sales.pos_orders");
+        if (posState.desiredEnabled) assert.equal((await request(`${root}/features/sales.pos_orders`, "PUT", {
+          desiredEnabled: false, expectedVersion: posState.version,
+        }, "manager-single")).status, 200);
+        const waiterTable = await request(`${root}/service/tables`, "POST", { name: "Ek sipariş testi" }, "manager-single");
+        assert.equal(waiterTable.status, 201);
+        const waiter = await request(`${root}/service/waiters`, "POST", { name: "Ek sipariş garsonu" }, "manager-single");
+        assert.equal(waiter.status, 201);
+        const path = `${root}/service/tables/${waiterTable.data.id}/orders`;
+        const first = { orderId: "f1200000-0000-4000-8000-000000000001", waiterId: waiter.data.id,
+          items: [{ productId: "55555555-5555-4555-8555-555555555501", quantity: 1 }] };
+        const second = { ...first, orderId: "f1200000-0000-4000-8000-000000000002" };
+        const created = await request(path, "POST", first, "pos-single");
+        assert.equal(created.status, 201);
+        const checksBefore = (await request(`${root}/sales/checks`, "GET", undefined, "manager-single")).data.items.length;
+        const added = await request(path, "POST", second, "pos-single");
+        assert.equal(added.status, 201, "Açık adisyona ek sipariş yeni adisyon oluşturmamalı.");
+        const detailPath = `${root}/sales/checks/${first.orderId}`;
+        const detail = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        assert.equal(detail.orders.length, 2);
+        assert.equal(detail.tableId, waiterTable.data.id);
+        assert.equal(detail.totalMinor, created.data.order.totalMinor + added.data.order.totalMinor);
+        assert.deepEqual(detail.orders.find(order => order.id === first.orderId).kitchenItems.map(line => line.quantity), [1],
+          "Mutfak hazırlık miktarı sipariş oluşturulurken sabitlenmeli.");
+        const kitchenTable = (await request(`${root}/service/tables`, "GET", undefined, "manager-single"))
+          .data.items.find(row => row.id === waiterTable.data.id);
+        assert.deepEqual([...kitchenTable.assignment.orderIds].sort(), [first.orderId, second.orderId].sort(),
+          "Mutfak için masa bilgisi ilk ve ek siparişin ikisini de eşlemeli.");
+        assert.equal((await request(`${root}/sales/checks`, "GET", undefined, "manager-single")).data.items.length, checksBefore);
+        assert.equal((await request(path, "POST", second, "pos-single")).status, 200);
+        const replay = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        assert.equal(replay.orders.length, 2);
+        assert.equal(replay.totalMinor, detail.totalMinor);
+        assert.equal(replay.version, detail.version);
+        assert.equal((await request(path, "POST", {
+          ...second, items: [{ ...second.items[0], quantity: 2 }],
+        }, "pos-single")).data.code, "ORDER_ID_CONFLICT");
+        assert.equal((await request(`${root}/sales/checks`, "POST", {
+          requestId: first.orderId, firstOrderId: "f1200000-0000-4000-8000-000000000003", items: first.items,
+        }, "pos-single")).data.code, "CHECK_REQUEST_CONFLICT");
+        const firstOrder = detail.orders.find(order => order.id === first.orderId);
+        const splitBody = { requestId: "f1200000-0000-4000-8000-000000000006", expectedVersion: detail.version,
+          items: firstOrder.items.map(line => ({ orderLineId: line.id, quantity: line.quantity })) };
+        const splitPath = `${detailPath}/split`;
+        const split = await request(splitPath, "POST", splitBody, "pos-single");
+        assert.equal(split.status, 201, "Masa bağının tuttuğu ilk siparişin tamamı silinmeden ayrılabilmeli.");
+        assert.equal(split.data.source.orders.length, 1);
+        assert.equal(split.data.source.orders[0].id, second.orderId);
+        assert.equal(split.data.check.orders.length, 1);
+        assert.equal(split.data.check.orders[0].id, first.orderId);
+        assert.equal(split.data.check.orders[0].source, "waiter_web");
+        assert.deepEqual(split.data.check.orders[0].items, firstOrder.items);
+        assert.equal(split.data.source.totalMinor + split.data.check.totalMinor, detail.totalMinor);
+        const splitReplay = await request(splitPath, "POST", splitBody, "pos-single");
+        assert.equal(splitReplay.status, 200);
+        assert.equal(splitReplay.data.check.id, split.data.check.id);
+        const tableAfterSplit = (await request(`${root}/service/tables`, "GET", undefined, "manager-single"))
+          .data.items.find(row => row.id === waiterTable.data.id);
+        assert.equal(tableAfterSplit.assignment.id, kitchenTable.assignment.id);
+        assert.equal(tableAfterSplit.assignment.orderId, first.orderId);
+        assert.deepEqual([...tableAfterSplit.assignment.orderIds].sort(), [first.orderId, second.orderId].sort());
+        const third = { ...first, orderId: "f1200000-0000-4000-8000-000000000007",
+          items: [{ ...first.items[0], quantity: 3, note: "Az tuzlu", options: [{ groupName: "Hazırlama", optionName: "Sosu ayrı" }] }] };
+        assert.equal((await request(path, "POST", third, "pos-single")).status, 201,
+          "Bölmeden sonra kaynak adisyona yeni garson siparişi eklenebilmeli.");
+        const beforePartial = (await request(detailPath, "GET", undefined, "manager-single")).data;
+        const thirdLine = beforePartial.orders.find(order => order.id === third.orderId).items[0];
+        const partial = await request(splitPath, "POST", {
+          requestId: "f1200000-0000-4000-8000-000000000008", expectedVersion: beforePartial.version,
+          items: [{ orderLineId: thirdLine.id, quantity: 1 }],
+        }, "pos-single");
+        assert.equal(partial.status, 201);
+        assert.equal(partial.data.source.orders.find(order => order.id === third.orderId).items[0].quantity, 2);
+        assert.equal(partial.data.check.orders[0].source, "split");
+        assert.equal(partial.data.check.orders[0].items[0].quantity, 1);
+        assert.equal(partial.data.check.orders[0].items[0].note, thirdLine.note);
+        assert.deepEqual(partial.data.check.orders[0].items[0].options, thirdLine.options);
+        assert.deepEqual(partial.data.source.orders.find(order => order.id === third.orderId).kitchenItems.map(line => line.quantity), [3],
+          "Adisyon bölünmesi mutfağın hazırlayacağı kaynak sipariş miktarını değiştirmemeli.");
+        assert.deepEqual(partial.data.check.orders[0].kitchenItems, [],
+          "Bölme ile oluşan finansal sipariş mutfak hazırlık işi oluşturmamalı.");
+        assert.equal(partial.data.source.totalMinor + partial.data.check.totalMinor, beforePartial.totalMinor);
+        const state = (await request(`${root}/features`, "GET", undefined, "manager-single")).data.find(row => row.key === "sales.pos_orders");
+        assert.equal((await request(`${root}/features/sales.pos_orders`, "PUT", {
+          desiredEnabled: true, expectedVersion: state.version,
+        }, "manager-single")).status, 200);
+        const selfServiceId = "f1200000-0000-4000-8000-000000000004";
+        assert.equal((await request(`${root}/sales/orders`, "POST", {
+          orderId: selfServiceId, items: first.items,
+        }, "pos-single")).status, 201);
+        const selfService = (await request(`${root}/sales/checks/${selfServiceId}`, "GET", undefined, "manager-single")).data;
+        assert.equal(selfService.tableId ?? null, null);
+        assert.equal(selfService.orders.length, 1);
+      }
+      // Fiziksel masa grubu: ek masalar dolu görünür, hesap ana masada kalır.
+      {
+        const root = `/api/v1/firms/${single}/branches/${singleBranch}`;
+        const service = `${root}/service`;
+        const ids = [];
+        for (const name of ["Grup ana masa", "Grup ek masa 1", "Grup ek masa 2", "Grup boş hedef"]) {
+          const result = await request(`${service}/tables`, "POST", { name }, "manager-single");
+          assert.equal(result.status, 201); ids.push(result.data.id);
+        }
+        const waiter = (await request(`${service}/waiters`, "POST", { name: "Grup garsonu" }, "manager-single")).data;
+        const body = { requestId: "f1300000-0000-4000-8000-000000000001", primaryTableId: ids[0], memberTableIds: ids.slice(1, 3), guestCount: 10 };
+        const create = await request(`${service}/table-groups`, "POST", body, "pos-single");
+        assert.equal(create.status, 201, JSON.stringify(create.data));
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, memberTableIds: [...body.memberTableIds].reverse() }, "pos-single")).status, 200);
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, guestCount: 9 }, "pos-single")).data.code, "TABLE_GROUP_REQUEST_CONFLICT");
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, requestId: "f1300000-0000-4000-8000-000000000002", primaryTableId: ids[3], memberTableIds: [ids[1]] }, "pos-single")).data.code, "TABLE_GROUP_ACTIVE");
+        const tableList = async () => (await request(`${service}/tables`, "GET", undefined, "manager-single")).data.items;
+        const before = (await tableList()).filter(table => ids.slice(0, 3).includes(table.id));
+        assert.equal(before.length, 3);
+        for (const table of before) { assert.equal(table.group.id, body.requestId); assert.equal(table.group.guestCount, 10); assert.equal(table.assignment ?? null, null); }
+        const order = { orderId: "f1300000-0000-4000-8000-000000000003", waiterId: waiter.id,
+          items: [{ productId: "55555555-5555-4555-8555-555555555501", quantity: 3, note: "Grup siparişi" }] };
+        assert.equal((await request(`${service}/tables/${ids[1]}/orders`, "POST", order, "pos-single")).data.code, "TABLE_GROUP_PRIMARY_REQUIRED");
+        assert.equal((await request(`${root}/sales/checks`, "POST", { requestId: order.orderId, firstOrderId: "f1300000-0000-4000-8000-000000000004", tableId: ids[2], waiterId: waiter.id, items: order.items }, "pos-single")).data.code, "TABLE_GROUP_PRIMARY_REQUIRED");
+        assert.equal((await request(`${service}/tables/${ids[0]}/orders`, "POST", order, "pos-single")).status, 201);
+        const extra = { ...order, orderId: "f1300000-0000-4000-8000-000000000005" };
+        assert.equal((await request(`${service}/tables/${ids[0]}/orders`, "POST", extra, "pos-single")).status, 201);
+        const occupied = (await tableList()).filter(table => ids.slice(0, 3).includes(table.id));
+        for (const table of occupied) {
+          assert.equal(table.assignment.orderIds.length, 2);
+          assert.equal(table.assignment.totalMinor, occupied[0].assignment.totalMinor);
+          assert.equal(table.assignment.id, occupied[0].assignment.id);
+        }
+        assert.equal((await request(`${service}/tables/${ids[0]}/transfer`, "POST", { requestId: "f1300000-0000-4000-8000-000000000006", targetTableId: ids[3], expectedVersion: occupied[0].assignment.version }, "pos-single")).data.code, "TABLE_GROUP_ACTIVE");
+        const detail = (await request(`${root}/sales/checks/${order.orderId}`, "GET", undefined, "manager-single")).data;
+        const split = await request(`${root}/sales/checks/${order.orderId}/split`, "POST", { requestId: "f1300000-0000-4000-8000-000000000007", expectedVersion: detail.version, items: [{ orderLineId: detail.orders[0].items[0].id, quantity: 1 }] }, "pos-single");
+        assert.equal(split.status, 201);
+        for (const table of (await tableList()).filter(table => ids.slice(0, 3).includes(table.id))) assert.equal(table.assignment.totalMinor, occupied[0].assignment.totalMinor);
+        const paymentFeature = (await request(`${root}/features`, "GET", undefined, "manager-single"))
+          .data.find(row => row.key === "payments.simulator");
+        if (!paymentFeature.desiredEnabled) assert.equal((await request(`${root}/features/payments.simulator`, "PUT", {
+          desiredEnabled: true, expectedVersion: paymentFeature.version,
+        }, "manager-single")).status, 200);
+        const settleCheck = async (checkId, attemptBase) => {
+          const checkPath = `${root}/sales/checks/${checkId}`;
+          const beforePayment = (await request(checkPath, "GET", undefined, "manager-single")).data;
+          assert.equal(beforePayment.status, "open");
+          for (const [index, checkOrder] of beforePayment.orders.entries()) {
+            const paid = await request(`${root}/sales/checks/${checkId}/payment-attempts`, "POST", {
+              orderId: checkOrder.id,
+              attemptId: `f1300000-0000-4000-8000-${String(attemptBase + index).padStart(12, "0")}`,
+              amountMinor: checkOrder.totalMinor, method: "cash", simulatedOutcome: "succeeded",
+              expectedOrderVersion: checkOrder.version,
+            }, "pos-single");
+            assert.equal(paid.status, 201, JSON.stringify(paid.data));
+          }
+          return (await request(checkPath, "GET", undefined, "manager-single")).data;
+        };
+        const sourceClosed = await settleCheck(order.orderId, 11);
+        assert.equal(sourceClosed.status, "closed", "Son tahsilat kaynak adisyonu kapatmalı.");
+        const splitStillOpen = (await request(`${root}/sales/checks/${split.data.check.id}`, "GET", undefined, "manager-single")).data;
+        assert.equal(splitStillOpen.status, "open", "Bölünmüş ikinci adisyon açık kalmalı.");
+        for (const table of (await tableList()).filter(table => ids.slice(0, 3).includes(table.id))) {
+          assert.equal(table.status, "occupied");
+          assert.equal(table.group.id, body.requestId, "Başka açık adisyon varken fiziksel masa grubu korunmalı.");
+        }
+        const splitClosed = await settleCheck(split.data.check.id, 21);
+        assert.equal(splitClosed.status, "closed", "Son açık adisyonun tahsilatı adisyonu kapatmalı.");
+        const afterSettlement = await tableList();
+        for (const id of ids.slice(0, 3)) {
+          const table = afterSettlement.find(row => row.id === id);
+          assert.equal(table.status, "idle", "Son adisyon kapanınca fiziksel masa boşalmalı.");
+          assert.equal(table.assignment ?? null, null, "Son adisyon kapanınca garson ataması kapanmalı.");
+          assert.equal(table.group ?? null, null, "Son adisyon kapanınca fiziksel grup kapanmalı.");
+        }
+        assert.equal((await request(`${service}/table-groups`, "POST", { ...body, requestId: "f1300000-0000-4000-8000-000000000008", primaryTableId: ids[3], memberTableIds: [ids[0]] }, "pos-single")).status, 201,
+          "Kapanan fiziksel masalar yeni bir grupta tekrar kullanılabilmeli.");
+      }
       await browser.close();
       browser = undefined;
       ui.kill("SIGTERM");

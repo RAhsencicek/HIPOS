@@ -6,6 +6,7 @@ using Hipos.Api.Service;
 using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
 using Hipos.Api.Expenses;
+using Hipos.Api.Printing;
 using Hipos.Api.Kitchen;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
@@ -45,11 +46,18 @@ if (storage == "postgres")
     builder.Services.AddScoped<CatalogDraftCommands>();
     builder.Services.AddScoped<CatalogProductActivationCommands>();
     builder.Services.AddScoped<CatalogCategoryCommands>();
+    builder.Services.AddScoped<CatalogOptionGroupCommands>();
     builder.Services.AddScoped<CatalogPublicationCommands>();
     builder.Services.AddScoped<SalesOrders>();
+    builder.Services.AddScoped<PaidCheckTableSettlement>();
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
     builder.Services.AddScoped<CashProvisioningService>();
+    var printerConfig = new PrinterConfig();
+    builder.Configuration.GetSection("Printers").Bind(printerConfig);
+    builder.Services.AddSingleton(printerConfig);
+    builder.Services.AddSingleton<PrinterTransport>();
+    builder.Services.AddScoped<PrintingService>();
 }
 else if (storage == "memory")
     builder.Services.AddSingleton<IFeatureStore, InMemoryFeatureStore>();
@@ -113,6 +121,7 @@ if (storage == "postgres")
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
+    if (inventoryReady) await FeatureDbInitializer.PromoteInventoryAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
     featureRuntime.PaymentSimulatorReady = salesReady;
@@ -131,8 +140,10 @@ if (storage == "postgres") app.MapProcurementEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady);
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
-if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
+if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
+if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
+if (storage == "postgres") app.MapPrintingEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
@@ -363,7 +374,7 @@ app.MapGet("/api/v1/firms/{firmId}/sales/orders",
     {
         var actor = DemoAccess.Resolve(context);
         if (actor is null) return Failure(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (actor.CanOperate || !DemoAccess.CanReadCatalog(actor, firmId, branchId))
+        if (!DemoAccess.CanReadCatalog(actor, firmId, branchId))
             return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu firma/şube siparişlerini izleme izni yok.");
         if (!salesReady)
             return Failure(context, "SALES_STORAGE_UNAVAILABLE", 503, "Satış migration'ı uygulanmalı ve API yeniden başlatılmalı.");
@@ -382,8 +393,14 @@ app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/sales/orders",
             return Failure(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede POS siparişi oluşturma izni yok.");
         if (!catalogReady || !salesReady)
             return Failure(context, "SALES_STORAGE_UNAVAILABLE", 503, "Katalog ve satış migration'ları uygulanmalı.");
+        var check = new SalesCheckRow
+        {
+            Id = command.OrderId, FirmId = firmId, BranchId = branchId, Status = "open",
+            Currency = "TRY", CreatedAt = DateTimeOffset.UtcNow, Version = 1,
+        };
         var result = await services.GetRequiredService<SalesOrders>().CreateAsync(
-            firmId, branchId, command, actor.Name, context.RequestAborted);
+            firmId, branchId, command, actor.Name, context.RequestAborted,
+            command.OrderId, check, "sales.pos_orders", "test_pos");
         if (result.Failure is { } failure)
             return Failure(context, failure.Code, failure.Status, failure.Message);
         return result.Created

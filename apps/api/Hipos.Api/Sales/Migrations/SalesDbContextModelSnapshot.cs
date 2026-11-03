@@ -181,6 +181,112 @@ namespace Hipos.Api.Sales.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckAdjustmentRow", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("actor");
+
+                    b.Property<long>("AmountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("amount_minor");
+
+                    b.Property<string>("ApprovalMode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("approval_mode");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<Guid>("CheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("check_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<long?>("OrderLineId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("order_line_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<int?>("Value")
+                        .HasColumnType("integer")
+                        .HasColumnName("value");
+
+                    b.Property<string>("ValueType")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("value_type");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("CheckId");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("OrderLineId");
+
+                    b.HasIndex("FirmId", "BranchId", "OrderLineId");
+
+                    b.HasIndex("FirmId", "BranchId", "CheckId", "CreatedAt");
+
+                    b.ToTable("check_adjustments", "sales", t =>
+                        {
+                            t.HasCheckConstraint("ck_check_adjustment_action", "action IN ('discount','comp','void')");
+
+                            t.HasCheckConstraint("ck_check_adjustment_amount", "amount_minor > 0");
+
+                            t.HasCheckConstraint("ck_check_adjustment_quantity", "quantity >= 0");
+
+                            t.HasCheckConstraint("ck_check_adjustment_scope", "(action = 'discount' AND order_id IS NULL AND order_line_id IS NULL AND value_type IS NOT NULL AND value IS NOT NULL AND quantity = 0) OR (action IN ('comp','void') AND order_id IS NOT NULL AND order_line_id IS NOT NULL AND quantity > 0 AND value_type IS NULL AND value IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Hipos.Api.Sales.SalesCheckAuditRow", b =>
                 {
                     b.Property<long>("Id")
@@ -246,6 +352,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("branch_id");
 
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("closed_at");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -266,6 +376,10 @@ namespace Hipos.Api.Sales.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("firm_id");
+
+                    b.Property<Guid?>("MergedIntoCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("merged_into_check_id");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -292,16 +406,68 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.HasAlternateKey("Id", "FirmId", "BranchId");
 
+                    b.HasIndex("MergedIntoCheckId");
+
                     b.HasIndex("FirmId", "BranchId", "CreatedAt");
 
                     b.ToTable("checks", "sales", t =>
                         {
                             t.HasCheckConstraint("ck_check_currency", "currency = 'TRY'");
 
-                            t.HasCheckConstraint("ck_check_status", "status IN ('open')");
+                            t.HasCheckConstraint("ck_check_merged_target", "(status = 'merged' AND merged_into_check_id IS NOT NULL AND closed_at IS NULL) OR (status = 'closed' AND merged_into_check_id IS NULL AND closed_at IS NOT NULL) OR (status = 'open' AND merged_into_check_id IS NULL AND closed_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_check_status", "status IN ('open', 'merged', 'closed')");
 
                             t.HasCheckConstraint("ck_check_version_positive", "version > 0");
                         });
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckSplitRow", b =>
+                {
+                    b.Property<Guid>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<string>("BranchId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("branch_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<string>("FirmId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("firm_id");
+
+                    b.Property<Guid>("SourceCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_check_id");
+
+                    b.Property<Guid>("TargetCheckId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("target_check_id");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("SourceCheckId");
+
+                    b.HasIndex("TargetCheckId");
+
+                    b.HasIndex("FirmId", "BranchId", "SourceCheckId");
+
+                    b.ToTable("check_splits", "sales");
                 });
 
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderAuditRow", b =>
@@ -365,6 +531,10 @@ namespace Hipos.Api.Sales.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<long>("BaseUnitPriceMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("base_unit_price_minor");
+
                     b.Property<string>("Currency")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -374,6 +544,18 @@ namespace Hipos.Api.Sales.Migrations
                     b.Property<long>("LineTotalMinor")
                         .HasColumnType("bigint")
                         .HasColumnName("line_total_minor");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("OptionsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("options_json");
 
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uuid")
@@ -409,7 +591,7 @@ namespace Hipos.Api.Sales.Migrations
 
                     b.ToTable("order_lines", "sales", t =>
                         {
-                            t.HasCheckConstraint("ck_line_price_positive", "unit_price_minor > 0 AND line_total_minor > 0");
+                            t.HasCheckConstraint("ck_line_price_positive", "base_unit_price_minor > 0 AND unit_price_minor >= 0 AND line_total_minor >= 0");
 
                             t.HasCheckConstraint("ck_line_quantity_positive", "quantity > 0");
                         });
@@ -447,6 +629,13 @@ namespace Hipos.Api.Sales.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("firm_id");
+
+                    b.Property<string>("KitchenItemsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("kitchen_items_json");
 
                     b.Property<string>("PaymentStatus")
                         .IsRequired()
@@ -493,7 +682,7 @@ namespace Hipos.Api.Sales.Migrations
 
                             t.HasCheckConstraint("ck_order_status", "status IN ('open')");
 
-                            t.HasCheckConstraint("ck_order_total_positive", "total_minor > 0");
+                            t.HasCheckConstraint("ck_order_total_positive", "total_minor >= 0");
 
                             t.HasCheckConstraint("ck_order_version_positive", "version > 0");
                         });
@@ -514,6 +703,48 @@ namespace Hipos.Api.Sales.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckAdjustmentRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("CheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Sales.SalesOrderRow", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Hipos.Api.Sales.SalesOrderLineRow", null)
+                        .WithMany()
+                        .HasForeignKey("OrderLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("MergedIntoCheckId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Hipos.Api.Sales.SalesCheckSplitRow", b =>
+                {
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("SourceCheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Hipos.Api.Sales.SalesCheckRow", null)
+                        .WithMany()
+                        .HasForeignKey("TargetCheckId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Hipos.Api.Sales.SalesOrderLineRow", b =>

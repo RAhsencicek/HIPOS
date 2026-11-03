@@ -1,6 +1,6 @@
 # HIPOS — Ürünler ve Menü backend sözleşmesi
 
-Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme**, ilk **taslak fiyat sürümü → POS yayını** ve menü oluşturma/aktif menü komutları uygulandı. Ürün aktifliği, menü aktifliği ve kanal yayını ayrı durumlar olarak korunur. QR/web yayını, ileri tarihli/merkezi fiyat ve yayın geri alma planlıdır. Yönetici paneli ilk kullanıcı yüzüdür; sipariş oluşturma veya POS işlemi bu sözleşmenin parçası değildir.
+Durum: PostgreSQL liste/detay okuması, **şube bazlı ürün taslağı**, **firma bazlı kategori oluşturma/ad değiştirme**, ilk **taslak fiyat sürümü → POS yayını** ve menü oluşturma/aktif menü komutları uygulandı. Ürün aktifliği, menü aktifliği ve kanal yayını ayrı durumlar olarak korunur. Seçenek gruplarının EF modeli, migration'ları, firma kapsamlı yönetim API'si ve sipariş oluşturma sırasında güncel katalogdan doğrulama/fiyat snapshot'ı uygulandı; panel ve garson ekranı entegrasyonu sıradadır. QR/web yayını, ileri tarihli/merkezi fiyat ve yayın geri alma planlıdır. Yönetim ve sipariş ekranlarının seçenek deneyimi henüz tamamlanmadı.
 
 ## Bugün çalışan okuma dilimi
 
@@ -112,12 +112,63 @@ Kategori firma genelinde olduğu için komutu yalnız bütün firma şubelerine 
 | --- | --- | --- | --- |
 | Ürünler, ürün ayrıntısı | Firma/şube ürün listesi, detay, arama; aktiflik ve kanal/yayın durumu ayrı görünür | Taslak oluştur/güncelle, etkinleştir/pasifleştir | Ürün aktifliği, audit ve API korumaları panel/API/PostgreSQL kabul testinde doğrulandı; ürün yayın geçmişi okunabiliyor. |
 | Kategoriler | Kategori listesi ve şube ürün sayısı | Kategori oluştur/ad değiştir/sırala | Okuma, oluşturma ve ad değiştirme API/PostgreSQL'de var. Panel henüz yazma formu içermez; sıralama ve pasifleştirme yok. |
-| Seçenek grupları, alerjenler, görseller | Ürün ilişkileri | Bağla/çıkar, görsel yükle | Yalnız mevcut okuma alanları; dosya/ilişki komutu yok. |
+| Seçenek grupları, alerjenler, görseller | Ürün ilişkileri | Bağla/çıkar, görsel yükle | Normalize grup API'si ve sipariş API'sinde doğrulama/fiyat snapshot'ı PostgreSQL'e bağlıdır; yönetim ve sipariş ekranı bağlı değildir. Alerjen/görsel komutu yoktur. |
 | Menüler ve kompozisyon | Menü–kategori–ürün hiyerarşisi; menü aktifliği ürün durumundan ayrıdır | Taslak menü düzenle, şubede etkinleştir/pasifleştir | Menü düzenleme ve tek aktif menü seçimi panel/API/PostgreSQL'de vardır; etkinleştirme pasif ürün içeriyorsa reddedilir. |
 | Kanal/şube görünürlüğü | Ürün kapsamı | Taslak görünürlük değiştir | Şube görünürlüğü okunur; komut yok. |
 | Fiyatlar ve sürümler | Merkez/şube fiyatı, geçerlilik | Fiyat taslağı, şube istisnası, sürüm oluştur | Şube taslağı için numaralı fiyat sürümü API'si, panel formu ve geçmiş okuması var; ileri tarih/merkez istisnası yok. |
 | İleri tarihli fiyatlar | Zamanlanmış sürümler | Gelecek tarihli fiyat planla/iptal et | Planlandı. |
 | Menü yayınlama ve geçmişi | Taslak/yayın sürümleri | Yayınla, geri al | İlk taslak → POS yayını ve geçmişi panelden çalışır; geri alma ve tekrar yayın yok. |
+
+## Ürün seçenekleri — yönetim ve sipariş API'si uygulanmış, ekran entegrasyonu bekliyor
+
+EF modeli, migration, firma kapsamlı grup yönetimi API'si ve sipariş fiyatlama/snapshot entegrasyonu PostgreSQL'e uygulanmıştır. Aşağıdaki maddeler mevcut backend sözleşmesini açıklar; yönetim paneli ve garson ekranı henüz bu API'lere bağlı değildir.
+
+### Veri modeli
+
+- `catalog.option_groups` firma kapsamında tekrar kullanılabilir grupları tutar. Grup birden fazla ürüne bağlanabilir; ürün-grup bağı yoksa ürün için o grup seçeneği bulunmaz.
+- `catalog.option_items` bir grubun seçeneklerini tutar. Her seçenek işaretli `price_delta_minor BIGINT` kullanır; TRY tutarları kuruş cinsindendir ve negatif fiyat farkı geçerlidir.
+- `catalog.product_option_groups` ürün-grup bağını, ürün üzerindeki sıralamayı ve o ürün için `min_selections` / nullable `max_selections` sınırlarını tutar. Aynı grup farklı ürünlerde farklı seçim sınırlarıyla kullanılabilir.
+- Grup sınırları farklı seçilmiş seçenek kimliklerini sayar; seçenek adetleri bu sayıya dahil değildir. Seçenek bazında `quantity_enabled` ve `max_quantity` bulunur. Adet girişi kapalı seçenek bir kez seçilir; açıksa seçilen adet en az 1 ve tanımlı üst sınırı aşmayacak biçimde doğrulanır.
+- Pasif grup ve seçenek sipariş sırasında seçilebilir. `is_active` bu hedef akışta seçimi engellemez. Ürün aktifliği kuralı bundan ayrıdır: pasif ürün yeni siparişe eklenemez ve yeniden aktifleştirilene kadar mevcut `409 PRODUCT_INACTIVE` kuralı korunur.
+
+Eski `catalog.products.option_groups` metin dizisi normalize grup ve seçeneklere dönüştürülmeyecek; eski değerlerin korunması gerekmiyor. Eski kod tüketicileri yeni ilişkilere geçirildikten sonra bu alanı kaldıran ileri migration yapılabilir. Uygulanmış migration dosyaları geriye dönük değiştirilmez.
+
+### Grup yönetimi API'si
+
+Firma çapında tekrar kullanılabilir grup tanımları mevcut kategori yönetimindeki firma yöneticisi ve firma erişimi denetimiyle korunur. Grup/seçenek kayıtları pasif olsa bile okuma yanıtlarında döner. `requestId` ile aynı içerik tekrarlanırsa önceki anlık yanıt döner; aynı kimlik farklı içerikle gelirse `409 REQUEST_ID_CONFLICT` döner. Grup sürümü seçenek ekleme/düzenleme işlemlerinde de ilerler; ürün-grup bağlantısı ürünün sürümünü ilerletir. Denetim snapshot'ları `catalog.option_management_audit` tablosuna yazılır.
+
+```text
+GET  /api/v1/firms/{firmId}/catalog/option-groups
+POST /api/v1/firms/{firmId}/catalog/option-groups
+PUT  /api/v1/firms/{firmId}/catalog/option-groups/{groupId}
+POST /api/v1/firms/{firmId}/catalog/option-groups/{groupId}/items
+PUT  /api/v1/firms/{firmId}/catalog/option-groups/{groupId}/items/{itemId}
+GET  /api/v1/firms/{firmId}/catalog/products/{productId}/option-groups
+PUT  /api/v1/firms/{firmId}/catalog/products/{productId}/option-groups
+```
+
+Grup oluşturma gövdesi `requestId`, `name`, `isActive`, `sortOrder` alır; `requestId` grup UUID'si olarak da kullanılır. Grup düzenleme bunlara `expectedVersion` ekler. Seçenek oluşturma `requestId`, `name`, `priceDeltaMinor`, `quantityEnabled`, `maxQuantity`, `isActive`, `sortOrder` ve grubun beklenen sürümünü alır; `requestId` seçenek UUID'sidir. Seçenek düzenleme gövdesi `expectedVersion` ile grubun mevcut sürümünü ister. Adet girişi kapalıysa `maxQuantity` tam 1 olmalıdır; fiyat farkı işaretli `BIGINT` olarak kabul edilir.
+
+Ürün-grup PUT gövdesi `requestId`, ürünün `expectedVersion` değeri ve `{ groupId, minSelections, maxSelections, sortOrder }` listesi alır. Bu liste ürünün grup bağlantılarının tamamını değiştirir; listeden çıkarılan grup o üründen ayrılır. Grup aynı firmaya ait olmalı, aynı ürün için tekrarlanmamalı; alt sınır seçenek sayısını aşmamalıdır. Seçim sayımı farklı seçenekleri esas alır, seçenek adedini değil. Fiziksel grup/seçenek silme uç noktası bu API diliminde yoktur.
+
+### Sipariş doğrulaması, fiyat ve anlık görüntü
+
+Sipariş oluşturma sırasında sunucu seçilen grup ve seçenek kimliklerini güncel katalogdan çözer. Seçenek, ürünün bağlı olduğu gruba ait olmalı; grup sınırları, seçenek adedi ve seçenek üst sınırı sunucuda doğrulanmalıdır. İstemciden gelen ad veya fiyat, fiyat hesabının kaynağı değildir. Pasif ürün reddedilir; pasif grup/seçenek tek başına ret nedeni değildir.
+
+Her ürün birimi için hesaplama:
+
+```text
+birim_fiyat = sipariş anındaki temel ürün fiyatı
+            + Σ(seçenek sipariş anındaki birim fiyat farkı × seçilen seçenek adedi)
+```
+
+Hesaplanan ürün birim fiyatı sıfırın altındaysa sipariş reddedilir; sıfır kabul edilir. Kalem toplamı bu birim fiyatın sipariş edilen ürün adediyle çarpılmasıyla hesaplanır.
+
+Sipariş kalemi temel ürün fiyatını ve hesaplanan nihai birim fiyatı ayırt edilebilir şekilde saklar. `options_json` sipariş anındaki grup/seçenek kimliklerini ve adlarını, seçenek adetlerini ve birim fiyat farklarını taşır. Katalogda sonradan yapılan ad, fiyat veya ilişki değişiklikleri mevcut sipariş kaleminin tutarını ve görüntüsünü değiştirmez. Sipariş seçenekleri yayımlanmış POS anlık görüntüsünden değil, sipariş anındaki güncel katalogdan doğrulanır; bu nedenle istemcide eski kalmış seçenek sunucu tarafından reddedilebilir.
+
+Sipariş gövdesi seçenekler için `{ groupId, optionId, quantity }` kimliklerini taşır. Eski `{ groupName, optionName }` etiket girdisi fiyatlandırılmış seçenek kabul edilmez; istemcilerin bu girdiyi seçme kimlikleriyle değiştirmesi gerekir. Yanıtlarda sipariş anı snapshot'ı ad ve fiyat farkını içerir.
+
+Sipariş API'si ve ortak satış/garson sipariş girişleri bu doğrulamayı kullanır. Katalog yönetim ekranı, garson ekranı ve QR menü geliştirmesi bu backend diliminin kapsamı değildir; mevcut istemcilerin seçenek gönderme biçimi ayrıca güncellenmelidir.
 
 ### Kategori ve şube kapsamı kararı
 

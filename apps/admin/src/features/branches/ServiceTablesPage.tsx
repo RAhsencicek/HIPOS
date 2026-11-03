@@ -8,7 +8,7 @@ type Line = { productId: string; productName: string; quantity: number; unitPric
 type Assignment = { id: string; orderId: string; waiterId: string | null; waiterName: string | null;
   openedAt: string; orderCreatedAt: string; orderStatus: string; paymentStatus: string;
   totalMinor: number; version: number; items: Line[] };
-type Table = { id: string; number: number; name: string; isActive: boolean; assignment?: Assignment | null };
+type Table = { id: string; number: number; name: string; isActive: boolean; group?: { tableNames: string[]; guestCount: number } | null; assignment?: Assignment | null };
 type Waiter = { id: string; name: string; isActive: boolean };
 type TableResponse = { source: "postgres"; tablesEnabled: boolean; waitersEnabled: boolean; items: Table[] };
 
@@ -72,7 +72,7 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
   const activeTables = data?.items.filter((table) => table.isActive) ?? [];
   const lastTable = activeTables.at(-1) ?? null;
   const canAddTable = !lastTable || lastTable.number < 999;
-  const occupied = activeTables.filter((table) => Boolean(table.assignment)).length;
+  const occupied = activeTables.filter((table) => Boolean(table.assignment || table.group)).length;
   const selectedWaiter = waiters.find((waiter) => waiter.id === selectedWaiterId) ?? null;
   const waiterTableCount = (waiterId: string) => activeTables.filter((table) => table.assignment?.waiterId === waiterId).length;
 
@@ -95,7 +95,7 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
   }
 
   async function removeLastTable() {
-    if (!scope || !lastTable || lastTable.assignment || busy) return;
+    if (!scope || !lastTable || lastTable.assignment || lastTable.group || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
       await serviceApi(`${scope}/tables/${encodeURIComponent(lastTable.id)}`, actor, "DELETE");
@@ -126,20 +126,22 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
             <span className="service-summary">{occupied}/{activeTables.length} masada açık bağ</span></div>
           {activeTables.length ? <div className={`table-plan service-table-plan ${selectedWaiterId ? "has-waiter-filter" : ""}`}>
             {activeTables.map((table) => <button key={table.id} type="button"
-              className={`restaurant-table service-table ${table.assignment ? "occupied" : ""} ${selectedId === table.id ? "selected" : ""} ${selectedWaiterId && table.assignment?.waiterId === selectedWaiterId ? "waiter-match" : ""} ${selectedWaiterId && table.assignment?.waiterId !== selectedWaiterId ? "waiter-dimmed" : ""}`}
+              className={`restaurant-table service-table ${table.assignment || table.group ? "occupied" : ""} ${selectedId === table.id ? "selected" : ""} ${selectedWaiterId && table.assignment?.waiterId === selectedWaiterId ? "waiter-match" : ""} ${selectedWaiterId && table.assignment?.waiterId !== selectedWaiterId ? "waiter-dimmed" : ""}`}
               onClick={() => setSelectedId(table.id)} aria-pressed={selectedId === table.id}
-              aria-label={`${table.name}, ${table.assignment ? "açık adisyon var" : "açık adisyon yok"}`}>
+              aria-label={`${table.name}, ${table.group ? "masa grubunda" : table.assignment ? "açık adisyon var" : "açık adisyon yok"}`}>
               <span className="service-table-number"><LayoutGrid size={14} />{String(table.number).padStart(2, "0")}</span>
+              {table.group && <span className="service-table-waiter">{table.group.tableNames.join(" + ")} · {table.group.guestCount} kişi</span>}
               {table.assignment && <><span className="service-table-waiter">{table.assignment.waiterName ?? "Garson atanmamış"}</span><span className="service-table-total">{money(table.assignment.totalMinor)}</span></>}
             </button>)}
           </div> : <p>Bu şubede aktif masa yok. “Masa ekle” ile ilk masayı oluşturabilirsiniz.</p>}
-          <p className="card-note">Dolu durumu açık masa-adisyon bağından hesaplanır. Garson filtresi sorumlu olduğu masaları vurgular; self-servis adisyonlar masa doluluğuna eklenmez.</p>
+          <p className="card-note">Dolu durumu açık masa-adisyon bağı veya aktif masa grubundan hesaplanır. Garson filtresi sorumlu olduğu masaları vurgular; self-servis adisyonlar masa doluluğuna eklenmez.</p>
           {data.tablesEnabled && <div className="service-table-actions">
             <div className="service-table-actions-copy"><span className="card-kicker">MASA DÜZENİ</span><strong>{activeTables.length} aktif masa</strong><small>{lastTable ? `Son masa: ${lastTable.name}` : "Henüz masa yok"}</small></div>
             <div className="service-table-action-buttons">
               <button className="primary-button" type="button" disabled={busy || !canAddTable} onClick={() => void createTable()}>Masa ekle</button>
-              <button className="soft-button danger-soft-button" type="button" disabled={busy || !lastTable || Boolean(lastTable.assignment)} onClick={() => void removeLastTable()}>Masa sil</button>
+              <button className="soft-button danger-soft-button" type="button" disabled={busy || !lastTable || Boolean(lastTable.assignment || lastTable.group)} onClick={() => void removeLastTable()}>Masa sil</button>
             </div>
+            {lastTable?.group && <div className="service-table-warning" role="status">Bu masa bir gruba bağlı; kaldırmadan önce garson ekranından grubu ayırın.</div>}
             {lastTable?.assignment && <div className="service-table-warning" role="status"><strong>{lastTable.name} silinemez.</strong> Bu masada açık adisyon var; önce adisyonu kapatın. Masa numaraları sondan geriye doğru kaldırılır.</div>}
             {!canAddTable && <div className="service-table-warning" role="status">Bu şubede masa numarası sınırına ulaşıldı.</div>}
             {canAddTable && <small className="service-table-next-number">Masa ekle, sıradaki numarayı otomatik verir{lastTable ? `: ${lastTable.number + 1}` : ": 1"}.</small>}
@@ -149,6 +151,7 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
           <span className="card-kicker">MASA DETAYI</span>
           {!selected ? <><h2>Masa seçin</h2><p>Adisyon, sipariş zamanı, ürünler ve sorumlu garson için bir masaya tıklayın.</p></> : <>
             <h2>{selected.name}</h2>
+            {selected.group && <p>Masa grubu: {selected.group.tableNames.join(" + ")} · {selected.group.guestCount} kişi. Ortak hesap ana masada tutulur.</p>}
             {!selected.isActive && <StatusPill tone="orange">Masa pasif</StatusPill>}
             {!selected.assignment ? <p>Bu masada açık adisyon yok.</p> : <>
               {!data.tablesEnabled && <p className="service-historical">Masa servisi kapalı · geçmiş bağ</p>}

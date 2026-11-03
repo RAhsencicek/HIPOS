@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpCatalogProvider } from "./HttpCatalogProvider";
 
+const testOrigin = "http://hipos.test";
+
 const scope = {
   firmId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   branchId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
@@ -16,13 +18,22 @@ describe("HttpCatalogProvider", () => {
       scope, query: "pizza", categoryId: "pizza", page: 2, pageSize: 10,
     });
     const [url, options] = fetchMock.mock.calls[0];
-    const parsed = new URL(url);
+    const parsed = new URL(url, testOrigin);
     expect(parsed.pathname).toBe(`/api/v1/firms/${scope.firmId}/catalog/products`);
     expect(Object.fromEntries(parsed.searchParams)).toEqual({
       page: "2", pageSize: "10", branchId: scope.branchId,
       query: "pizza", categoryId: "pizza",
     });
     expect(options.headers["X-Demo-Actor"]).toBe("manager-multi");
+  });
+
+  it("API adresi boşken aynı sunucuya göreli istek gönderir", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ scope, items: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new HttpCatalogProvider("").listCategories(scope);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/v1/firms/${scope.firmId}/catalog/categories?branchId=${scope.branchId}`);
+    expect(new URL(url, testOrigin).origin).toBe(testOrigin);
   });
 
   it("404 ve erişim hatalarını sahte boş listeye çevirmez", async () => {
@@ -45,7 +56,7 @@ describe("HttpCatalogProvider", () => {
     vi.stubGlobal("fetch", fetchMock);
     await new HttpCatalogProvider().listCategories(scope);
     const [url] = fetchMock.mock.calls[0];
-    const parsed = new URL(url);
+    const parsed = new URL(url, testOrigin);
     expect(parsed.pathname).toBe(`/api/v1/firms/${scope.firmId}/catalog/categories`);
     expect(parsed.searchParams.get("branchId")).toBe(scope.branchId);
   });
@@ -56,7 +67,7 @@ describe("HttpCatalogProvider", () => {
     const command = { scope, draftId: "77777777-7777-4777-8777-777777777703", name: "Yeni pizza", sku: "P-1", categoryId: "pizza", categoryName: "Pizzalar", description: "Test" };
     await new HttpCatalogProvider().createDraft(command);
     const [url, options] = fetchMock.mock.calls[0];
-    expect(new URL(url).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/drafts`);
+    expect(new URL(url, testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/drafts`);
     expect(options.method).toBe("POST");
     expect(JSON.parse(options.body)).toEqual({ draftId: command.draftId, name: command.name, sku: command.sku, categoryId: command.categoryId, categoryName: command.categoryName, description: command.description });
   });
@@ -67,7 +78,7 @@ describe("HttpCatalogProvider", () => {
     await expect(new HttpCatalogProvider().updateDraft({ scope, draftId: "draft-1", expectedVersion: 2, name: "Pizza", sku: "P-1", categoryId: "pizza", categoryName: "Pizzalar", description: "" }))
       .rejects.toMatchObject({ code: "VERSION_CONFLICT", status: 409 });
     const [url, options] = fetchMock.mock.calls[0];
-    expect(new URL(url).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/drafts/draft-1`);
+    expect(new URL(url, testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/drafts/draft-1`);
     expect(options.method).toBe("PUT");
     expect(JSON.parse(options.body).expectedVersion).toBe(2);
   });
@@ -90,14 +101,14 @@ describe("HttpCatalogProvider", () => {
     await provider.listPriceVersions({ scope, productId: draftId });
     await provider.listPublications({ scope, productId: draftId });
     const prefix = `/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog`;
-    expect(new URL(fetchMock.mock.calls[0][0]).pathname).toBe(`${prefix}/drafts/${draftId}/price`);
+    expect(new URL(fetchMock.mock.calls[0][0], testOrigin).pathname).toBe(`${prefix}/drafts/${draftId}/price`);
     expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ priceVersionId: "price-id", amountMinor: 32550, expectedVersion: 2 });
-    expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe(`${prefix}/drafts/${draftId}/publish`);
+    expect(new URL(fetchMock.mock.calls[1][0], testOrigin).pathname).toBe(`${prefix}/drafts/${draftId}/publish`);
     expect(fetchMock.mock.calls[1][1].method).toBe("POST");
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ publicationId: "publication-id", expectedVersion: 3 });
-    expect(new URL(fetchMock.mock.calls[2][0]).pathname).toBe(`${prefix}/products/${draftId}/price-versions`);
-    expect(new URL(fetchMock.mock.calls[3][0]).pathname).toBe(`${prefix}/products/${draftId}/publications`);
+    expect(new URL(fetchMock.mock.calls[2][0], testOrigin).pathname).toBe(`${prefix}/products/${draftId}/price-versions`);
+    expect(new URL(fetchMock.mock.calls[3][0], testOrigin).pathname).toBe(`${prefix}/products/${draftId}/publications`);
   });
 
   it("ürün aktifliğini requestId ve expectedVersion ile şube API'sine gönderir", async () => {
@@ -108,7 +119,7 @@ describe("HttpCatalogProvider", () => {
     const command = { scope, productId: "product-1", requestId: "request-1", expectedVersion: 4, isActive: false };
     await new HttpCatalogProvider().setProductActive(command);
     const [url, options] = fetchMock.mock.calls[0];
-    expect(new URL(url).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products/product-1/activation`);
+    expect(new URL(url, testOrigin).pathname).toBe(`/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/catalog/products/product-1/activation`);
     expect(options.method).toBe("POST");
     expect(JSON.parse(options.body)).toEqual({ requestId: "request-1", expectedVersion: 4, isActive: false });
   });

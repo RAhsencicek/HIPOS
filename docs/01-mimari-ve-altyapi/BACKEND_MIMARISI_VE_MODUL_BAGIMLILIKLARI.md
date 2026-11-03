@@ -26,7 +26,7 @@ API ve panel için temel çalışma bağımlılıkları Node.js `>=22.12`, npm w
 |---|---|---|---|
 | Özellik yönetimi | `modules` | Şube bazlı tercih, etkin yeni iş durumu, sürüm ve audit | PostgreSQL’de çalışıyor; kullanıcı/rol kimliği demo. |
 | Ürünler ve Menü | `catalog` | Kategori, ürün, fiyat sürümü, yayın anlık görüntüsü, taslak, menü, menüye özel adlandırılmış bölümler ve sıralı ürün bağları | Liste/detay, taslak, fiyat sürümü ve ilk yayın yanında; mevcut ürünleri farklı katalog kategorilerinden seçip özel menü başlığı altında yeniden kullanma, menü sıralama ve aktif menü seçimi API’ye bağlı. Menü yeni ürün/fiyat kopyası üretmez. |
-| Satış ve Adisyon | `sales` | `checks`, `orders`, kalemler, fiyat snapshot'ı, simüle payment attempts/audit | Ortak adisyon API'si check açma, sipariş ekleme, liste/detay ve check üzerinden simüle ödeme başlatma/sonuçlandırmayı sağlar. Garson endpoint'i de `sales.checks` kaydı kullanır ve sipariş kalemleri kalıcı KDS görevleri üretir. Tam check kapama/taşıma/birleştirme, kalem iptali/ikram, gerçek tahsilat/refund ve mali belge yoktur. |
+| Satış ve Adisyon | `sales` | `checks`, `orders`, kalemler, fiyat snapshot'ı, ödeme tahsilatı, masa kapatma | Ortak adisyon API'si check açma, sipariş ekleme, liste/detay, ara hesap fişi basma ve nakit/kart tahsilat ile adisyonu kapatıp masayı boşaltmayı sağlar. Kalıcı KDS görevleri üretir ve ESC/POS mutfak/kasa fiş basımını tetikler. |
 | Personel ve Masa Servisi | `service` | Şube kapsamlı personel, masa, personel-adisyon bağı ve audit | `staff.records` personel kartını; `branches.tables`/`service.waiters` masa-servis bağını yönetir. Panel bölüm/görev kartı CRUD ve ayrı çalışan ızgaraları sunar. Bordro, puantaj, POS kimliği yok. |
 | Cari | `cari` | Müşteri/tedarikçi kartı ve iletişimi, semantik hareket defteri, ekstre, audit | PostgreSQL'de kalıcı; müşteri ve tedarikçi capability'leri ayrı. Tahsilat/ödeme elle girilen işletme kaydıdır; banka/POS/fatura değildir. |
 | Reçete ve stok | `inventory` | Depo, hammadde/eşik, değiştirilemez hareket defteri, reçete sürümleri, sayım snapshot/onayı, mal kabul, tedarikçiye iade, fire/zayi ve denetim | `InventoryDbContext` migration, API, demo seed ve PostgreSQL kabul testi var. Mal kabul onayı stok ile tedarikçi borcunu atomik yazar; iade ters kayıt üretir; fire `waste_loss` hareketidir. Eksik teslim düzeltme geçmişi korunur ancak yeni düzeltme formu panelde yoktur. Satıştan otomatik tüketim, satın alma talebi/siparişi, gerçek PIN ve ayrı fiyatlandırma/maliyet modülü henüz yoktur. |
@@ -107,7 +107,7 @@ Temel endpoint envanteri:
 - `/api/v1/firms/{firmId}/sales/orders...`: legacy/test sipariş listeleme/oluşturma ve simüle ödeme akışı.
 - `/api/v1/firms/{firmId}/branches/{branchId}/sales/checks...`: ortak adisyon açma, sipariş ekleme, liste/detay ve adisyona bağlı simüle ödeme. [Ortak Adisyon Sözleşmesi](../02-kasa-ve-operasyon/ORTAK_ADISYON_SOZLESMESI.md).
 - `/api/v1/firms/{firmId}/branches/{branchId}/caris...`: cari kart, hareket ve ekstre.
-- `/api/v1/firms/{firmId}/branches/{branchId}/service/...`: masa/garson listesi ve oluşturma, atama ve atamayı kapatma.
+- `/api/v1/firms/{firmId}/branches/{branchId}/service/...`: masa/garson listesi ve oluşturma, atama kapatma, açık adisyonu boş masaya taşıma ve ödemesiz açık adisyonları birleştirme.
 - `/api/v1/firms/{firmId}/branches/{branchId}/inventory/...`: hammadde, hareket, reçete sürümü ve sayım/tekil onaylı düzeltme.
 - `/api/v1/firms/{firmId}/branches/{branchId}/cash/...`: kasa/shift özeti, hareket ve vardiya geçmişi, varsayılan kasa provisioning'i, vardiya açma, manuel hareket/düzeltme ve fiziksel sayımla kapama. [Kasa MVP sözleşmesi](../02-kasa-ve-operasyon/KASA_MVP_SOZLESMESI.md).
 - `/api/v1/firms/{firmId}/branches/{branchId}/expense-categories` ve `/expenses...`: firma kategori okuması; şube kapsamlı manuel gider liste/detay/oluşturma. [Gider MVP sözleşmesi](../03-is-alanlari-ve-yonetim/GIDER_YONETIMI_MVP.md).
@@ -157,3 +157,11 @@ Bir iş “tamamlandı” denmeden en azından gerekli otomatik senaryo, ilgili 
 - [Teknik mimari](TEKNIK_MIMARI.md) teknoloji kararlarının geçmişini korur; gerçekleşen modül sınırları için bu sayfa esastır.
 - [API ve Mock Sözleşmesi](API_VE_MOCK_SOZLESMESI.md) tarihsel başlangıç taslağıdır; gerçek endpoint ve tabloların kaynağı uygulama kodu ve modül sözleşmeleridir. Tam kapsamlı OpenAPI henüz üretilmiyor.
 - [Yeni ürün yön taslağı](../05-gecmis-ve-arsiv/YENI_URUN_YONU_TASLAK.md) tartışma kaydıdır; uygulanmış karar gibi okunmamalıdır.
+
+### 23 Ekim 2026 — Fiziksel masa grubu
+
+Garson ekranında kalabalık misafirler için ana masa ve boş ek masaları birlikte kullanımda tutma eklendi. Tüm üyeler ana masanın hesabını açar; mutfak birlikte kullanılan masa adlarını gösterir. Grup ayırma hesabı ana masada korur. Service şeması `table_groups` kaydı ve `tables.table_group_id` bağıyla sahipliği tutar; mevcut adisyon birleştirme davranışı korunur. Sınırlar, API ve yeni Service migration [Modül 2 sözleşmesinde](../00-devir-rehberi/MODUL_02_MASA_VE_ADISYON.md), elle kontroller [masa servisi test rehberinde](../04-test-ve-rehberler/MASA_SERVISI_TEST.md) kayıtlıdır. Gerçek tahsilat/otomatik masa kapatma bu dilime dahil değildir.
+
+### 26 Ekim 2026 — Simüle tahsilat sonrası adisyon ve masa kapanışı
+
+Development ödeme simülasyonunda adisyonun ödenecek bakiyesi tamamen tahsil edildiğinde check `closed` olur. Fiziksel masa grubundaki tüm açık check'ler kapanmadan masa/garson ataması/grup serbest bırakılmaz; son check kapandığında Service alanı kendi context'i üzerinden aynı transaction'da masa ve grubu boşaltır. `CloseChecksAfterPayment` migration'ı uygulanmadan davranış veritabanında etkin değildir. Gerçek kasa/POS hareketi, kasa kaydı ve gerçek tahsilat bu kapsama dahil değildir.
