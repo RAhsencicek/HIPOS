@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 namespace Hipos.Api.Features;
 
 public sealed record DemoActor(string Name, bool CanManage, bool CanOperate, IReadOnlySet<string> AllowedBranches)
@@ -50,9 +52,40 @@ public static class DemoAccess
             ["pos-besiktas"] = new("pos-besiktas", false, true,
                 new HashSet<string> { Scope(InMemoryFeatureStore.MultiFirm, InMemoryFeatureStore.BesiktasBranch) }),
         };
+    public static DemoActor? Resolve(HttpContext context)
+    {
+        // 1. Önce gelen istekte gerçek JWT Bearer Token var mı kontrol et
+        var authHeader = context.Request.Headers.Authorization.ToString();
+        if (!string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            var tokenString = authHeader["Bearer ".Length..].Trim();
+            try
+            {
+                var handler = new JwtSecurityTokenHandler();
+                if (handler.CanReadToken(tokenString))
+                {
+                    var jwt = handler.ReadJwtToken(tokenString);
+                    var role = jwt.Claims.FirstOrDefault(c => c.Type == "role" || c.Type == ClaimTypes.Role)?.Value ?? "waiter";
+                    var firmId = jwt.Claims.FirstOrDefault(c => c.Type == "firmId")?.Value ?? InMemoryFeatureStore.SingleFirm;
+                    var branchId = jwt.Claims.FirstOrDefault(c => c.Type == "branchId")?.Value ?? InMemoryFeatureStore.SingleBranch;
+                    var name = jwt.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Name || c.Type == ClaimTypes.Name)?.Value ?? role;
 
-    public static DemoActor? Resolve(HttpContext context) =>
-        Actors.TryGetValue(context.Request.Headers["X-Demo-Actor"].ToString(), out var actor) ? actor : null;
+                    bool canManage = role == "owner";
+                    bool canOperate = true;
+                    var allowedBranches = new HashSet<string> { Scope(firmId, branchId) };
 
+                    return new DemoActor(name, canManage, canOperate, allowedBranches);
+                }
+            }
+            catch
+            {
+                // Token geçersizse null döner
+                return null;
+            }
+        }
+
+        // 2. Geriye dönük uyumluluk: Eğer token yoksa sahte X-Demo-Actor başlığına bak
+        return Actors.TryGetValue(context.Request.Headers["X-Demo-Actor"].ToString(), out var actor) ? actor : null;
+    }
     private static string Scope(string firmId, string branchId) => $"{firmId}:{branchId}";
 }

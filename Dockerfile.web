@@ -1,0 +1,18 @@
+FROM node:24-alpine
+
+WORKDIR /workspace
+
+# Demo seed komutları psql istemcisini kullanır.
+RUN apk add --no-cache postgresql-client
+
+COPY package.json package-lock.json ./
+COPY apps/admin/package.json ./apps/admin/package.json
+COPY apps/pos/package.json ./apps/pos/package.json
+RUN npm ci
+
+COPY apps/admin ./apps/admin
+COPY apps/pos ./apps/pos
+COPY contracts ./contracts
+COPY scripts ./scripts
+
+EXPOSE 5173 5176

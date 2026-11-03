@@ -11,3 +11,6 @@ test-results/
 .playwright-temp/
 **/bin/
 **/obj/
+
+.vs/
+.agents/

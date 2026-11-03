@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRequestId } from "./requestId";
 import { ProductOptionPicker, type SelectedOption, type OptionSelection } from "./ProductOptionPicker";
 import "./operational.css";
+import { PinPadModal } from "./components/PinPadModal";
 
 const firmId = "11111111-1111-4111-8111-111111111111";
 const branchId = "33333333-3333-4333-8333-333333333333";
@@ -57,10 +58,18 @@ async function request<T>(path: string, actor: string, body?: unknown): Promise<
   let response: Response;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  const token = localStorage.getItem("hipos_pos_token") || localStorage.getItem("hipos_cashier_token") || localStorage.getItem("hipos_waiter_token") || localStorage.getItem("hipos_kitchen_token");
   try {
-    response = await fetch(`${apiBase}${path}`, { method: body ? "POST" : "GET", signal: controller.signal,
-      headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}) });
+    response = await fetch(`${apiBase}${path}`, {
+      method: body ? "POST" : "GET",
+      signal: controller.signal,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "X-Demo-Actor": actor,
+        ...(body ? { "Content-Type": "application/json" } : {})
+      },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
   } catch {
     if (controller.signal.aborted)
       throw new Error("Sunucu 15 saniyede yanıt vermedi. Sipariş kaydedilmiş olabilir; yeniden deneyin, aynı sipariş kimliği kullanılacak.");
@@ -98,6 +107,11 @@ const quickRequestKey = `hipos.quick-create.${firmId}.${branchId}`;
 const morningOpenRequestKey = `hipos.cash-opening.${firmId}.${branchId}`;
 
 export function CashierApp() {
+  const [cashierSession, setCashierSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
+    const saved = localStorage.getItem("hipos_cashier_user");
+    const token = localStorage.getItem("hipos_cashier_token");
+    return saved && token ? { token, user: JSON.parse(saved) } : null;
+  });
   const [tables, setTables] = useState<Table[]>([]);
   const [cashOverview, setCashOverview] = useState<CashOverview | null>(null);
   const [cashError, setCashError] = useState("");
@@ -671,6 +685,21 @@ export function CashierApp() {
     return (Boolean(query) || matchesCat) && matchesSearch;
   });
 
+  if (!cashierSession) {
+    return (
+      <PinPadModal
+        title="Kasa Dokunmatik Ekranı"
+        allowedRoles={["cashier", "owner"]}
+        subtitle="Kasayı açmak ve tahsilat yapmak için 4 haneli PIN kodunuzu tuşlayın"
+        onSuccess={(data) => {
+          localStorage.setItem("hipos_cashier_token", data.token);
+          localStorage.setItem("hipos_cashier_user", JSON.stringify(data.user));
+          setCashierSession(data);
+        }}
+      />
+    );
+  }
+
   return <main className={`ops-shell waiter-shell cashier-shell${selected || cashierMode === "quick" ? " cashier-detail-shell" : " cashier-table-overview"}`}>
     <header className="ops-header">
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -681,6 +710,29 @@ export function CashierApp() {
         </nav>
       </div>
       <div className="waiter-header-actions">
+        <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
+          Kasiyer: {cashierSession.user.fullName}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            localStorage.removeItem("hipos_cashier_token");
+            localStorage.removeItem("hipos_cashier_user");
+            setCashierSession(null);
+          }}
+          style={{
+            padding: "0.25rem 0.6rem",
+            fontSize: "0.75rem",
+            borderRadius: "9999px",
+            backgroundColor: "rgba(239, 68, 68, 0.15)",
+            color: "#ef4444",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            cursor: "pointer",
+            marginRight: "8px"
+          }}
+        >
+          Ekranı Kilitle
+        </button>
         {lastCompletedReceipt && <button type="button" className="waiter-back" onClick={() => printAccountReceipt(lastCompletedReceipt)}>Son hesap fişi</button>}
         {activeShift && mainRegister && <button type="button" className="waiter-back" disabled={cashBusy || cashLoading || Boolean(cashError)} onClick={() => { setCashAmount(""); setCashDenominations({}); setCashNote(""); setCashActionError(""); setCashNotice(""); setCashDialog({ mode: "close", registerId: mainRegister.id, shiftId: activeShift.id, version: activeShift.version, expected: activeShift.expectedCashMinor ?? undefined }); }}>Vardiyayı kapat</button>}
         {selected && cashierMode === "tables" && <button className="waiter-back" onClick={() => setSelectedId("")}>← Masalara dön</button>}
@@ -1082,6 +1134,11 @@ export function CashierApp() {
 }
 
 export function WaiterApp() {
+    const [waiterSession, setWaiterSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
+        const saved = localStorage.getItem("hipos_waiter_user");
+        const token = localStorage.getItem("hipos_waiter_token");
+        return saved && token ? { token, user: JSON.parse(saved) } : null;
+    });
   const [products, setProducts] = useState<Product[]>([]);
   const [menus, setMenus] = useState<RestaurantMenu[]>([]);
   const [selectedMenuId, setSelectedMenuId] = useState("");
@@ -1770,8 +1827,23 @@ export function WaiterApp() {
     finally { setOperationSaving(false); }
   }
 
+  if (!waiterSession) {
+    return (
+      <PinPadModal
+        title="Garson Tablet Girişi"
+        allowedRoles={["waiter"]}
+        subtitle="Masalara sipariş girmek için 4 haneli PIN kodunuzu tuşlayın"
+        onSuccess={(data) => {
+          localStorage.setItem("hipos_waiter_token", data.token);
+          localStorage.setItem("hipos_waiter_user", JSON.stringify(data.user));
+          setWaiterSession(data);
+        }}
+      />
+    );
+  }
+
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>Garson: {waiterSession.user.fullName}</span><button onClick={() => { localStorage.removeItem("hipos_waiter_token"); localStorage.removeItem("hipos_waiter_user"); setWaiterSession(null); }} style={{ padding: "0.25rem 0.6rem", fontSize: "0.75rem", borderRadius: "9999px", backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.3)", cursor: "pointer", marginRight: "8px" }}>Vardiyayı Kapat</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
     {!selectedTable && notice && <p className="ops-success" role="status" style={{ margin: "12px 16px", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}</p>}
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
@@ -2161,6 +2233,9 @@ export function WaiterApp() {
 }
 
 export function KitchenApp() {
+  const [kitchenSession, setKitchenSession] = useState<boolean>(() =>
+    Boolean(localStorage.getItem("hipos_kitchen_token"))
+  );
   const [tasks, setTasks] = useState<KitchenTask[]>([]);
   const [stations, setStations] = useState<KitchenStation[]>([]);
   const [stationFilter, setStationFilter] = useState("all");
@@ -2223,8 +2298,44 @@ export function KitchenApp() {
     </article>;
   }
 
+  if (!kitchenSession) {
+    return (
+      <PinPadModal
+        title="Mutfak KDS Girişi"
+        allowedRoles={["chef"]}
+        subtitle="Mutfak ekranını açmak için 4 haneli PIN kodunuzu tuşlayın"
+        onSuccess={(data) => {
+          localStorage.setItem("hipos_kitchen_token", data.token);
+          setKitchenSession(true);
+        }}
+      />
+    );
+  }
+
   return <main className="ops-shell kitchen-shell">
-    <header className="ops-header"><a href="/kitchen" className="ops-brand">HIPOS <span>MUTFAK</span></a><a className="ops-link" href="/waiter">Garson ekranı</a></header>
+    <header className="ops-header">
+      <a href="/kitchen" className="ops-brand">HIPOS <span>MUTFAK</span></a>
+      <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+        <a className="ops-link" href="/waiter">Garson ekranı</a>
+        <button
+          onClick={() => {
+            localStorage.removeItem("hipos_kitchen_token");
+            setKitchenSession(false);
+          }}
+          style={{
+            padding: "0.25rem 0.6rem",
+            fontSize: "0.75rem",
+            borderRadius: "9999px",
+            backgroundColor: "rgba(239, 68, 68, 0.15)",
+            color: "#ef4444",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            cursor: "pointer"
+          }}
+        >
+          Ekranı Kilitle
+        </button>
+      </div>
+    </header>
     <section className="ops-intro"><span className="ops-eyebrow">SİPARİŞ KUYRUĞU</span><h1>Mutfak fişleri</h1><p>Yeni garson siparişleri yerel sunucudan otomatik olarak yenilenir.</p></section>
     <div className="kitchen-toolbar"><span className={error ? "offline-dot" : "online-dot"} />{error ? "Sunucuya ulaşılamıyor" : `Bağlı · son yenileme ${lastRefresh?.toLocaleTimeString("tr-TR") ?? "—"}`}<button onClick={() => void load()}>Yenile</button></div>
     <nav className="kitchen-filters" aria-label="Mutfak istasyonları">

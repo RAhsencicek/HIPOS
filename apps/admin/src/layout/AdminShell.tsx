@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type * as React from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import {
+    LogOut,
   ArrowRight,
   Bell,
   Building2,
@@ -283,14 +284,41 @@ export function Shell({
               onClick={() => navigate("/admin/settings/modules")}
             >
               <CircleHelp size={18} />
-            </button>
-            <div className="topbar-profile" title="Yönetici Profili">
-              <div className="user-avatar">YA</div>
-              <div className="user-info">
-                <strong>Yönetici</strong>
-                <small>{ctx.isMulti ? "Merkez Ofis" : "Şube Müdürü"}</small>
-              </div>
-            </div>
+                      </button>
+                      <div className="topbar-profile" title="Patron Profili" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                          <div className="user-avatar" style={{ backgroundColor: "#2563eb", color: "#fff" }}>AP</div>
+                          <div className="user-info">
+                              <strong>Ahmet Patron</strong>
+                              <small style={{ color: "#10b981", fontWeight: "600" }}>Owner (Patron)</small>
+                          </div>
+                          <button
+                              onClick={() => {
+                                  localStorage.removeItem("hipos_token");
+                                  localStorage.removeItem("hipos_user");
+                                  window.location.href = "/";
+                              }}
+                              title="Oturumu Kapat"
+                              style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.3rem",
+                                  marginLeft: "0.5rem",
+                                  padding: "0.25rem 0.65rem",
+                                  borderRadius: "9999px",
+                                  backgroundColor: "rgba(239, 68, 68, 0.08)",
+                                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                                  color: "#ef4444",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "600",
+                                  whiteSpace: "nowrap",
+                                  cursor: "pointer",
+                                  transition: "all 0.15s ease"
+                              }}
+                          >
+                              <LogOut size={12} />
+                              <span>Çıkış</span>
+                          </button>
+                      </div>
           </div>
         </header>
         <main className="page-content">

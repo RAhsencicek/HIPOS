@@ -1,4 +1,23 @@
 # Yalnız yerel geliştirme. Üretim parolası veya dağıtım yapılandırması değildir.
+x-api-environment: &api-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  ASPNETCORE_URLS: http://+:5180
+  HIPOS_FEATURE_STORAGE: postgres
+  HIPOS_FEATURES_CONNECTION: Host=db;Port=5432;Database=hipos_features;Username=hipos;Password=hipos-dev-only
+  HIPOS_JWT_SECRET: hipos-local-development-secret-change-before-production
+
+x-web-environment: &web-environment
+  HIPOS_DEV_API_TARGET: http://api:5180
+  VITE_API_BASE_URL: ""
+  VITE_FEATURE_PROVIDER: http
+  VITE_CATALOG_PROVIDER: http
+  VITE_SALES_PROVIDER: http
+  VITE_CARI_PROVIDER: http
+  VITE_SERVICE_PROVIDER: http
+  VITE_INVENTORY_PROVIDER: http
+  VITE_CASH_PROVIDER: http
+  VITE_EXPENSE_PROVIDER: http
+
 services:
   db:
     image: postgres:18-alpine
@@ -15,6 +34,83 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: build
+    environment: *api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext
+        ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext AuthDbContext;
+        do
+          echo "Migrating $$context";
+          dotnet tool run dotnet-ef database update --project /src/Hipos.Api/Hipos.Api.csproj --context "$$context" --configuration Release --no-build || exit 1;
+        done
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      HIPOS_DEMO_DATABASE_URL: postgresql://hipos:hipos-dev-only@127.0.0.1:5432/hipos_features
+    network_mode: "service:db"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        npm run demo:seed &&
+        npm run demo:seed:menus &&
+        npm run demo:seed:cari &&
+        npm run demo:seed:service &&
+        npm run demo:seed:inventory &&
+        npm run demo:seed:cash &&
+        npm run demo:seed:expenses
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: *api-environment
+    ports:
+      - "127.0.0.1:5180:5180"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment: *web-environment
+    command: npm run dev --workspace @hipos/admin -- --host 0.0.0.0 --port 5173 --strictPort
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  pos:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment: *web-environment
+    command: npm run dev --workspace @hipos/pos -- --host 0.0.0.0 --port 5176 --strictPort
+    ports:
+      - "127.0.0.1:5176:5176"
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   hipos_pg_dev:

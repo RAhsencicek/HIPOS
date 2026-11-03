@@ -111,3 +111,7 @@ Tarihsel ürün kararları ve ilk aşama taslakları:
 * [STOK_MODULU_İÇİN_YAPILANLAR.md](05-gecmis-ve-arsiv/STOK_MODULU_İÇİN_YAPILANLAR.md): Modül 5 stok/reçete çalışmalarının tarihsel özeti, geri alınan denemeler ve kalan işler.
 
 Kasa sözleşmelerinin önceki sürümleri: [Kasa/POS v2](05-gecmis-ve-arsiv/KASA_POS_VE_OPERASYON_SOZLESMESI_V2.md) · [Manuel kasa önceki çalışma kopyası](05-gecmis-ve-arsiv/KASA_MVP_SOZLESMESI_ONCEKI.md) · [Ödeme simülatörü önceki sürümü](05-gecmis-ve-arsiv/ODEME_SIMULATORU_SOZLESMESI_ONCEKI.md).
+
+### 6. [06-busra-auth](06-busra-auth/) — Büşra Branch (Kimlik, PIN ve Auth Geliştirme Rehberi)
+Kimlik, oturum, 4 haneli PIN ve Manager'sız tek yetkili Owner modelinin kapsamlı analiz ve geliştirme rehberi:
+* [KAPSAMLI_ANALIZ_VE_YOL_HARITASI.md](06-busra-auth/KAPSAMLI_ANALIZ_VE_YOL_HARITASI.md): Tüm proje mimarisi, modül analizleri, RBAC yetki tablosu ve adım adım Auth uygulama rehberi.

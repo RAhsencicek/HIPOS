@@ -1,0 +1,11 @@
+.git
+.agents
+.vs
+.tmp
+node_modules
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/TestResults
+*.log

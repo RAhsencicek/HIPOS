@@ -6,6 +6,7 @@ import { createRequestId } from "./requestId";
 import { ProductOptionPicker, type OptionSelection } from "./ProductOptionPicker";
 import type { TestOrder } from "./PaymentSimulatorPanel";
 import "./styles.css";
+import { PinPadModal } from "./components/PinPadModal";
 
 type Product = {
   id: string;
@@ -39,24 +40,60 @@ const money = (amountMinor: number) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(amountMinor / 100);
 
 async function api<T>(path: string, actor: string, body?: unknown): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase}${path}`, {
-      method: body ? "POST" : "GET",
-      headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
-    throw new Error("Yerel HIPOS API'sine bağlanılamadı.");
-  }
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({})) as Problem;
-    throw new Error(problem.detail ?? `İşlem başarısız (${response.status}).`);
-  }
-  return response.json() as Promise<T>;
+    let response: Response;
+    const token = localStorage.getItem("hipos_cashier_token") || localStorage.getItem("hipos_pos_token");
+    try {
+        response = await fetch(`${apiBase}${path}`, {
+            method: body ? "POST" : "GET",
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                "X-Demo-Actor": actor,
+                ...(body ? { "Content-Type": "application/json" } : {})
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+    } catch {
+        throw new Error("Yerel HIPOS API'sine bağlanılamadı.");
+    }
+    if (!response.ok) {
+        const problem = await response.json().catch(() => ({})) as Problem;
+        throw new Error(problem.detail ?? `İşlem başarısız (${response.status}).`);
+    }
+    return response.json() as Promise<T>;
 }
 
 function App() {
+    // Kasiyer Oturumu
+    const [cashierSession, setCashierSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
+        const saved = localStorage.getItem("hipos_cashier_user");
+        const token = localStorage.getItem("hipos_cashier_token");
+        return saved && token ? { token, user: JSON.parse(saved) } : null;
+    });
+
+    // 15 Dakika Hareketsizlik Kilidi (Auto-Lock)
+    useEffect(() => {
+        if (!cashierSession) return;
+
+        let timer: number;
+        const resetTimer = () => {
+            window.clearTimeout(timer);
+            // 15 dakika (15 * 60 * 1000 ms) hareketsiz kalınca ekranı kilitle
+            timer = window.setTimeout(() => {
+                setCashierSession(null);
+            }, 15 * 60 * 1000);
+        };
+
+        // Kullanıcının ekrana dokunma, tıklama veya tuşa basma hareketlerini dinle
+        const events = ["mousedown", "mousemove", "keypress", "scroll", "touchstart"];
+        events.forEach((name) => window.addEventListener(name, resetTimer));
+
+        resetTimer(); // Sayacı başlat
+
+        return () => {
+            window.clearTimeout(timer);
+            events.forEach((name) => window.removeEventListener(name, resetTimer));
+        };
+    }, [cashierSession]);
   const [scopeKey, setScopeKey] = useState<(typeof scopes)[number]["key"]>("single");
   const scope = scopes.find((item) => item.key === scopeKey)!;
   const [products, setProducts] = useState<Product[]>([]);
@@ -115,13 +152,52 @@ function App() {
       setSaving(false);
     }
   }
-
+    if (!cashierSession) {
+        return (
+            <PinPadModal
+                title="Kasa Terminali Girişi"
+                subtitle="Kasayı açmak için 4 haneli PIN kodunuzu tuşlayın"
+                allowedRoles={["cashier"]}
+                onSuccess={(data) => {
+                    localStorage.setItem("hipos_cashier_token", data.token);
+                    localStorage.setItem("hipos_cashier_user", JSON.stringify(data.user));
+                    setCashierSession(data);
+                }}
+            />
+        );
+    }
   return (
     <main className="shell">
-      <header>
-        <span className="brand">HIPOS <span>TEST POS</span></span>
-        <p>Yalnız geliştirme ortamı · Gerçek tahsilat yapılmaz</p>
-        <nav className="role-links"><a href="/cashier">Kasa ekranı</a><a href="/waiter">Garson ekranı</a><a href="/kitchen">Mutfak kuyruğu</a></nav>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+        <div>
+          <span className="brand">HIPOS <span>TEST POS</span></span>
+          <p>Yalnız geliştirme ortamı · Gerçek tahsilat yapılmaz</p>
+          <nav className="role-links"><a href="/cashier">Kasa ekranı</a><a href="/waiter">Garson ekranı</a><a href="/kitchen">Mutfak kuyruğu</a></nav>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600" }}>
+            Kasiyer: {cashierSession.user.fullName}
+          </span>
+          <button
+            onClick={() => {
+              localStorage.removeItem("hipos_cashier_token");
+              localStorage.removeItem("hipos_cashier_user");
+              setCashierSession(null);
+            }}
+            style={{
+              padding: "0.3rem 0.75rem",
+              fontSize: "0.8rem",
+              borderRadius: "9999px",
+              backgroundColor: "rgba(239, 68, 68, 0.15)",
+              color: "#ef4444",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              cursor: "pointer",
+              fontWeight: "600"
+            }}
+          >
+            Vardiyayı Kapat / Kilitle
+          </button>
+        </div>
       </header>
       <section className="card">
         <p className="eyebrow">AYRI OPERASYON YÜZÜ</p>

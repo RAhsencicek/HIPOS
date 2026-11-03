@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
+import { AuthGuard } from "../features/auth/AuthGuard";
 import { scenarios } from "../data/catalog";
 import type { ViewContext } from "./context";
 import { Shell } from "../layout/AdminShell";
@@ -35,7 +36,8 @@ export default function App() {
     brand: scenario.brand,
     isMulti: scenario.branches.length > 1,
   };
-  return (
+    return (
+       <AuthGuard >
     <Shell ctx={ctx}>
       <Routes>
         <Route path="/" element={<Navigate to="/admin" replace />} />
@@ -51,6 +53,7 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
-    </Shell>
+            </Shell>
+        </AuthGuard>
   );
 }
