@@ -4,7 +4,7 @@ Bu envanter, panelde görünen alanları capability tanımlarıyla karşılaşt�
 
 | Panel alanı | Bugünkü temsilî anahtar(lar) | Açık boşluk / karar |
 | --- | --- | --- |
-| Genel Bakış | `sales.monitoring`, `branches.tables` (özet okuma) | Yönetici başlangıç ekranı açık adisyon ve masa özetlerini API sağlayıcısı açıksa okur; mock modda örnek etiketi gösterir. Cari/ürün/stok için kısayol ve ürün duyurusu var. Bütün günlük metrikler henüz API'den hesaplanmıyor. |
+| Genel Bakış | sales.monitoring, ranches.tables, overview.monitoring | Yönetici başlangıç ekranı açık adisyon, masa servisi ve kritik stok özetlerini canlı okur. PostgreSQL kalıcı uyarı merkezi (overview.alert_acknowledgments), çoklu modül canlı aktivite akışı (/overview/activities), tüm kasaların nakit kâr oranı (/overview/cash-profit) ve ciro analizi (/overview/turnover) PostgreSQL API'sine bağlanmıştır. |
 | Şubeler ve Canlı Durum | `branches.tables`, `service.waiters`, `sales.monitoring` | Masa planı `service` PostgreSQL API'sine bağlıdır; masa/adisyon bağı personel kartından ayrı tutulur. Masa servisi kapanınca atama kapanır; `staff.records` kartları ve satış adisyonları açık kalabilir. Şube listesi/karşılaştırma ve genel durum hâlâ örnek gösterimdir. |
 | Mutfak ve Servis | `staff.records`, `kitchen.monitoring` | Personel kartları `service.employees` PostgreSQL tablosunda bölüm/görev ve firma/şube kapsamıyla saklanır. Bordro, vardiya/puantaj ve POS yetkileri kapsam dışıdır. |
 | Ürünler ve Menü | `catalog.products`, `catalog.drafts`, `catalog.price_drafts`, `catalog.publishing`, `catalog.pricing` | Ürün taslağı, fiyat sürümü ve ilk yayın PostgreSQL'de çalışır. Kategori panel yazması, seçenek, alerjen, görsel, kanal/şube görünürlüğü ve yeniden yayın henüz eksik. |

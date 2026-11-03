@@ -15,6 +15,7 @@ export const sections: NavSection[] = [
     icon: "layout-dashboard",
     items: [
       { label: "Günlük Durum", slug: "daily" },
+      { label: "Aylık ve Günlük Ciro", slug: "turnover" },
       { label: "Uyarılar", slug: "alerts" },
       { label: "Son İşlemler", slug: "activity" },
     ],

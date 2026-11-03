@@ -12,6 +12,9 @@ import type {
 } from "../features/modules/contracts";
 import { StatusPill } from "../shared/ui";
 import { Dashboard } from "../features/overview/OverviewPage";
+import { MonthlyDailyTurnoverPage } from "../features/overview/MonthlyDailyTurnoverPage";
+import { AlertsPage } from "../features/overview/AlertsPage";
+import { ActivityPage } from "../features/overview/ActivityPage";
 import { ProductsPage, ProductDetail, CategoriesPage } from "../features/catalog/CatalogPages";
 import { MenusPage } from "../features/catalog/MenusPage";
 import { BranchesPage } from "../features/branches/BranchesPage";
@@ -194,6 +197,12 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
       canSetPrice={canSetPrice} canPublish={canPublish} inventorySource={inventorySource} />;
   } else if (!section || (section === "overview" && item === "daily")) {
     content = <Dashboard ctx={ctx} />;
+  } else if (section === "overview" && item === "turnover") {
+    content = <MonthlyDailyTurnoverPage ctx={ctx} />;
+  } else if (section === "overview" && item === "alerts") {
+    content = <AlertsPage ctx={ctx} />;
+  } else if (section === "overview" && item === "activity") {
+    content = <ActivityPage ctx={ctx} />;
   } else if (section === "catalog" && !item) {
     content = <>{menus}<SectionDirectory section={sections.find(entry => entry.id === "catalog")!} sources={sources} /></>;
   } else if (section === "catalog" && item === "menus") {
@@ -314,7 +323,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
           görünümünde yeni işlem için önce hedef şubeyi seçin.
         </div>
       )}
-      {!generic && !(presentationSection === "overview" && presentationItem === "daily") && <div className="notice feature-stage-notice" role="status">
+      {!generic && !(presentationSection === "overview" && (presentationItem === "daily" || presentationItem === "turnover" || presentationItem === "alerts" || presentationItem === "activity")) && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>
       </div>}

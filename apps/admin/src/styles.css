@@ -12453,6 +12453,75 @@ td.strong {
 }
 
 /* ━━━━ 1. HERO ALANI: SICAK KARŞILAMA VE SİPARİŞ RİTMİ GRAFİĞİ ━━━━ */
+/* ━━━━ 0. GENEL BAKIŞ ÜST SEKME MENÜSÜ ━━━━ */
+.overview-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 6px 0 10px;
+}
+
+.overview-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f4eee9;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid #ebdcd0;
+}
+
+.overview-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 750;
+  color: #7b6257;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.overview-nav-tab:hover {
+  color: #4a342b;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.overview-nav-tab.active {
+  background: #fff;
+  color: #3b2820;
+  box-shadow: 0 2px 8px rgba(80, 58, 45, 0.1);
+}
+
+.overview-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 850;
+  background: #ecd9cf;
+  color: #634336;
+}
+
+.overview-tab-badge.alert {
+  background: #c53030;
+  color: #ffffff;
+}
+
+.overview-section-hint {
+  margin: 4px 0 0;
+  color: #8c766e;
+  font-size: 13px;
+}
+
 .overview-spotlight-hero {
   position: relative;
   isolation: isolate;
@@ -12575,9 +12644,21 @@ td.strong {
 
 .overview-spotlight-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 26px;
+}
+
+@media (max-width: 1024px) {
+  .overview-spotlight-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .overview-spotlight-stats {
+    grid-template-columns: 1fr;
+  }
 }
 
 .overview-spotlight-stats a {
@@ -12871,7 +12952,7 @@ td.strong {
 /* ━━━━ 2. KPI METRİK ŞERİDİ (4 KRİTİK GÖSTERGE) ━━━━ */
 .overview-kpi-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -12929,6 +13010,12 @@ td.strong {
   background: #edf4fa;
   color: #2e669e;
   border: 1px solid #d4e5f4;
+}
+
+.overview-kpi-icon.red {
+  background: #fdf0f0;
+  color: #c53030;
+  border: 1px solid #fed7d7;
 }
 
 .overview-kpi-icon.orange {
@@ -13069,7 +13156,7 @@ td.strong {
 
 .overview-spotlight-insight-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
 }
 
@@ -13120,6 +13207,73 @@ td.strong {
   background: #fbefe4;
   border-color: #f2decb;
 }
+.overview-insight.cash-profit .overview-insight-heading > span {
+  color: #2b6d3b;
+  background: #edf7ee;
+  border-color: #d1ead4;
+}
+
+.overview-insight-cash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0;
+  flex: 1;
+}
+
+.overview-cash-metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid #f2ece7;
+  font-size: 13px;
+}
+
+.overview-cash-metric-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.overview-cash-metric-row span {
+  color: #6d5b57;
+}
+
+.overview-cash-metric-row strong {
+  font-weight: 750;
+  color: #3b2d2a;
+}
+
+.overview-cash-metric-row strong.is-profit {
+  color: #2b6d3b;
+}
+
+.overview-cash-metric-row strong.is-loss {
+  color: #a83e32;
+}
+
+.overview-cash-registers-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #ebdcd0;
+  font-size: 11px;
+}
+
+.overview-cash-reg-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #725d58;
+}
+
+.overview-cash-reg-item b {
+  color: #3b2d2a;
+  font-weight: 700;
+}
+
 
 .overview-insight-heading small {
   color: #9e8782;
@@ -13142,13 +13296,143 @@ td.strong {
   margin: 14px 0;
 }
 
-.overview-insight-order-list > div {
+.overview-order-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 52px;
+  gap: 12px;
+  min-height: 54px;
+  padding: 8px 0;
   border-top: 1px solid #f2ece7;
+}
+
+.overview-order-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.overview-order-main strong {
+  color: #3b2d2a;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-order-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview-order-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 750;
+  background: #f1ebd8;
+  color: #6d5423;
+}
+
+.overview-order-main small {
+  color: #94857f;
+  font-size: 11px;
+}
+
+.overview-order-price {
+  color: #43332d;
+  font-size: 14px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.overview-table-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f2ece7;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7b6861;
+}
+
+.legend-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.legend-item.occupied i {
+  background: #7e679c;
+}
+
+.legend-item.empty i {
+  background: #f8f5fa;
+  border: 1px solid #e4ddea;
+}
+
+.overview-stock-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid #f2ece7;
+}
+
+.stock-shortage {
+  color: #c53030 !important;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.stock-item-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #8c766e;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.overview-insight-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.soft-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: #f7ede5;
+  color: #6e4b3f;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+
+.soft-action-link:hover {
+  background: #efded2;
+  color: #4b3026;
 }
 
 .overview-insight-order-list strong,
@@ -13467,5 +13751,2125 @@ td.strong {
   }
   .overview-spotlight-shortcuts > div {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ━━━━ CİRO GRAFİĞİ GELİŞTİRMELERİ (SON 3 GÜN & CİRO RAKAMLARI) ━━━━ */
+a.overview-spotlight-chart {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+a.overview-spotlight-chart:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 28px 56px rgba(116, 90, 72, 0.22), 0 6px 18px rgba(116, 90, 72, 0.08);
+}
+
+.overview-day-turnover {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  color: #2e2625;
+  margin-bottom: 8px;
+  text-align: center;
+  letter-spacing: -0.3px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #ebdcd0;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.overview-day-date {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #4a3d38;
+}
+
+.overview-day-orders {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #8c7a74;
+  margin-top: 2px;
+}
+
+.overview-chart-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 750;
+  color: #ad6f62;
+  font-size: 11px;
+  transition: color 0.2s;
+}
+
+a.overview-spotlight-chart:hover .overview-chart-action {
+  color: #7d4439;
+  text-decoration: underline;
+}
+
+/* ━━━━ AYLIK VE GÜNLÜK CİRO ANALİZİ SAYFASI (RESPONSIVE) ━━━━ */
+.turnover-analysis-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: 48px;
+}
+
+.turnover-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.turnover-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #72574e;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #fdfaf7;
+  border: 1px solid #ebdcd0;
+  transition: all 0.2s ease;
+}
+
+.turnover-back-link:hover {
+  background: #f7ede5;
+  color: #4a332a;
+  transform: translateX(-2px);
+}
+
+.turnover-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ━━━━ AY SEÇİCİ DROPDOWN VE HIZLI GEÇİŞ ÇUBUĞU ━━━━ */
+.turnover-month-selector-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #fffdfb;
+  border: 1px solid #ebdcd0;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(80, 58, 45, 0.05);
+}
+
+.turnover-month-dropdown-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.turnover-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 850;
+  color: #7d6760;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.turnover-select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  max-width: 440px;
+  min-width: 220px;
+}
+
+.turnover-month-dropdown {
+  width: 100%;
+  height: 44px;
+  padding: 0 38px 0 14px;
+  border-radius: 11px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #3b2c27;
+  font-size: 14px;
+  font-weight: 700;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.turnover-month-dropdown:hover {
+  background: #f9f0ea;
+  border-color: #dfcdbf;
+}
+
+.turnover-month-dropdown:focus {
+  border-color: #ad6f62;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(173, 111, 98, 0.16);
+}
+
+.turnover-dropdown-icon {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: #9c837b;
+}
+
+/* Önceki / Sonraki Ay Hızlı Adımlama */
+.turnover-month-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.turnover-step-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #5d4841;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.turnover-step-button:hover:not(:disabled) {
+  background: #f7ece3;
+  color: #382721;
+  border-color: #dfcdbf;
+}
+
+.turnover-step-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.turnover-current-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  height: 40px;
+  border-radius: 10px;
+  background: #684a40;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(104, 74, 64, 0.25);
+}
+
+/* ━━━━ KPI METRİK KARTLARI (RESPONSIVE GRID) ━━━━ */
+.turnover-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* ━━━━ GÜNLÜK TABLO VE DÖKÜM KARTI ━━━━ */
+.turnover-table-card {
+  padding: 0;
+  border: 1px solid #ebdcd0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fffdfb;
+  box-shadow: 0 8px 24px rgba(80, 58, 45, 0.05);
+}
+
+.turnover-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  border-bottom: 1px solid #ebdcd0;
+  background: #fcf8f4;
+}
+
+.turnover-card-heading h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+  color: #382b26;
+}
+
+.turnover-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.turnover-toggle-filter {
+  height: 38px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.turnover-days-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.turnover-table-header {
+  display: grid;
+  grid-template-columns: 140px 140px 100px 110px 1fr 120px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 24px;
+  background: #f6eee8;
+  border-bottom: 1px solid #ebdcd0;
+  font-size: 11px;
+  font-weight: 850;
+  color: #7f6a62;
+  letter-spacing: 0.6px;
+}
+
+.turnover-days-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.turnover-day-row {
+  display: grid;
+  grid-template-columns: 140px 140px 100px 110px 1fr 120px;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid #f2e7df;
+  transition: background-color 0.15s ease;
+}
+
+.turnover-day-row:last-child {
+  border-bottom: none;
+}
+
+.turnover-day-row.has-data {
+  cursor: pointer;
+}
+
+.turnover-day-row.has-data:hover {
+  background: #fbf3ec;
+}
+
+.turnover-day-row.is-best {
+  background: #fbf7ee;
+}
+
+.turnover-day-row.is-best:hover {
+  background: #f6efe1;
+}
+
+.turnover-day-row.no-data {
+  opacity: 0.55;
+}
+
+.turnover-day-row .col-day strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 750;
+  color: #3b2d29;
+}
+
+.turnover-day-row .col-day small {
+  display: block;
+  font-size: 11px;
+  color: #8c7871;
+}
+
+/* Masaüstünde Metrikler Grubu Grid ile bütünleşir */
+.turnover-metrics-group {
+  display: contents;
+}
+
+.mobile-metric-label {
+  display: none;
+}
+
+.turnover-day-row .col-turnover strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: #2b2322;
+}
+
+.turnover-day-row .col-orders span {
+  font-size: 13px;
+  font-weight: 650;
+  color: #55443e;
+}
+
+.turnover-day-row .col-avg span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4a3e3b;
+}
+
+.turnover-day-row .col-ratio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.turnover-ratio-bar {
+  flex: 1;
+  height: 10px;
+  background: #f0e4db;
+  border-radius: 5px;
+  overflow: hidden;
+  position: relative;
+}
+
+.turnover-ratio-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #c07d6e 0%, #a66d62 100%);
+  transition: width 0.4s ease;
+}
+
+.turnover-ratio-bar span.best-bar {
+  background: linear-gradient(90deg, #688b77 0%, #4a745b 100%);
+}
+
+.turnover-day-row .col-ratio small {
+  font-size: 11px;
+  font-weight: 750;
+  color: #796660;
+  min-width: 34px;
+  text-align: right;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.status-badge.best {
+  background: #fbf0cb;
+  color: #7a5408;
+  border: 1px solid #ebd79a;
+}
+
+.status-badge.active {
+  background: #eaf3ec;
+  color: #2e623a;
+  border: 1px solid #c9e4cf;
+}
+
+.status-badge.empty {
+  background: #f0eae5;
+  color: #92817a;
+}
+
+/* ━━━━ GÜN DETAYI MODAL (RESPONSIVE) ━━━━ */
+.turnover-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 31, 26, 0.48);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.turnover-modal-content {
+  width: 100%;
+  max-width: 620px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #fffdfb;
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(45, 30, 20, 0.35);
+  border: 1px solid #ebdcd0;
+  overflow: hidden;
+  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.turnover-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #ebdcd0;
+  background: #fdfaf7;
+}
+
+.turnover-modal-header h2 {
+  margin: 4px 0 2px;
+  font-size: 18px;
+  color: #2e2422;
+}
+
+.turnover-modal-header p {
+  margin: 0;
+  font-size: 13px;
+  color: #796862;
+}
+
+.turnover-modal-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+
+.turnover-modal-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+}
+
+.turnover-order-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.turnover-modal-order-card {
+  padding: 14px 16px;
+  border: 1px solid #ebdcd0;
+  border-radius: 12px;
+  background: #faf6f2;
+}
+
+.order-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #e2d2c6;
+  margin-bottom: 8px;
+}
+
+.order-card-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.order-card-id span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #a46c60;
+  background: #f5e4dc;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.order-card-id strong {
+  font-size: 13px;
+  color: #40322e;
+}
+
+.order-card-price {
+  font-size: 15px;
+  color: #2b2220;
+}
+
+.order-card-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.order-item-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #5c4c47;
+}
+
+.order-item-line small {
+  color: #7e6c66;
+  font-weight: 600;
+}
+
+.turnover-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid #ebdcd0;
+  background: #fdfaf7;
+}
+
+/* ━━━━ MEDIA QUERIES: TABLET (<= 992px) & MOBİL (<= 768px & <= 540px) ━━━━ */
+@media (max-width: 992px) {
+  .turnover-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .turnover-analysis-page {
+    gap: 16px;
+    padding-bottom: 32px;
+  }
+
+  /* Ay Seçici Çubuğunu dikey yığınla */
+  .turnover-month-selector-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+
+  .turnover-month-dropdown-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .turnover-select-wrapper {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .turnover-month-stepper {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .turnover-step-button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .turnover-current-badge {
+    flex: 1;
+    justify-content: center;
+    font-size: 12px;
+    padding: 0 8px;
+  }
+
+  /* Başlık ve Filtre Düğmesi */
+  .turnover-card-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .turnover-filter-controls .turnover-toggle-filter {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Masaüstü Başlığını Gizle */
+  .turnover-table-header {
+    display: none;
+  }
+
+  /* Her Gün Satırını Kart Görünümüne Dönüştür */
+  .turnover-day-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "day status"
+      "ratio ratio"
+      "metrics metrics";
+    gap: 10px;
+    padding: 14px 16px;
+  }
+
+  .turnover-day-row .col-day {
+    grid-area: day;
+  }
+
+  .turnover-day-row .col-status {
+    grid-area: status;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .turnover-day-row .col-ratio {
+    grid-area: ratio;
+    width: 100%;
+  }
+
+  /* Metrikler Mobilde 3 Sütunlu Kompakt Şerit Olur */
+  .turnover-metrics-group {
+    grid-area: metrics;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    background: #fbf5ef;
+    padding: 8px 12px;
+    border-radius: 9px;
+    border: 1px solid #f1e4d9;
+    text-align: center;
+  }
+
+  .mobile-metric-label {
+    display: block;
+    font-size: 9px;
+    font-weight: 800;
+    color: #8c7871;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 2px;
+  }
+
+  .turnover-day-row .col-turnover strong {
+    font-size: 13px;
+  }
+
+  .turnover-day-row .col-orders span,
+  .turnover-day-row .col-avg span {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 540px) {
+  /* Küçük ekranlarda KPI kartları */
+  .turnover-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .turnover-kpi-grid .overview-kpi-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .turnover-kpi-grid .overview-kpi-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .turnover-kpi-grid .overview-kpi-body strong {
+    font-size: 18px;
+  }
+
+  .turnover-kpi-grid .overview-kpi-label {
+    font-size: 9px;
+  }
+
+  /* Modal Tam Genişlik */
+  .turnover-modal-backdrop {
+    padding: 8px;
+    align-items: flex-end;
+  }
+
+  .turnover-modal-content {
+    max-height: 90vh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .turnover-modal-header {
+    padding: 14px 16px;
+  }
+
+  .turnover-modal-body {
+    padding: 14px 16px;
+  }
+
+  .turnover-modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    padding: 12px 16px;
+  }
+
+  .turnover-modal-footer button,
+  .turnover-modal-footer a {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+
+  /* Dashboard Grafiği Ufak Ekranlar */
+  .overview-day-turnover {
+    font-size: 11px;
+    padding: 2px 4px;
+  }
+}
+
+
+/* ━━━━ UYARILAR MERKEZİ (ALERTS PAGE) STİLLERİ ━━━━ */
+.alerts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: 48px;
+}
+
+.alerts-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.alerts-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #72574e;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #fdfaf7;
+  border: 1px solid #ebdcd0;
+  transition: all 0.2s ease;
+}
+
+.alerts-back-link:hover {
+  background: #f7ede5;
+  color: #4a332a;
+  transform: translateX(-2px);
+}
+
+.alerts-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ━━━━ 1. KPI İSTATİSTİK ŞERİDİ ━━━━ */
+.alerts-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.alerts-kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid #ebdcd0;
+  border-radius: 18px;
+  background: #fffdfb;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 14px rgba(80, 58, 45, 0.04);
+}
+
+.alerts-kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: #dfcdbf;
+  box-shadow: 0 8px 24px rgba(80, 58, 45, 0.08);
+}
+
+.alerts-kpi-card.is-active {
+  border-color: #684a40;
+  background: #fdfaf7;
+  box-shadow: 0 0 0 2px #684a40;
+}
+
+.alerts-kpi-card.critical.is-active {
+  border-color: #d9483b;
+  box-shadow: 0 0 0 2px #d9483b;
+}
+
+.alerts-kpi-card.warning.is-active {
+  border-color: #d9822b;
+  box-shadow: 0 0 0 2px #d9822b;
+}
+
+.alerts-kpi-card.info.is-active {
+  border-color: #3b76bb;
+  box-shadow: 0 0 0 2px #3b76bb;
+}
+
+.alerts-kpi-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.alerts-kpi-icon.red {
+  background: #fdf0ee;
+  color: #c93b2b;
+  border: 1px solid #f9d3cf;
+}
+
+.alerts-kpi-icon.amber {
+  background: #fef5ea;
+  color: #bf6f1b;
+  border: 1px solid #fde1bf;
+}
+
+.alerts-kpi-icon.blue {
+  background: #eff5fc;
+  color: #2a69ab;
+  border: 1px solid #d4e4f7;
+}
+
+.alerts-kpi-icon.neutral {
+  background: #f5ede6;
+  color: #6d544b;
+  border: 1px solid #ebdcd0;
+}
+
+.alerts-kpi-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.alerts-kpi-label {
+  font-size: 10px;
+  font-weight: 850;
+  color: #8c7871;
+  letter-spacing: 0.6px;
+}
+
+.alerts-kpi-info strong {
+  font-size: 24px;
+  line-height: 1.1;
+  color: #342823;
+  margin: 3px 0 2px;
+}
+
+.alerts-kpi-info small {
+  font-size: 11px;
+  color: #8a756e;
+}
+
+/* ━━━━ 2. KONTROL PANELİ (ARAMA, KATEGORİ, BATCH) ━━━━ */
+.alerts-control-panel {
+  padding: 18px 22px;
+  border: 1px solid #ebdcd0;
+  border-radius: 18px;
+  background: #fffdfb;
+  box-shadow: 0 6px 20px rgba(80, 58, 45, 0.04);
+}
+
+.alerts-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.alerts-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 360px;
+}
+
+.alerts-search-icon {
+  position: absolute;
+  left: 12px;
+  color: #9c837b;
+  pointer-events: none;
+}
+
+.alerts-search-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 36px;
+  border-radius: 10px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #342823;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.alerts-search-input:focus {
+  border-color: #ad6f62;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(173, 111, 98, 0.15);
+}
+
+.alerts-search-clear {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #9c837b;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.alerts-category-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.alerts-filter-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 850;
+  color: #8c7871;
+  letter-spacing: 0.5px;
+}
+
+.alerts-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.alerts-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #5d4841;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.alerts-chip:hover {
+  background: #f7ede5;
+  color: #382721;
+}
+
+.alerts-chip.active {
+  background: #684a40;
+  border-color: #684a40;
+  color: #ffffff;
+}
+
+.alerts-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #f2e7df;
+  flex-wrap: wrap;
+}
+
+.alerts-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #6d544b;
+  cursor: pointer;
+}
+
+.alerts-checkbox-label input {
+  accent-color: #684a40;
+  width: 15px;
+  height: 15px;
+}
+
+.alerts-batch-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alerts-action-btn {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* ━━━━ 3. UYARI KARTLARI ━━━━ */
+.alerts-list-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.alerts-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alerts-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 18px 22px;
+  border: 1px solid #ebdcd0;
+  border-radius: 16px;
+  background: #fffdfb;
+  box-shadow: 0 4px 14px rgba(80, 58, 45, 0.04);
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.alerts-card:hover {
+  box-shadow: 0 8px 24px rgba(80, 58, 45, 0.08);
+  border-color: #dfcdbf;
+}
+
+.alerts-card.severity-critical {
+  border-left: 5px solid #d9483b;
+}
+
+.alerts-card.severity-warning {
+  border-left: 5px solid #d9822b;
+}
+
+.alerts-card.severity-info {
+  border-left: 5px solid #3b76bb;
+}
+
+.alerts-card.is-dismissed {
+  opacity: 0.65;
+  background: #fbf8f5;
+  border-left-color: #a8948c;
+}
+
+.alerts-card-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+}
+
+.alerts-severity-icon-badge {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+.alerts-severity-icon-badge.critical {
+  background: #fdf0ee;
+  color: #c93b2b;
+}
+
+.alerts-severity-icon-badge.warning {
+  background: #fef5ea;
+  color: #bf6f1b;
+}
+
+.alerts-severity-icon-badge.info {
+  background: #eff5fc;
+  color: #2a69ab;
+}
+
+.alerts-card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.alerts-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.alerts-category-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #5d4841;
+  background: #f7eee7;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.alerts-severity-pill {
+  font-size: 10px;
+  font-weight: 850;
+  padding: 3px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.alerts-severity-pill.critical {
+  background: #fde8e5;
+  color: #b72b1b;
+}
+
+.alerts-severity-pill.warning {
+  background: #fef0db;
+  color: #ad5a05;
+}
+
+.alerts-severity-pill.info {
+  background: #e5f0fc;
+  color: #1f5896;
+}
+
+.alerts-time-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #927e77;
+  margin-left: 4px;
+}
+
+.alerts-dismissed-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #2f6b3e;
+  background: #eaf5ec;
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.alerts-card-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 750;
+  color: #342823;
+  line-height: 1.25;
+}
+
+.alerts-card-message {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #5b4841;
+  line-height: 1.4;
+}
+
+.alerts-card-detail {
+  margin: 0;
+  font-size: 12px;
+  color: #8c7871;
+}
+
+.alerts-card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+}
+
+.alerts-primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  background: #684a40;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(104, 74, 64, 0.22);
+}
+
+.alerts-primary-action:hover {
+  background: #54372e;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(104, 74, 64, 0.32);
+}
+
+.alerts-dismiss-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #ebdcd0;
+  background: transparent;
+  color: #8c7871;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.alerts-dismiss-btn:hover {
+  background: #f7eee7;
+  color: #4a342c;
+  border-color: #dfcdbf;
+}
+
+.alerts-dismiss-btn.active {
+  background: #eaf5ec;
+  border-color: #c4e4cc;
+  color: #2b6137;
+}
+
+/* Boş Durum Kartı */
+.alerts-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 24px;
+  text-align: center;
+  border: 1px dashed #ebdcd0;
+  border-radius: 20px;
+  background: #fffdfb;
+}
+
+.alerts-empty-icon {
+  color: #438f56;
+  margin-bottom: 12px;
+}
+
+.alerts-empty-card h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: #342823;
+}
+
+.alerts-empty-card p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #8c7871;
+  max-width: 440px;
+}
+
+/* ━━━━ RESPONSIVE: MOBİL VE TABLET DÜZENİ ━━━━ */
+@media (max-width: 992px) {
+  .alerts-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .alerts-page {
+    gap: 16px;
+    padding-bottom: 32px;
+  }
+
+  .alerts-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .alerts-search-box {
+    max-width: 100%;
+  }
+
+  .alerts-category-selector {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .alerts-chips-row {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .alerts-card {
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .alerts-card-sidebar {
+    display: none;
+  }
+
+  .alerts-card-actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 10px;
+    border-top: 1px solid #f5ede6;
+  }
+
+  .alerts-primary-action {
+    flex: 1;
+    justify-content: center;
+    height: 38px;
+  }
+
+  .alerts-dismiss-btn {
+    height: 38px;
+    padding: 0 14px;
+  }
+}
+
+@media (max-width: 540px) {
+  .alerts-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .alerts-kpi-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .alerts-kpi-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .alerts-kpi-info strong {
+    font-size: 20px;
+  }
+
+  .alerts-category-selector {
+    width: 100%;
+  }
+
+  .alerts-chips-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .alerts-chip {
+    padding: 6px 10px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .alerts-footer-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .alerts-batch-buttons {
+    width: 100%;
+  }
+
+  .alerts-action-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+
+/* ━━━━ UYARILAR SEKMELERİ (AKTİF UYARILAR VS ARŞİV) ━━━━ */
+.alerts-tab-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #f2e7df;
+  flex-wrap: wrap;
+}
+
+.alerts-tab-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alerts-main-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #5d4841;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.alerts-main-tab:hover {
+  background: #f8eee6;
+  border-color: #dfcdbf;
+  color: #382721;
+}
+
+.alerts-main-tab.active {
+  background: #684a40;
+  border-color: #684a40;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(104, 74, 64, 0.22);
+}
+
+.alerts-tab-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.alerts-main-tab.active .alerts-tab-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.alerts-dismiss-btn {
+  gap: 5px;
+}
+
+@media (max-width: 768px) {
+  .alerts-tab-switch-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .alerts-tab-group {
+    width: 100%;
+  }
+  .alerts-main-tab {
+    flex: 1;
+    justify-content: center;
+    height: 40px;
+  }
+}
+
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   SON İŞLEMLER (ACTIVITY FEED) STYLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+.activity-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  padding-bottom: 48px;
+}
+
+.activity-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.activity-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.activity-kicker {
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.8px;
+  color: #8c5b3e;
+  text-transform: uppercase;
+}
+
+.activity-branch-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #f4ede6;
+  color: #5c4338;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.activity-header h1 {
+  font-size: 26px;
+  font-weight: 850;
+  color: #2b1f1a;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.4px;
+}
+
+.activity-subtitle {
+  font-size: 13.5px;
+  color: #7a665e;
+  margin: 0;
+  max-width: 680px;
+  line-height: 1.5;
+}
+
+.activity-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.activity-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ━━━━ KPI Kartları ━━━━ */
+.activity-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.activity-kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: #fffdfb;
+  border: 1px solid #f0e6dd;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(70, 48, 38, 0.03);
+}
+
+.activity-kpi-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.activity-kpi-icon.total {
+  background: #f3ede8;
+  color: #684a40;
+}
+
+.activity-kpi-icon.cash {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.activity-kpi-icon.inventory {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.activity-kpi-icon.sales {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.activity-kpi-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-kpi-info small {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8c7871;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.activity-kpi-info strong {
+  font-size: 22px;
+  font-weight: 850;
+  color: #2b1f1a;
+  line-height: 1.2;
+}
+
+/* ━━━━ Filtreler ━━━━ */
+.activity-filters-card {
+  padding: 16px 20px;
+  border-radius: 16px;
+  border: 1px solid #eee2d7;
+  background: #fffdfb;
+}
+
+.activity-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.activity-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 240px;
+  max-width: 380px;
+}
+
+.activity-search-icon {
+  position: absolute;
+  left: 12px;
+  color: #9c8a82;
+  pointer-events: none;
+}
+
+.activity-search-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 36px;
+  border-radius: 10px;
+  border: 1px solid #ebdcd0;
+  background: #faf6f2;
+  font-size: 13px;
+  color: #2e221d;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.activity-search-input:focus {
+  border-color: #7a5447;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(122, 84, 71, 0.12);
+}
+
+.activity-search-clear {
+  position: absolute;
+  right: 10px;
+  border: none;
+  background: transparent;
+  color: #9c8a82;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.activity-category-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.activity-filter-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 850;
+  color: #8c7871;
+  letter-spacing: 0.5px;
+}
+
+.activity-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.activity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ebdcd0;
+  background: #fdfaf7;
+  color: #5d4841;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.activity-chip:hover {
+  background: #f7ede5;
+  color: #382721;
+}
+
+.activity-chip.active {
+  background: #684a40;
+  color: #ffffff;
+  border-color: #684a40;
+}
+
+/* ━━━━ Timeline Listesi ━━━━ */
+.activity-timeline-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.activity-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.activity-day-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.activity-day-calendar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #f0e6dd;
+  color: #684a40;
+}
+
+.activity-day-header h3 {
+  font-size: 13px;
+  font-weight: 850;
+  color: #4a3730;
+  margin: 0;
+  letter-spacing: 0.2px;
+}
+
+.activity-day-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #8c7871;
+}
+
+.activity-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-item-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  background: #fffdfb;
+  border: 1px solid #f0e6dd;
+  border-radius: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.activity-item-card:hover {
+  border-color: #e2d1c3;
+  box-shadow: 0 4px 14px rgba(70, 48, 38, 0.05);
+}
+
+.activity-item-icon-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.activity-item-icon-badge.cash {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.activity-item-icon-badge.inventory {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.activity-item-icon-badge.sales {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.activity-item-icon-badge.finance {
+  background: #fce4ec;
+  color: #c2185b;
+}
+
+.activity-item-icon-badge.alerts {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.activity-item-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.activity-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.activity-module-tag {
+  font-size: 10.5px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.activity-module-tag.cash {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.activity-module-tag.inventory {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.activity-module-tag.sales {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.activity-module-tag.finance {
+  background: #fce4ec;
+  color: #c2185b;
+}
+
+.activity-module-tag.alerts {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.activity-time-tag,
+.activity-actor-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #8c7871;
+  font-weight: 600;
+}
+
+.activity-actor-tag {
+  color: #684a40;
+  background: #f9f4ef;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.activity-item-title {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: #2b1f1a;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.activity-item-desc {
+  font-size: 13px;
+  color: #66524a;
+  margin: 0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.activity-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.activity-amount-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 850;
+  background: #f5ede6;
+  color: #4a3730;
+}
+
+.activity-amount-badge.severity-success {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.activity-amount-badge.severity-warning {
+  background: #fff3e0;
+  color: #b75300;
+}
+
+.activity-amount-badge.severity-info {
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+
+.activity-action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #faf5f0;
+  color: #5c4338;
+  border: 1px solid #ebdcd0;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.activity-action-link:hover {
+  background: #684a40;
+  color: #ffffff;
+  border-color: #684a40;
+}
+
+/* ━━━━ Boş ve Yükleniyor Durumu ━━━━ */
+.activity-loading-card,
+.activity-empty-card {
+  padding: 48px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #fffdfb;
+  border-radius: 16px;
+  border: 1px dashed #e6d7cc;
+}
+
+.activity-spinner {
+  color: #8c5b3e;
+}
+
+.activity-empty-icon {
+  color: #a89489;
+}
+
+.activity-empty-card h3 {
+  font-size: 17px;
+  font-weight: 850;
+  color: #382721;
+  margin: 0;
+}
+
+.activity-empty-card p {
+  font-size: 13.5px;
+  color: #7a665e;
+  max-width: 440px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ━━━━ Mobil Responsive ━━━━ */
+@media (max-width: 768px) {
+  .activity-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .activity-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .activity-search-box {
+    max-width: 100%;
+  }
+
+  .activity-category-selector {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .activity-chips-row {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .activity-item-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .activity-item-actions {
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 10px;
+    border-top: 1px solid #f5ede6;
+  }
+
+  .activity-action-link {
+    flex: 1;
+    justify-content: center;
+    height: 36px;
   }
 }

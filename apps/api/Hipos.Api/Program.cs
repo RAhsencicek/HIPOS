@@ -7,6 +7,7 @@ using Hipos.Api.Inventory;
 using Hipos.Api.Cash;
 using Hipos.Api.Expenses;
 using Hipos.Api.Kitchen;
+using Hipos.Api.Overview;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -40,6 +41,8 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "finance")));
     builder.Services.AddDbContext<KitchenDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "kitchen")));
+    builder.Services.AddDbContext<OverviewDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "overview")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -84,6 +87,7 @@ var inventoryReady = false;
 var cashReady = false;
 var expensesReady = false;
 var kitchenReady = false;
+var overviewReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -110,6 +114,8 @@ if (storage == "postgres")
     expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
     var kitchenDb = scope.ServiceProvider.GetRequiredService<KitchenDbContext>();
     kitchenReady = salesReady && !(await kitchenDb.Database.GetPendingMigrationsAsync()).Any();
+    var overviewDb = scope.ServiceProvider.GetRequiredService<OverviewDbContext>();
+    overviewReady = !(await overviewDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -134,6 +140,7 @@ if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady);
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
+if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

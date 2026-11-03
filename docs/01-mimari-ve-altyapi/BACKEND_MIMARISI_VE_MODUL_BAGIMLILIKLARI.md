@@ -111,6 +111,7 @@ Temel endpoint envanteri:
 - `/api/v1/firms/{firmId}/branches/{branchId}/inventory/...`: hammadde, hareket, reçete sürümü ve sayım/tekil onaylı düzeltme.
 - `/api/v1/firms/{firmId}/branches/{branchId}/cash/...`: kasa/shift özeti, hareket ve vardiya geçmişi, varsayılan kasa provisioning'i, vardiya açma, manuel hareket/düzeltme ve fiziksel sayımla kapama. [Kasa MVP sözleşmesi](../02-kasa-ve-operasyon/KASA_MVP_SOZLESMESI.md).
 - `/api/v1/firms/{firmId}/branches/{branchId}/expense-categories` ve `/expenses...`: firma kategori okuması; şube kapsamlı manuel gider liste/detay/oluşturma. [Gider MVP sözleşmesi](../03-is-alanlari-ve-yonetim/GIDER_YONETIMI_MVP.md).
+- `/api/v1/firms/{firmId}/branches/{branchId}/overview/alerts...`: operasyonel uyarı listesi, incelenen/arşivlenen uyarıların çok kullanıcılı PostgreSQL kaydı (`overview.alert_acknowledgments`) ve geri alma/sıfırlama yönetimi.
 
 İstek kapsamı endpoint'lerde bugünkü DemoAccess aktörü üzerinden doğrulanır; bu bir test/örnek kapsam denetimidir, gerçek kullanıcı üyeliği veya role-based auth değildir. `X-Demo-Actor` Production ortamında da kullanılabilir ve taklit edilebilir; auth uygulanmadan dış müşteri ağına yayınlanmamalıdır. Ayrıntılı rotalar modül belgeleri ve kaynak koddadır; tüm yüzeyi kapsayan canonical OpenAPI artefaktı henüz repoda yoktur.
 

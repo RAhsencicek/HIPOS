@@ -109,3 +109,4 @@ Tarihsel ürün kararları ve ilk aşama taslakları:
 * [YENI_URUN_YONU_TASLAK.md](05-gecmis-ve-arsiv/YENI_URUN_YONU_TASLAK.md): 19 Ekim öncesi ürün yönü tartışma taslağı.
 * [MUTFAK_MODULU_ICIN_YAPILANLAR.md](05-gecmis-ve-arsiv/MUTFAK_MODULU_ICIN_YAPILANLAR.md): Modül 3 (Mutfak & KDS) tarihsel gelişim, tamamlanan adımlar ve kalan backlog raporu.
 * [STOK_MODULU_İÇİN_YAPILANLAR.md](05-gecmis-ve-arsiv/STOK_MODULU_İÇİN_YAPILANLAR.md): Modül 5 stok/reçete çalışmalarının tarihsel özeti, geri alınan denemeler ve kalan işler.
+* [ADMIN_SAYFASI_MODULU.md](05-gecmis-ve-arsiv/ADMIN_SAYFASI_MODULU.md): Yönetim Paneli Genel Bakış (Dashboard & Overview) modülü için yapılan operasyonel uyarılar, son işlemler akışı, kasa kâr oranı ve ciro analizi raporu.
