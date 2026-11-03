@@ -41,7 +41,7 @@ export class HttpMenuProvider {
   async ensureProductInActiveMenu(scope: CatalogScope, productId: string, categoryName: string): Promise<boolean> {
     try {
       const workspace = await this.load(scope);
-      const activeMenu = workspace.items.find(m => m.isActive) ?? workspace.items[0];
+      const activeMenu = workspace.items.find(m => m.isActive);
       if (!activeMenu) return false;
       const catTrimmed = categoryName.trim();
       const existingSection = activeMenu.sections.find(

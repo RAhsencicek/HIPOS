@@ -13,7 +13,8 @@ type PublicProduct = {
 };
 type PublicSection = { sectionId: string; name: string; products: PublicProduct[] };
 type PublicMenu = { id: string; name: string; description: string; sections: PublicSection[] };
-type MenuResponse = { restaurantName: string; branchName: string; logoUrl: string | null; menus: PublicMenu[] };
+type PublicCategory = { id: string; name: string; products: PublicProduct[] };
+type MenuResponse = { restaurantName: string; branchName: string; logoUrl: string | null; menus: PublicMenu[]; categories?: PublicCategory[] };
 type MenuState = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; data: MenuResponse };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -152,40 +153,41 @@ export function PublicMenuPage() {
   const [logoError, setLogoError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<PublicProduct | null>(null);
-  const [selection, setSelection] = useState<{ menuId: string; sectionId?: string } | null>(null);
+  const [selection, setSelection] = useState<{ menuId?: string; sectionId?: string; categoryId?: string } | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    setState({ status: "loading" });
+    let disposed = false;
+    let initialLoad = true;
+    let controller: AbortController | null = null;
     setLogoError(false);
     setSelection(null);
     setSearchQuery("");
-    fetch(`${apiBase}/api/v1/public/menus/${encodeURIComponent(token)}`, { signal: controller.signal })
-      .then(async response => {
+    const refresh = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const current = controller;
+      try {
+        const response = await fetch(`${apiBase}/api/v1/public/menus/${encodeURIComponent(token)}`, { signal: current.signal });
         if (!response.ok)
           throw new Error(
             response.status === 404
               ? "Bu menü bağlantısı bulunamadı."
               : "Menüye şu anda ulaşılamıyor. Lütfen tekrar deneyin.",
           );
-        return response.json() as Promise<MenuResponse>;
-      })
-      .then(data => {
-        if (!controller.signal.aborted) setState({ status: "ready", data });
-      })
-      .catch(reason => {
-        if (!controller.signal.aborted)
-          setState({
-            status: "error",
-            message:
-              reason instanceof TypeError
-                ? "Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin."
-                : reason instanceof Error
-                  ? reason.message
-                  : "Menü yüklenemedi.",
-          });
-      });
-    return () => controller.abort();
+        const data = await response.json() as MenuResponse;
+        if (!disposed && !current.signal.aborted) setState({ status: "ready", data });
+      } catch (reason) {
+        if (!disposed && !current.signal.aborted) setState(previous => previous.status === "ready" ? previous : {
+          status: "error",
+          message: reason instanceof TypeError
+            ? "Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin."
+            : reason instanceof Error ? reason.message : "Menü yüklenemedi.",
+        });
+      } finally { initialLoad = false; }
+    };
+    void refresh();
+    const interval = window.setInterval(() => { if (!initialLoad) void refresh(); }, 5000);
+    return () => { disposed = true; window.clearInterval(interval); controller?.abort(); };
   }, [token, revision]);
 
   const query = searchQuery.trim().toLocaleLowerCase("tr-TR");
@@ -206,6 +208,14 @@ export function PublicMenuPage() {
         }))
         .filter(section => section.products.length > 0),
     }));
+  }, [state, query]);
+
+  const filteredCategories = useMemo(() => {
+    if (state.status !== "ready") return [];
+    const categories = state.data.categories ?? [];
+    if (!query) return categories;
+    return categories.map(category => ({ ...category, products: category.products.filter(product =>
+      product.name.toLocaleLowerCase("tr-TR").includes(query) || product.description.toLocaleLowerCase("tr-TR").includes(query)) }));
   }, [state, query]);
 
   if (state.status !== "ready")
@@ -235,6 +245,7 @@ export function PublicMenuPage() {
     );
 
   const { data } = state;
+  const categories = data.categories ?? [];
   const sections = data.menus.flatMap((menu, menuIndex) =>
     menu.sections.map((section, sectionIndex) => ({
       menu,
@@ -243,8 +254,9 @@ export function PublicMenuPage() {
     })),
   );
 
-  const productMenus = filteredMenus
-    .filter(menu => !selection || menu.id === selection.menuId)
+  const selectedCategory = selection?.categoryId ? filteredCategories.find(category => category.id === selection.categoryId) : null;
+  const productMenus = selectedCategory ? [{ id: `category-${selectedCategory.id}`, name: selectedCategory.name, description: "", sections: [{ sectionId: selectedCategory.id, name: selectedCategory.name, products: selectedCategory.products }] }] : filteredMenus
+    .filter(menu => !selection?.menuId || menu.id === selection.menuId)
     .map(menu => ({ ...menu, sections: selection?.sectionId ? menu.sections.filter(section => section.sectionId === selection.sectionId) : menu.sections }));
   const hasVisibleProducts = productMenus.some(menu => menu.sections.some(section => section.products.length > 0));
   const showProducts = Boolean(selection || query);
@@ -277,7 +289,7 @@ export function PublicMenuPage() {
             </div>
           </div>
 
-          {sections.length > 0 && (
+          {(sections.length > 0 || categories.length > 0) && (
             <div className="qr-search-wrap">
               <Search size={18} className="qr-search-icon" />
               <input
@@ -303,7 +315,7 @@ export function PublicMenuPage() {
         </div>
       </header>
 
-      {sections.length > 0 ? (
+      {sections.length > 0 || categories.length > 0 ? (
         <div className="qr-content">
           {!showProducts ? (
             <section className="qr-discovery" aria-label="Menü ve kategorileri keşfet">
@@ -323,6 +335,11 @@ export function PublicMenuPage() {
                     imageUrl={section.products.find(product => product.imageUrl)?.imageUrl ?? null}
                     onSelect={() => setSelection({ menuId: menu.id, sectionId: section.sectionId })} />
                 )))}
+                {categories.map(category => (
+                  <DiscoveryCard key={`category-${category.id}`} name={category.name} label="Kategori"
+                    imageUrl={category.products.find(product => product.imageUrl)?.imageUrl ?? null}
+                    onSelect={() => setSelection({ categoryId: category.id })} />
+                ))}
               </div>
             </section>
           ) : (

@@ -58,6 +58,7 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<CatalogProviderError | null>(null);
   const [customError, setCustomError] = useState("");
+  const [partiallySavedId, setPartiallySavedId] = useState("");
 
   // Product Image state
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -220,12 +221,13 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
               desiredChannels: selectedChannels,
             }),
           });
-          if (chanRes.ok) {
-            const chanData = (await chanRes.json().catch(() => ({}))) as { version?: number };
-            if (chanData.version) currentVersion = chanData.version;
-          }
+          const chanData = (await chanRes.json().catch(() => ({}))) as { version?: number; detail?: string };
+          if (!chanRes.ok || !chanData.version) throw new Error(chanData.detail || "Kanal tercihleri kaydedilemedi.");
+          currentVersion = chanData.version;
         } catch (chanError) {
-          console.warn("Kanal tercihleri kaydedilemedi:", chanError);
+          setPartiallySavedId(saved.id);
+          setCustomError(`Ürün kaydedildi ancak kanal tercihleri kaydedilemedi: ${chanError instanceof Error ? chanError.message : "Bağlantı hatası."}`);
+          return;
         }
       }
 
@@ -246,6 +248,9 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
           if (!imgRes.ok) {
             const problem = (await imgRes.json().catch(() => ({}))) as { detail?: string };
             console.warn("Görsel yüklenemedi:", problem.detail);
+          } else {
+            const imageResult = await imgRes.json() as { version: number };
+            currentVersion = imageResult.version;
           }
         } catch (imgError) {
           console.warn("Görsel kaydedilirken hata oluştu:", imgError);
@@ -265,7 +270,9 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
           currentVersion = pubRes.product.version;
           finalSaved = { ...saved, status: "published", version: pubRes.product.version };
         } catch (pubErr) {
-          console.warn("Ürün otomatik yayınlanamadı:", pubErr);
+          setPartiallySavedId(saved.id);
+          setCustomError(`Ürün kaydedildi ancak POS'ta yayınlanamadı: ${pubErr instanceof Error ? pubErr.message : "Bağlantı hatası."}`);
+          return;
         }
       }
 
@@ -407,7 +414,7 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
           </label>
           {!product ? (
             <label className="draft-field"><span>Fiyat (TL)</span>
-              <input inputMode="decimal" required placeholder="Örn. 125,00" value={price} disabled={saving || error?.code === "LOAD_FAILED"}
+              <input inputMode="decimal" required value={price} disabled={saving || error?.code === "LOAD_FAILED"}
                 onChange={(event) => setPrice(event.target.value)} />
             </label>
           ) : (
@@ -561,6 +568,7 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
       </section>
 
       {customError && <div className="notice" role="alert">{customError}</div>}
+      {partiallySavedId && <Link className="subtle-link" to={`/admin/catalog/products/${encodeURIComponent(partiallySavedId)}`}>Kaydedilen ürüne git</Link>}
 
       {error && <div className="notice" role="alert">
         <span>{errorMessage(error)} Kayıt başarılı olarak işaretlenmedi.</span>
@@ -570,7 +578,7 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
 
       <div className="draft-actions">
         <button type="button" className="soft-button" onClick={onCancel} disabled={saving}>Vazgeç</button>
-        <button type="submit" className="primary-button" disabled={saving || !scope.branchId || !selectedCategory || (!product && !canSetPrice)}>
+        <button type="submit" className="primary-button" disabled={saving || !!partiallySavedId || !scope.branchId || !selectedCategory || (!product && !canSetPrice)}>
           {saving ? "Kaydediliyor…" : product ? "Değişiklikleri kaydet" : "Ürünü kaydet"}
         </button>
       </div>

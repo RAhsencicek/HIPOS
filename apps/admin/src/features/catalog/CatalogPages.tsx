@@ -26,11 +26,12 @@ import { channelLabels, formatCatalogMoney, parseCatalogPrice } from "./formatte
 import { useCategoryList, useProductDetail, useProductList } from "./useCatalogData";
 import { DraftForm } from "./DraftForm";
 import { HttpMenuProvider } from "./MenuProvider";
+import { HttpCatalogProvider } from "./HttpCatalogProvider";
 import { PricePublicationPanel } from "./PricePublicationPanel";
 import { ProductOptionsPanel } from "./ProductOptionsPanel";
 import { ProductImage } from "./ProductImage";
 import type { CatalogLoad } from "./useCatalogData";
-import type { CatalogProduct, CatalogProductDetail, CategoryListResponse, ProductListResponse, ScheduledPrice } from "./contracts";
+import type { CatalogProduct, CatalogProductDetail, CategoryListResponse, ProductListResponse } from "./contracts";
 import singleDemo from "../../../../../contracts/demo-single-branch.v1.json";
 
 const statusLabel = { published: "Yayında", draft: "Satışa açılmadı" } as const;
@@ -261,7 +262,7 @@ export function CategoriesPage({ ctx, canWriteDraft }: { ctx: ViewContext; canWr
         : `Kategori adı yalnızca ${selectedBranchName} şubesindeki ilgili ürünlere yansıtılır.`}</p>
       <form onSubmit={event => void submitCategory(event)}>
         <label className="category-name-field">Kategori adı<input autoFocus value={categoryName} maxLength={160} disabled={saving}
-          onChange={event => setCategoryName(event.target.value)} placeholder="Örn. Sıcak İçecekler" /></label>
+          onChange={event => setCategoryName(event.target.value)} /></label>
         {formError && <div className="category-form-error" role="alert"><AlertCircle size={16} />{formError}</div>}
         <footer><button type="button" className="soft-button" disabled={saving} onClick={() => setDialog(null)}>Vazgeç</button>
           <button type="submit" className="primary-button" disabled={saving || !categoryName.trim()}>
@@ -325,39 +326,47 @@ function ChannelControls({ product, ctx, canWriteDraft, canPublish }: { product:
   const canEdit = source === "http" && canWriteDraft && (product.status !== "published" || canPublish) && !!ctx.branchApiId && product.branchIds.length === 1;
   async function update(channels: string[]) {
     if (!canEdit || busy || !ctx.branchApiId) return;
-    const selected = [...channels].sort();
+    const approvingPos = product.status === "draft" && channels.includes("pos");
+    if (approvingPos && !product.isActive) { setError("POS'ta yayınlamak için önce ürünü etkinleştirin."); return; }
+    if (approvingPos && product.price.amountMinor <= 0) { setError("POS'ta yayınlamak için önce Şube fiyatı bölümünden geçerli bir fiyat kaydedin."); return; }
+    const selected = [...new Set(channels)].sort();
     if (!pending.current || pending.current.version !== product.version || JSON.stringify(pending.current.channels) !== JSON.stringify(selected))
       pending.current = { channels: selected, version: product.version, id: crypto.randomUUID() };
     const command = pending.current;
     setBusy(true); setError("");
+    let qrMenuUpdated = false;
     try {
       const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/channels`;
       const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : (ctx.isMulti ? "manager-multi" : "manager-single");
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Demo-Actor": actor }, body: JSON.stringify({ requestId: command.id, expectedVersion: command.version, desiredChannels: command.channels }) });
       if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; pending.current = null; throw new Error(problem.detail ?? "Kanal seçimi kaydedilemedi."); }
+      const channelResult = await response.json() as { version: number };
       pending.current = null;
-      if (command.channels.includes("pos") && product.status === "published" && ctx.branchApiId) {
-        try {
-          await new HttpMenuProvider().ensureProductInActiveMenu(
-            { firmId: ctx.firmId, branchId: ctx.branchApiId },
-            product.id,
-            product.category.name,
+      if (approvingPos) {
+        await new HttpCatalogProvider().publishDraft({ scope: { firmId: ctx.firmId, branchId: ctx.branchApiId }, draftId: product.id,
+          publicationId: crypto.randomUUID(), expectedVersion: channelResult.version });
+        if (command.channels.includes("qr"))
+          qrMenuUpdated = await new HttpMenuProvider().ensureProductInActiveMenu(
+            { firmId: ctx.firmId, branchId: ctx.branchApiId }, product.id, product.category.name,
           );
-        } catch (menuErr) {
-          console.warn("Menü senkronizasyonu:", menuErr);
-        }
+      } else if (command.channels.includes("pos") && product.status === "published") {
+        qrMenuUpdated = await new HttpMenuProvider().ensureProductInActiveMenu(
+          { firmId: ctx.firmId, branchId: ctx.branchApiId }, product.id, product.category.name,
+        );
       }
       notifyChange();
+      if (command.channels.includes("pos") && command.channels.includes("qr") && !qrMenuUpdated)
+        setError("Ürün POS'ta yayınlandı; QR menüye eklenemedi. Şubede aktif menü bulunduğunu kontrol edin.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Kanal seçimi kaydedilemedi."); }
     finally { setBusy(false); }
   }
   return <div className="channel-controls">
     <div className="channel-controls-grid">
       <label className={`channel-control-card ${desired.includes("pos") ? "is-active" : ""}`}>
-        <input type="checkbox" checked={desired.includes("pos")} disabled={!canEdit || busy} onChange={event => void update(event.target.checked ? [...desired, "pos"] : desired.filter(x => x !== "pos"))} />
+        <input type="checkbox" checked={product.status === "published" && desired.includes("pos")} disabled={!canEdit || busy || (product.status === "draft" && (!product.isActive || product.price.amountMinor <= 0))} onChange={event => void update(event.target.checked ? [...desired, "pos"] : desired.filter(x => x !== "pos"))} />
         <div>
           <strong>POS'ta yayınla</strong>
-          <small>Kasa ve garson terminallerinde siparişe açık olur.</small>
+          <small>{product.status === "draft" ? "Seçtiğinizde ürün fiyatıyla birlikte POS'ta yayınlanır." : "Kasa ve garson terminallerinde siparişe açık olur."}</small>
         </div>
       </label>
       <label className={`channel-control-card ${desired.includes("qr") ? "is-active" : ""}`}>
@@ -368,6 +377,8 @@ function ChannelControls({ product, ctx, canWriteDraft, canPublish }: { product:
         </div>
       </label>
     </div>
+    {product.status === "draft" && !product.isActive && <small className="channel-controls-note">POS'ta yayınlamak için önce ürünü etkinleştirin.</small>}
+    {product.status === "draft" && product.price.amountMinor <= 0 && <small className="channel-controls-note">POS'ta yayınlamak için önce geçerli bir şube fiyatı kaydedin.</small>}
     {!canEdit && <small className="channel-controls-note">Bu ürünün kanal seçimi bu şubeden değiştirilemiyor.</small>}
     {error && <small role="alert" className="channel-controls-error">{error}{pending.current && <button type="button" className="soft-button" onClick={() => void update(pending.current!.channels)}>Tekrar dene</button>}</small>}
   </div>;
@@ -386,14 +397,14 @@ export function ChannelVisibilityPage({ ctx, canWriteDraft, canSetPrice, canPubl
     {notice && <div className="notice menu-success" role="status">{notice}</div>}
     {!ctx.branchApiId ? <div className="notice">Ürünleri görmek için bir şube seçin.</div> : <>
       <div className="channel-overview"><div className="card"><strong>POS</strong><span>Seçim yeni satışlarda geçerli</span></div><div className="card"><strong>Paket servis</strong><span>Tercih kaydedilir; satış ekranı planlanıyor</span></div><div className="card"><strong>QR menü</strong><span>Tercih kaydedilir; QR menü planlanıyor</span></div></div>
-      <section className="card channel-list"><header><div><h2>Ürünler</h2><p>Ürün aktifliği, kanal tercihi ve POS yayın kaydı ayrı gösterilir.</p></div><label className="category-search"><Search size={17} /><input aria-label="Ürün ara" placeholder="Ürün veya stok kodu ara" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label></header>
+      <section className="card channel-visibility-list"><header><div><h2>Ürünler</h2><p>Ürün aktifliği, kanal tercihi ve POS yayın kaydı ayrı gösterilir.</p></div><label className="category-search"><Search size={17} /><input aria-label="Ürün ara" placeholder="Ürün veya stok kodu ara" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></label></header>
         {load.status !== "success" ? <CatalogStatePanel load={load} /> : <>
-          {load.data.items.length === 0 ? <div className="notice">Ürün bulunamadı.</div> : <div className="channel-rows">{load.data.items.map(product => <article className="channel-row" key={product.id}>
-            <div className="channel-row-product"><span className="channel-product-image"><ProductImage image={product.image} productId={product.id} firmId={ctx.firmId} branchId={ctx.branchApiId} actor={ctx.isMulti ? "manager-multi" : "manager-single"} name={product.name} /></span><div><strong>{product.name}</strong><small>{product.category.name} · {product.sku}</small></div></div>
-            <div><small>Ürün durumu</small><StatusPill tone={product.isActive ? "green" : "neutral"}>{product.isActive ? "Aktif" : "Pasif"}</StatusPill></div>
-            <div><small>POS yayını</small><StatusPill tone={product.status === "published" && product.channels.includes("pos") ? "green" : "neutral"}>{product.status === "published" && product.channels.includes("pos") ? "Yayın kaydı var" : "Yayınlanmadı"}</StatusPill></div>
+          {load.data.items.length === 0 ? <div className="notice">Ürün bulunamadı.</div> : <div className="channel-rows"><div className="channel-row-heading" aria-hidden="true"><div>Ürün</div><div>Ürün durumu</div><div>POS yayını</div><div>Satış kanalları</div><div>İşlemler</div></div>{load.data.items.map(product => <article className="channel-row" key={product.id}>
+            <div className="channel-row-product"><span className="channel-product-image"><ProductImage image={product.image} productId={product.id} firmId={ctx.firmId} branchId={ctx.branchApiId} actor={ctx.isMulti ? "manager-multi" : "manager-single"} name={product.name} /></span><div><Link className="channel-product-link" to={`/admin/catalog/products/${encodeURIComponent(product.id)}`}>{product.name}</Link><small>{product.category.name} · {product.sku}</small></div></div>
+            <div><small className="channel-status-label">Ürün durumu</small><StatusPill tone={product.isActive ? "green" : "neutral"}>{product.isActive ? "Aktif" : "Pasif"}</StatusPill></div>
+            <div><small className="channel-status-label">POS yayını</small><StatusPill tone={product.status === "published" && product.channels.includes("pos") ? "green" : "neutral"}>{product.status === "published" && product.channels.includes("pos") ? "Yayın kaydı var" : "Yayınlanmadı"}</StatusPill></div>
             <ChannelControls product={product} ctx={ctx} canWriteDraft={canWriteDraft} canPublish={canPublish} />
-            <div className="channel-row-actions"><button type="button" className="soft-button" aria-pressed={selectedId === product.id} onClick={() => { setSelectedId(selectedId === product.id ? "" : product.id); setNotice(""); }}>Yayın işlemleri</button><Link className="subtle-link" to={`/admin/catalog/products/${encodeURIComponent(product.id)}`}>Ürün ayrıntısı</Link></div>
+            <div className="channel-row-actions"><button type="button" className="soft-button" aria-pressed={selectedId === product.id} onClick={() => { setSelectedId(selectedId === product.id ? "" : product.id); setNotice(""); }}>Yayın işlemleri</button></div>
             {selectedId === product.id && <div className="channel-row-publication"><PublicationProductPanel key={selectedId} ctx={ctx} productId={selectedId} canSetPrice={canSetPrice} canPublish={canPublish} onChanged={message => setNotice(message ?? "")} /></div>}
           </article>)}</div>}
           <div className="catalog-pagination"><button className="soft-button" disabled={page <= 1} onClick={() => setPage(page - 1)}>Önceki</button><span>Sayfa {page} / {Math.max(1, load.data.pageInfo.totalPages)}</span><button className="soft-button" disabled={page >= load.data.pageInfo.totalPages} onClick={() => setPage(page + 1)}>Sonraki</button></div>
@@ -427,7 +438,7 @@ function SchedulePriceForm({ ctx, product, canSetPrice, canPublish, onSaved }: {
   }
   return <section className="card price-history-panel"><h2>İleri tarihli fiyat</h2><p>Güncel fiyat: <strong>{formatCatalogMoney(product.price)}</strong></p>
     <form className="scheduled-price-form" onSubmit={event => void submit(event)}>
-      <label>Yeni fiyat (TL)<input inputMode="decimal" placeholder="Örn. 325,50" value={price} disabled={!enabled || busy} onChange={event => { setPrice(event.target.value); requestId.current = crypto.randomUUID(); }} required /></label>
+      <label>Yeni fiyat (TL)<input inputMode="decimal" value={price} disabled={!enabled || busy} onChange={event => { setPrice(event.target.value); requestId.current = crypto.randomUUID(); }} required /></label>
       <label>Başlangıç tarihi ve saati<input type="datetime-local" value={effectiveAt} disabled={!enabled || busy} onChange={event => { setEffectiveAt(event.target.value); requestId.current = crypto.randomUUID(); }} required /></label>
       <small>Tarih ve saat cihazınızın yerel saatine göre yorumlanır. Zamanı geldiğinde planlanan fiyat uygulanır.</small>
       <button className="primary-button" disabled={!enabled || busy}>{busy ? "Kaydediliyor…" : "Fiyatı planla"}</button>
@@ -438,39 +449,7 @@ function SchedulePriceForm({ ctx, product, canSetPrice, canPublish, onSaved }: {
 }
 
 function ScheduledPriceSection({ ctx, product, canSetPrice, canPublish }: { ctx: ViewContext; product: CatalogProductDetail; canSetPrice: boolean; canPublish: boolean }) {
-  const { provider, source } = useCatalogProvider();
-  const [plans, setPlans] = useState<ScheduledPrice[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [revision, setRevision] = useState(0);
-  const [cancelling, setCancelling] = useState("");
-  useEffect(() => {
-    if (!ctx.branchApiId || source !== "http") return;
-    let active = true;
-    const reload = () => provider.listScheduledPrices({ firmId: ctx.firmId, branchId: ctx.branchApiId }).then(items => {
-      if (active) { setPlans(items.filter(item => item.productId === product.id)); setError(""); setLoading(false); }
-    }).catch(reason => { if (active) { setError(reason instanceof Error ? reason.message : "Fiyat planları yüklenemedi."); setLoading(false); } });
-    setLoading(true); void reload();
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void reload(); }, 10000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [provider, ctx.firmId, ctx.branchApiId, product.id, source, revision]);
-  async function cancelPlan(id: string) {
-    if (cancelling || !window.confirm("Bu fiyat planı iptal edilsin mi?")) return;
-    setCancelling(id); setError("");
-    try { await provider.cancelScheduledPrice({ firmId: ctx.firmId, branchId: ctx.branchApiId }, id); setRevision(value => value + 1); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Fiyat planı iptal edilemedi."); }
-    finally { setCancelling(""); }
-  }
-  return <>
-    <SchedulePriceForm key={`${product.id}:${product.version}`} ctx={ctx} product={product} canSetPrice={canSetPrice} canPublish={canPublish} onSaved={() => setRevision(value => value + 1)} />
-    <section className="card scheduled-price-list"><h2>Bu ürünün fiyat planları</h2><p>Planlanan fiyat, arada elle fiyat değişse de belirlenen zamanda uygulanır.</p>
-      {source !== "http" ? <p>Örnek veride fiyat planları kullanılamaz.</p> : loading ? <p role="status">Planlar yükleniyor…</p> : error ? <p role="alert">{error} <button className="soft-button" onClick={() => setRevision(value => value + 1)}>Tekrar dene</button></p> : !plans.length ? <p>Henüz fiyat planı yok.</p> : plans.map(plan => <div className="scheduled-price-row" key={plan.id}>
-        <div><strong>{formatCatalogMoney({ amountMinor: plan.amountMinor, currency: "TRY" })}</strong><small>{new Date(plan.effectiveAt).toLocaleString("tr-TR")}</small>{plan.detail && <small>{plan.detail}</small>}</div>
-        <StatusPill tone={plan.status === "applied" ? "green" : "neutral"}>{({ pending: "Bekliyor", processing: "İşleniyor", applied: "Uygulandı", failed: "Uygulanamadı", cancelled: "İptal edildi" } as const)[plan.status]}</StatusPill>
-        {plan.status === "pending" && <button className="soft-button" disabled={!canSetPrice || !!cancelling || new Date(plan.effectiveAt).getTime() <= Date.now()} onClick={() => void cancelPlan(plan.id)}>İptal et</button>}
-      </div>)}
-    </section>
-  </>;
+  return <SchedulePriceForm key={`${product.id}:${product.version}`} ctx={ctx} product={product} canSetPrice={canSetPrice} canPublish={canPublish} onSaved={() => {}} />;
 }
 
 function PriceProductPanel({ ctx, productId, canSetPrice, canPublish, onPriceChanged }: { ctx: ViewContext; productId: string; canSetPrice: boolean; canPublish: boolean; onPriceChanged: (message?: string) => void }) {
@@ -966,7 +945,7 @@ export function ProductDetail({
         Birden fazla şubede kullanılan ürünün bilgileri bu ekrandan düzenlenemez.
       </div>}
       {saveNotice && <div className="notice" role="status">{saveNotice}</div>}
-      {searchParams.get("created") === "1" && !saveNotice && <div className="notice" role="status">Ürün ve fiyat kaydedildi. Satışa açmak için aşağıdaki POS'a yayınla düğmesini kullanın.</div>}
+      {searchParams.get("created") === "1" && !saveNotice && <div className="notice" role="status">{product.status === "published" ? "Ürün kaydedildi ve POS'ta yayınlandı." : "Ürün ve fiyat kaydedildi. POS'ta yayınlamak için satış kanallarını kullanın."}</div>}
       {activationError && <div className="notice" role="alert">{activationError}</div>}
       {source === "http" && !product.isActive && <div className="notice" role="status">Ürün pasif. Yeni siparişe eklenemez ve yeni menü/POS yayınına alınamaz. Açık adisyonlar, mevcut yayın geçmişi ve ürün kaydı korunur.</div>}
       {editing && source === "http" && canWriteDraft && <DraftForm key={`${ctx.firmId}:${ctx.branchApiId}:${product.id}:${product.version}`}
