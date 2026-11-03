@@ -9,6 +9,11 @@ type StoryDraft = readonly [string, string, readonly [string, string, string]];
 // Müşteriye gösterilen içerik, özelliğin teknik hazırlık durumundan bağımsız tutulur.
 const storyGroups: Record<string, Record<string, StoryDraft>> = {
   overview: {
+    turnover: [
+      "Aylık ve günlük ciro analizi",
+      "Her ayın ve her günün cirosunu, sipariş adedini ve ortalama sepet tutarını inceleyin.",
+      ["Aylık ciro takibi", "Günlük ciro dökümü", "Sipariş detayları"],
+    ],
     daily: ["İşletmenizin nabzını tek bakışta tutun", "Satışları, masaları ve dikkat isteyen işleri aynı yerde görün. Güne nereden başlayacağınızı kolayca belirleyin.", ["Günün satışlarını takip edin", "Yoğunluğu tek bakışta görün", "Öncelikli işlere odaklanın"]],
     alerts: ["Önemli bir gelişme gözünüzden kaçmasın", "Azalan stok, uzayan sipariş veya dikkat isteyen bir işlem olduğunda sizi ilgilendiren uyarıları bir arada görün. Ekibinizi doğru işe yönlendirmek kolaylaşsın.", ["Dikkat isteyen işleri fark edin", "Önceliğe göre sıraya koyun", "Ekibinizle daha hızlı harekete geçin"]],
     activity: ["İşletmenizde neler olduğunu kolayca izleyin", "Ürün değişikliklerinden günlük işlemlere kadar son gelişmeleri zaman sırasıyla takip edin. Bir değişikliğin ne zaman yapıldığını aramakla vakit kaybetmeyin.", ["Son işlemleri bir arada görün", "Değişikliklerin zamanını öğrenin", "Gün içindeki gelişmeleri takip edin"]],

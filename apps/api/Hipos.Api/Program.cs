@@ -9,6 +9,7 @@ using Hipos.Api.Expenses;
 using Hipos.Api.Printing;
 using Hipos.Api.Kitchen;
 using Hipos.Api.Auth;
+using Hipos.Api.Overview;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -45,6 +46,8 @@ if (storage == "postgres")
     builder.Services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
     builder.Services.AddSingleton<AuthTokenService>();
+    builder.Services.AddDbContext<OverviewDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "overview")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -98,6 +101,7 @@ var cashReady = false;
 var expensesReady = false;
 var kitchenReady = false;
 var authReady = false;
+var overviewReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -127,6 +131,8 @@ if (storage == "postgres")
     var authDb = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
     authReady = !(await authDb.Database.GetPendingMigrationsAsync()).Any();
     if (authReady) await AuthDbInitializer.SeedDemoUsersAsync(authDb, CancellationToken.None);
+    var overviewDb = scope.ServiceProvider.GetRequiredService<OverviewDbContext>();
+    overviewReady = !(await overviewDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
@@ -158,6 +164,7 @@ if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, 
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
 if (storage == "postgres") app.MapPrintingEndpoints();
 if (storage == "postgres") app.MapAuthEndpoints(authReady);
+if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

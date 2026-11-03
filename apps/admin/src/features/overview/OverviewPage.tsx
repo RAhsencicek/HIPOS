@@ -10,30 +10,69 @@ import {
   ReceiptText,
   RefreshCw,
   Sparkles,
-  TrendingUp,
   UsersRound,
+  TrendingUp,
+  UtensilsCrossed,
   Wallet,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
 import { checks } from "../../data/catalog";
 import { mockCriticalStock } from "./overview.fixtures";
 
 /* ── Types ── */
+type TopDishItem = {
+  rank: number;
+  productId: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  isDish: boolean;
+  soldCount: number;
+  totalRevenueMinor: number;
+  currency: string;
+  imageUrl: string;
+  emoji: string;
+};
+type TopDishesResponse = {
+  source: "postgres";
+  firmId: string;
+  branchId: string | null;
+  category: string;
+  totalSold: number;
+  items: TopDishItem[];
+};
+
 type SalesOrder = { id: string; status: string; source: string; createdAt: string; totalMinor: number; items: Array<{ productName: string; quantity: number }> };
 type SalesSummaryResponse = { items: SalesOrder[] };
 type ServiceTable = { id: string; name: string; isActive: boolean; assignment: { orderStatus: string } | null };
 type ServiceSummaryResponse = { tablesEnabled: boolean; waitersEnabled: boolean; items: ServiceTable[] };
 type CriticalStockItem = { id: string; name: string; onHand: number; criticalBelow: number; belowThresholdBy: number; unit: string };
 type CriticalStockResponse = { source: "postgres"; criticalCount: number; warehouseId: string; items: CriticalStockItem[] };
-type CashOverviewResponse = {
-  source: string; simulated: boolean;
-  registers: Array<{ id: string; code: string; name: string }>;
-  openShifts: Array<{
-    shift: { id: string; status: "open" | "closed"; openingCashMinor: number };
-    expectedCashMinor?: number; cashInMinor: number; cashOutMinor: number;
-  }>;
+type CashProfitRegister = {
+  id: string;
+  code: string;
+  name: string;
+  cashInMinor: number;
+  cashOutMinor: number;
+  netProfitMinor: number;
+  profitRate: number;
+  hasOpenShift: boolean;
+};
+type CashProfitResponse = {
+  source: "postgres";
+  totalRegisters: number;
+  activeShiftsCount: number;
+  totalCashInMinor: number;
+  totalCashOutMinor: number;
+  netProfitMinor: number;
+  profitRate: number;
+  openShiftInMinor: number;
+  openShiftOutMinor: number;
+  openShiftNetProfitMinor: number;
+  openShiftProfitRate: number;
+  registers: CashProfitRegister[];
 };
 type LoadState<T> = { status: "loading" } | { status: "ready"; data: T } | { status: "error" };
 
@@ -57,12 +96,14 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
   const salesHttp = import.meta.env.VITE_SALES_PROVIDER === "http";
   const serviceHttp = import.meta.env.VITE_SERVICE_PROVIDER === "http";
   const inventoryHttp = import.meta.env.VITE_INVENTORY_PROVIDER === "http";
-  const cashHttp = import.meta.env.VITE_CASH_PROVIDER === "http";
 
   const [salesState, setSalesState] = useState<LoadState<SalesSummaryResponse>>({ status: "loading" });
   const [serviceState, setServiceState] = useState<LoadState<ServiceSummaryResponse>>({ status: "loading" });
   const [criticalStockState, setCriticalStockState] = useState<LoadState<CriticalStockResponse>>({ status: "loading" });
-  const [cashState, setCashState] = useState<LoadState<CashOverviewResponse>>({ status: "loading" });
+  const [cashProfitState, setCashProfitState] = useState<LoadState<CashProfitResponse>>({ status: "loading" });
+  const [topDishesState, setTopDishesState] = useState<LoadState<TopDishesResponse>>({ status: "loading" });
+  const [dishesCategory, setDishesCategory] = useState<"food" | "all">("food");
+
   const [refreshKey, setRefreshKey] = useState(0);
   const [spinning, setSpinning] = useState(false);
 
@@ -89,15 +130,23 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
         .then((d) => { if (active) setCriticalStockState({ status: "ready", data: d }); })
         .catch(() => { if (active) setCriticalStockState({ status: "error" }); });
     }
-    if (cashHttp && branchId) {
-      setCashState({ status: "loading" });
-      void getApi<CashOverviewResponse>(`/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/cash/overview`, actor)
-        .then((d) => { if (active) setCashState({ status: "ready", data: d }); })
-        .catch(() => { if (active) setCashState({ status: "error" }); });
-    }
+        setCashProfitState({ status: "loading" });
+    const cashProfitPath = branchId
+      ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/cash-profit`
+      : `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/overview/cash-profit`;
+    void getApi<CashProfitResponse>(cashProfitPath, actor)
+      .then((d) => { if (active) setCashProfitState({ status: "ready", data: d }); })
+      .catch(() => { if (active) setCashProfitState({ status: "error" }); });
+    setTopDishesState({ status: "loading" });
+    const topDishesPath = branchId
+      ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/top-dishes?category=${dishesCategory}`
+      : `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/overview/top-dishes?category=${dishesCategory}`;
+    void getApi<TopDishesResponse>(topDishesPath, actor)
+      .then((d) => { if (active) setTopDishesState({ status: "ready", data: d }); })
+      .catch(() => { if (active) setTopDishesState({ status: "error" }); });
     const t = setTimeout(() => { if (active) setSpinning(false); }, 500);
     return () => { active = false; clearTimeout(t); };
-  }, [actor, branchId, ctx.firmId, inventoryHttp, salesHttp, serviceHttp, cashHttp, refreshKey]);
+  }, [actor, branchId, ctx.firmId, inventoryHttp, salesHttp, serviceHttp, refreshKey, dishesCategory]);
 
   /* Derived data */
   const branches = ctx.selectedBranch ? [ctx.selectedBranch] : ctx.branches;
@@ -116,16 +165,6 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
   const stockLink = stockScopeMissing ? "/admin/branches/list" : "/admin/inventory/critical";
   const orderPreview = [...openOrders].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 4);
 
-  /* Cash */
-  const expectedCash = useMemo(() => {
-    if (cashHttp && cashState.status === "ready" && cashState.data.openShifts[0]) {
-      const s = cashState.data.openShifts[0];
-      return s.expectedCashMinor ?? s.shift.openingCashMinor + s.cashInMinor - s.cashOutMinor;
-    }
-    return 121000;
-  }, [cashHttp, cashState]);
-  const shiftOpen = cashHttp ? cashState.status === "ready" && cashState.data.openShifts.length > 0 : true;
-
   /* Chart */
   const chartOrders = salesHttp && salesState.status === "ready" ? salesState.data.items : [];
   const totalsByDay = new Map<string, { total: number; count: number }>();
@@ -134,12 +173,22 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
     const cur = totalsByDay.get(key) ?? { total: 0, count: 0 };
     totalsByDay.set(key, { total: cur.total + order.totalMinor, count: cur.count + 1 });
   });
-  const chartDays = [...totalsByDay.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-7).map(([key, val]) => ({
-    key, label: new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short", timeZone: "Europe/Istanbul" }).format(new Date(`${key}T12:00:00+03:00`)), ...val,
-  }));
+  // Sadece önceki 3 işlem gününün cirosu
+  const chartDays = [...totalsByDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-3)
+    .map(([key, val]) => ({
+      key,
+      label: new Intl.DateTimeFormat("tr-TR", {
+        day: "numeric",
+        month: "short",
+        timeZone: "Europe/Istanbul",
+      }).format(new Date(`${key}T12:00:00+03:00`)),
+      ...val,
+    }));
   const chartMax = Math.max(1, ...chartDays.map((d) => d.total));
-  const chartTotal = chartDays.reduce((s, d) => s + d.total, 0) || 1485000;
-  const chartCount = chartDays.reduce((s, d) => s + d.count, 0) || visibleChecks.length || 8;
+  const chartTotal = chartDays.reduce((s, d) => s + d.total, 0);
+  const chartCount = chartDays.reduce((s, d) => s + d.count, 0);
 
   /* Greeting */
   const hour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: "Europe/Istanbul" }).format(new Date()));
@@ -148,7 +197,7 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
 
   const personalSummary = !salesHttp ? "Giriş yaptığınızda veriler burada özetlenecek."
     : salesHttp && salesState.status === "loading" ? "İşletmenizin güncel kayıtları hazırlanıyor."
-    : `Şu anda ${salesCount ?? 0} açık ${salesHttp ? "sipariş" : "adisyon"} var${occupied !== null ? `, ${occupied} masa serviste` : ""}.${criticalCount && criticalCount > 0 ? ` ${criticalCount} kritik stok kalemi ilginizi bekliyor.` : ""}`;
+    : `Şu anda ${salesCount ?? 0} açık ${salesHttp ? "sipariş" : "adisyon"} var${occupied !== null ? `, ${occupied} masa serviste` : ""}.${criticalCount && criticalCount > 0 ? ` ${criticalCount} kritik stok kalemi ilginizi bekliyor.` : ""}${cashProfitState.status === "ready" ? ` Kasa kar oranı %${cashProfitState.data.profitRate}.` : ""}`;
 
   const priorityLink = criticalCount && criticalCount > 0 ? stockLink : salesCount && salesCount > 0 ? "/admin/sales/open" : "/admin/catalog/products";
   const priorityLabel = criticalCount && criticalCount > 0 ? "Kritik stokları inceleyin" : salesCount && salesCount > 0 ? "Açık siparişleri inceleyin" : "Ürünlerinize göz atın";
@@ -166,58 +215,228 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
             <Link to="/admin/sales/open"><strong>{salesCount === null ? "—" : salesCount}</strong><span>Açık {salesHttp ? "sipariş" : "adisyon"}</span><ArrowRight size={16} /></Link>
             <Link to="/admin/branches/tables"><strong>{occupied === null ? "—" : occupied}</strong><span>Serviste masa</span><ArrowRight size={16} /></Link>
             <Link to={stockLink}><strong>{criticalCount === null ? "—" : criticalCount}</strong><span>Kritik stok</span><ArrowRight size={16} /></Link>
+            <Link to="/admin/cash/movements" title="Kasa kar oranı ve detayları">
+              <strong>
+                {cashProfitState.status === "ready" ? `%${cashProfitState.data.profitRate}` : cashProfitState.status === "loading" ? "…" : "—"}
+              </strong>
+              <span>Kasa kar oranı</span>
+              <ArrowRight size={16} />
+            </Link>
           </div>
           <div className="overview-spotlight-bottom"><span><CalendarDays size={17} /> {todayLabel}</span><Link to={priorityLink}>{priorityLabel} <ArrowRight size={17} /></Link></div>
         </div>
 
-        <div className="overview-spotlight-chart">
-          <div className="overview-chart-heading"><span className="overview-chart-icon"><ReceiptText size={23} /></span><div><span>SİPARİŞ RİTMİ</span><h2>Son işlem günleri</h2></div><span className="overview-chart-period">{chartDays.length || "—"} GÜN</span></div>
-          <div className="overview-chart-total"><strong>{salesHttp && salesState.status === "ready" ? money(chartTotal) : "—"}</strong><span>{salesHttp && salesState.status === "ready" ? `${chartCount} siparişin toplam tutarı` : "Sipariş kayıtları yükleniyor"}</span></div>
-          {chartDays.length ? <div className="overview-chart-bars" style={{ gridTemplateColumns: `repeat(${chartDays.length},minmax(0,1fr))` }} role="img" aria-label={`${chartCount} sipariş, toplam ${money(chartTotal)}`}>
-            {chartDays.map((day) => <div className="overview-chart-day" key={day.key} title={`${day.label}: ${day.count} sipariş · ${money(day.total)}`}><span className="overview-chart-bar-track"><i className="has-orders" style={{ height: `${Math.max(8, day.total / chartMax * 100)}%` }} /></span><small>{day.label}</small></div>)}
-          </div> : <div className="overview-chart-empty">{salesHttp && salesState.status === "error" ? "Sipariş bilgisi alınamadı." : salesHttp && salesState.status === "loading" ? "Grafik hazırlanıyor…" : "Henüz grafik oluşturacak sipariş kaydı yok."}</div>}
-          <div className="overview-chart-footer"><span><i /> Sipariş tutarı</span><small>Son 100 sipariş kaydındaki işlem günleri</small></div>
-        </div>
+        <Link
+          to="/admin/overview/turnover"
+          className="overview-spotlight-chart"
+          title="Her ayın her gününe ait ciroları detaylı görmek için tıklayın"
+        >
+          <div className="overview-chart-heading">
+            <span className="overview-chart-icon">
+              <ReceiptText size={23} />
+            </span>
+            <div>
+              <span>SİPARİŞ RİTMİ</span>
+              <h2>Önceki 3 günün cirosu</h2>
+            </div>
+            <span className="overview-chart-period">
+              {chartDays.length ? `${chartDays.length} GÜN` : "3 GÜN"}
+            </span>
+          </div>
+          <div className="overview-chart-total">
+            <strong>
+              {salesHttp && salesState.status === "ready"
+                ? money(chartTotal)
+                : "—"}
+            </strong>
+            <span>
+              {salesHttp && salesState.status === "ready"
+                ? `Son 3 işlem gününün toplam işlem hacmi (${chartCount} sipariş)`
+                : "Sipariş kayıtları yükleniyor…"}
+            </span>
+          </div>
+          {chartDays.length ? (
+            <div
+              className="overview-chart-bars"
+              style={{
+                gridTemplateColumns: `repeat(${chartDays.length},minmax(0,1fr))`,
+              }}
+              role="img"
+              aria-label={`${chartCount} sipariş, toplam ${money(chartTotal)}`}
+            >
+              {chartDays.map((day) => (
+                <div
+                  className="overview-chart-day"
+                  key={day.key}
+                  title={`${day.label}: ${day.count} sipariş · ${money(day.total)}`}
+                >
+                  <strong className="overview-day-turnover">
+                    {money(day.total)}
+                  </strong>
+                  <span className="overview-chart-bar-track">
+                    <i
+                      className="has-orders"
+                      style={{
+                        height: `${Math.max(16, (day.total / chartMax) * 100)}%`,
+                      }}
+                    />
+                  </span>
+                  <small className="overview-day-date">{day.label}</small>
+                  <span className="overview-day-orders">
+                    {day.count} sipariş
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="overview-chart-empty">
+              {salesHttp && salesState.status === "error"
+                ? "Sipariş bilgisi alınamadı."
+                : salesHttp && salesState.status === "loading"
+                  ? "Grafik hazırlanıyor…"
+                  : "Henüz grafik oluşturacak sipariş kaydı yok."}
+            </div>
+          )}
+          <div className="overview-chart-footer">
+            <span>
+              <i /> Günlük sipariş cirosu
+            </span>
+            <span className="overview-chart-action">
+              Tüm Günlük Cirolar <ArrowRight size={13} />
+            </span>
+          </div>
+        </Link>
       </div>
     </section>
 
-    {/* ━━━━ 2. KPI METRİK KARTLARI: 4 Kritik Gösterge ━━━━ */}
-    <section className="overview-kpi-strip" aria-label="Günlük kritik metrikler">
-      <div className="overview-kpi-card">
-        <div className="overview-kpi-icon green"><TrendingUp size={22} /></div>
-        <div className="overview-kpi-body">
-          <span className="overview-kpi-label">GÜNLÜK CİRO</span>
-          <strong>{money(chartTotal)}</strong>
-          <small>{chartCount} sipariş toplam</small>
+        {/* ━━━━ 2. LEZZETLER & MENÜ PERFORMANSI: EN ÇOK SATAN YİYECEKLER ━━━━ */}
+    <section className="overview-dishes-section" aria-labelledby="overview-top-dishes-title">
+      <header className="overview-dishes-section-header">
+        <div>
+          <span className="overview-spotlight-section-label"><UtensilsCrossed size={16} /> MENÜ ANALİTİĞİ</span>
+          <h2 id="overview-top-dishes-title">Popüler Lezzetler & Ürünler</h2>
         </div>
-        <Link to="/admin/sales/summary" className="overview-kpi-link">Detay <ArrowRight size={14} /></Link>
-      </div>
-      <div className="overview-kpi-card">
-        <div className="overview-kpi-icon purple"><LayoutGrid size={22} /></div>
-        <div className="overview-kpi-body">
-          <span className="overview-kpi-label">SALON DOLULUĞU</span>
-          <strong>{occupied ?? "—"} <span>/ {tableCount ?? "—"}</span></strong>
-          <small>{tableCount && occupied !== null ? `%${Math.round(occupied / tableCount * 100)} doluluk` : "Masa bilgisi bekleniyor"}</small>
+        <p>İşletmenizin tüm siparişlerindeki satış hacmine göre ürün sıralaması.</p>
+      </header>
+
+      <div className="overview-dishes-grid">
+        {/* Sol Kolon: Top Selling Dishes (Görsel Referansı İle Birebir Kart) */}
+        <div className="overview-top-dishes-card">
+          <div className="overview-top-dishes-header">
+            <div>
+              <h3 className="overview-top-dishes-heading">Top Selling Dishes</h3>
+              <span className="overview-top-dishes-sub">En çok satan lezzetler</span>
+            </div>
+            <div className="overview-dishes-filter-pill" role="tablist" aria-label="Menü filtresi">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={dishesCategory === "food"}
+                className={dishesCategory === "food" ? "is-active" : ""}
+                onClick={() => setDishesCategory("food")}
+              >
+                🍕 Yiyecekler
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={dishesCategory === "all"}
+                className={dishesCategory === "all" ? "is-active" : ""}
+                onClick={() => setDishesCategory("all")}
+              >
+                Tüm Menü
+              </button>
+            </div>
+          </div>
+
+          {topDishesState.status === "ready" && topDishesState.data.items.length > 0 ? (
+            <div className="overview-top-dishes-list" role="list">
+              {topDishesState.data.items.map((dish) => (
+                <div key={dish.productId} className="overview-top-dish-row" role="listitem">
+                  <span className="overview-top-dish-rank">{dish.rank}.</span>
+                  <div className="overview-top-dish-thumb-wrap">
+                    <img
+                      src={dish.imageUrl}
+                      alt={dish.name}
+                      className="overview-top-dish-thumb"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        const fallback = e.currentTarget.parentElement?.querySelector(".overview-dish-thumb-emoji");
+                        if (fallback) (fallback as HTMLElement).style.display = "grid";
+                      }}
+                    />
+                    <span className="overview-dish-thumb-emoji" aria-hidden="true" style={{ display: "none" }}>
+                      {dish.emoji || "🍽️"}
+                    </span>
+                  </div>
+                  <div className="overview-top-dish-info">
+                    <strong className="overview-top-dish-name" title={dish.name}>
+                      {dish.name}
+                    </strong>
+                    <span className="overview-top-dish-sold">
+                      {dish.soldCount} sold ({dish.soldCount} adet satıldı)
+                    </span>
+                  </div>
+                  <div className="overview-top-dish-rev" title="Toplam ciro katkısı">
+                    <span>{money(dish.totalRevenueMinor)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : topDishesState.status === "loading" ? (
+            <div className="overview-top-dishes-loading">
+              <p>Lezzet sıralaması hesaplanıyor…</p>
+            </div>
+          ) : (
+            <div className="overview-top-dishes-empty">
+              <p>Henüz sipariş kaydı bulunmuyor.</p>
+            </div>
+          )}
         </div>
-        <Link to="/admin/branches/tables" className="overview-kpi-link">Masalar <ArrowRight size={14} /></Link>
-      </div>
-      <div className="overview-kpi-card">
-        <div className="overview-kpi-icon blue"><Wallet size={22} /></div>
-        <div className="overview-kpi-body">
-          <span className="overview-kpi-label">KASA NAKİT</span>
-          <strong>{money(expectedCash)}</strong>
-          <small>{shiftOpen ? "Açık vardiya" : "Vardiya kapalı"}</small>
+
+        {/* Sağ Kolon: Menü Dağılımı & Hızlı Özet */}
+        <div className="overview-dishes-summary-card">
+          <div className="overview-dishes-summary-header">
+            <span className="overview-summary-badge"><TrendingUp size={16} /> Satış Paylaşımı</span>
+            <h3>Menü & Kategori Durumu</h3>
+            <p>Satış adetlerinin menü gruplarına dağılımı ve hızlı katalog yönetimi.</p>
+          </div>
+
+          <div className="overview-dishes-summary-stats">
+            <div className="overview-summary-stat-box">
+              <span className="stat-label">Toplam Satış</span>
+              <strong className="stat-value">
+                {topDishesState.status === "ready" ? `${topDishesState.data.totalSold} Adet` : "—"}
+              </strong>
+              <small className="stat-hint">
+                {dishesCategory === "food" ? "Yiyecek ve tatlı porsiyonu" : "Tüm menü kalemleri"}
+              </small>
+            </div>
+            <div className="overview-summary-stat-box">
+              <span className="stat-label">Lider Lezzet</span>
+              <strong className="stat-value">
+                {topDishesState.status === "ready" && topDishesState.data.items[0]
+                  ? topDishesState.data.items[0].name
+                  : "—"}
+              </strong>
+              <small className="stat-hint">
+                {topDishesState.status === "ready" && topDishesState.data.items[0]
+                  ? `${topDishesState.data.items[0].soldCount} adet satıldı`
+                  : "Sipariş verisi"}
+              </small>
+            </div>
+          </div>
+
+          <div className="overview-dishes-summary-links">
+            <Link to="/admin/catalog/products" className="overview-dish-action-link">
+              <BookOpen size={16} /> Ürünleri ve Fiyatları Yönet <ArrowRight size={15} />
+            </Link>
+            <Link to="/admin/catalog/menus" className="overview-dish-action-link">
+              <Sparkles size={16} /> Menü ve Kategori Sıralaması <ArrowRight size={15} />
+            </Link>
+          </div>
         </div>
-        <Link to="/admin/cash/summary" className="overview-kpi-link">Kasa <ArrowRight size={14} /></Link>
-      </div>
-      <div className={`overview-kpi-card ${criticalCount && criticalCount > 0 ? "has-alert" : ""}`}>
-        <div className="overview-kpi-icon orange">{stockReady && criticalCount === 0 ? <Check size={22} /> : <AlertTriangle size={22} />}</div>
-        <div className="overview-kpi-body">
-          <span className="overview-kpi-label">KRİTİK STOK</span>
-          <strong>{criticalCount ?? "—"}</strong>
-          <small>{criticalCount === 0 ? "Tüm stoklar yeterli" : criticalCount && criticalCount > 0 ? "Eşik altı kalem" : "Yükleniyor"}</small>
-        </div>
-        <Link to={stockLink} className="overview-kpi-link">İncele <ArrowRight size={14} /></Link>
       </div>
     </section>
 
@@ -277,6 +496,61 @@ export function Dashboard({ ctx }: { ctx: ViewContext }) {
               )}</div>
             : <p className="overview-insight-message">{stockScopeMissing ? "Stokları görmek için şube seçin." : !stockReady ? criticalStockState.status === "loading" ? "Stoklar yükleniyor…" : "Stok bilgisi alınamadı." : "Eşik altında hammadde görünmüyor."}</p>}
           <Link to={stockLink}>{stockScopeMissing ? "Şubeleri aç" : "Stokları incele"} <ArrowRight size={17} /></Link>
+        </article>
+        {/* Kasalar ve Kârlılık */}
+        <article className="overview-insight cash-profit">
+          <div className="overview-insight-heading">
+            <span><Wallet size={22} /></span>
+            <div>
+              <small>KASALAR & KÂRLILIK</small>
+              <h3>
+                {cashProfitState.status === "ready"
+                  ? `Toplam %${cashProfitState.data.profitRate} Kâr`
+                  : cashProfitState.status === "loading"
+                    ? "Kasa kârı hesaplanıyor…"
+                    : "Kasa kâr durumu"}
+              </h3>
+            </div>
+          </div>
+
+          {cashProfitState.status === "ready" ? (
+            <div className="overview-insight-cash-list">
+              <div className="overview-cash-metric-row">
+                <span>Toplam Kasa Girişi:</span>
+                <strong>{money(cashProfitState.data.totalCashInMinor)}</strong>
+              </div>
+              <div className="overview-cash-metric-row">
+                <span>Toplam Kasa Çıkışı:</span>
+                <strong style={{ color: "#a83e32" }}>−{money(cashProfitState.data.totalCashOutMinor)}</strong>
+              </div>
+              <div className="overview-cash-metric-row">
+                <span>Net Kasa Kârı:</span>
+                <strong className={cashProfitState.data.netProfitMinor >= 0 ? "is-profit" : "is-loss"}>
+                  {cashProfitState.data.netProfitMinor >= 0 ? "+" : ""}{money(cashProfitState.data.netProfitMinor)}
+                </strong>
+              </div>
+
+              {cashProfitState.data.registers.length > 0 && (
+                <div className="overview-cash-registers-mini">
+                  {cashProfitState.data.registers.map((reg) => (
+                    <div key={reg.id} className="overview-cash-reg-item" title={`${reg.name}: Giriş ${money(reg.cashInMinor)}, Çıkış ${money(reg.cashOutMinor)}`}>
+                      <span>{reg.name.replace(/^Kadıköy\s*/i, "")} ({reg.code})</span>
+                      <b>
+                        {reg.cashInMinor > 0 ? `%${reg.profitRate} kâr` : reg.cashOutMinor > 0 ? `−${money(reg.cashOutMinor)}` : "Hareketsiz"}
+                      </b>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="overview-insight-message">
+              {cashProfitState.status === "loading"
+                ? "Kasa kayıtları yükleniyor…"
+                : "Kasa kârlılık verisi alınamadı."}
+            </p>
+          )}
+          <Link to="/admin/cash/movements">Kasa hareketlerini incele <ArrowRight size={17} /></Link>
         </article>
       </div>
     </section>

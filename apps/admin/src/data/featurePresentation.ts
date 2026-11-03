@@ -22,7 +22,7 @@ const configuredSources: Sources = {
 
 // Alt ekranların görünür olgunluğu. Burada bulunmayan yol gelecekteki ürün planıdır.
 const demoRoutes = new Set([
-  "overview/daily",
+  "overview/daily", "overview/turnover", "overview/alerts", "overview/activity",
   "branches/list", "branches/tables",
   "kitchen/personnel",
   "catalog/menus", "catalog/categories", "catalog/products",
@@ -61,7 +61,7 @@ export function featurePresentation(section: string, item: string, sources: Sour
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "catalog/menus" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
-  if (key === "overview/daily")
+  if (key === "overview/daily" || key === "overview/turnover" || key === "overview/alerts" || key === "overview/activity")
     return { stage: "demo", label: "Önizleme", description };
   if (section === "cash" && sources.cashSource === "http" &&
     ["summary", "movements", "shifts", "opening-closing"].includes(item))
