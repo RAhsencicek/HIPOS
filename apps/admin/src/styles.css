@@ -1079,7 +1079,7 @@ input:focus {
 
 .draft-option-groups-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -1127,7 +1127,7 @@ input:focus {
 
 .draft-option-limits {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
   padding-top: 12px;
@@ -1137,6 +1137,7 @@ input:focus {
 .draft-option-limits label {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 4px;
   font-size: 12px;
   font-weight: 700;
@@ -1144,6 +1145,8 @@ input:focus {
 }
 
 .draft-option-limits input {
+  width: 100%;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid #dcd3c4;
   border-radius: 8px;
@@ -7208,6 +7211,7 @@ td.strong {
 
 .menu-picker-search {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 9px;
   margin-top: 20px;
@@ -7217,16 +7221,26 @@ td.strong {
   color: #8b7a98;
 }
 
+.menu-picker-search:focus-within {
+  border-color: #9c79c2;
+  box-shadow: 0 0 0 3px #9c79c21c;
+}
+
 .menu-picker-search input {
   flex: 1;
   min-width: 0;
   border: 0;
   outline: 0;
   font: inherit;
+  box-shadow: none;
 }
+
+.menu-picker-search input:focus { outline: none; box-shadow: none; }
 
 .menu-picker-categories {
   display: flex;
+  flex: 0 0 auto;
+  align-items: center;
   gap: 7px;
   padding: 14px 0 12px;
   overflow-x: auto;
@@ -7234,13 +7248,16 @@ td.strong {
 
 .menu-picker-categories button {
   flex: 0 0 auto;
-  padding: 7px 11px;
+  min-height: 34px;
+  padding: 7px 14px;
   border: 1px solid #e6e0ea;
   border-radius: 999px;
   color: #695d75;
   background: white;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -7248,7 +7265,10 @@ td.strong {
   border-color: #9c79c2;
   color: #684292;
   background: #f5effa;
+  font-weight: 600;
 }
+
+.menu-picker-categories button:focus-visible { outline: 2px solid #684292; outline-offset: 2px; }
 
 .menu-picker-count {
   padding-bottom: 9px;
@@ -8217,16 +8237,26 @@ td.strong {
 .gallery-upload-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .channel-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .channel-overview .card { display: grid; gap: 6px; padding: 18px; }
-.channel-overview span, .channel-list p, .channel-row small { color: #746e86; font-size: 12px; }
-.channel-list { padding: 20px; }
-.channel-list header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
-.channel-list h2, .channel-list p { margin: 0 0 6px; }
-.channel-row { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(90px, 1fr) minmax(120px, 1fr) minmax(145px, 1fr) auto; gap: 16px; align-items: center; padding: 14px 0; border-top: 1px solid #eeeaf5; }
-.channel-controls { display: flex !important; flex-wrap: wrap; gap: 10px !important; }
-.channel-controls label { display: flex; align-items: center; gap: 4px; font-size: 12px; }
-.channel-row > div:not(.channel-row-product) { display: grid; justify-items: start; gap: 6px; }
+.channel-overview span, .channel-visibility-list p, .channel-row small { color: #746e86; font-size: 12px; }
+.channel-visibility-list { padding: 20px; }
+.channel-visibility-list > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.channel-visibility-list h2, .channel-visibility-list p { margin: 0 0 6px; }
+.channel-row, .channel-row-heading { display: grid; grid-template-columns: minmax(160px, 2fr) minmax(80px, .7fr) minmax(100px, .9fr) minmax(230px, 1.5fr) 125px; gap: 12px; align-items: center; }
+.channel-row { padding: 12px 0; border-top: 1px solid #eeeaf5; }
+.channel-row-heading { padding: 12px 0; color: #746e86; font-size: 12px; font-weight: 600; }
+.channel-status-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.channel-row > div:not(.channel-row-product) { display: grid; justify-items: start; gap: 6px; min-width: 0; }
+.channel-row .channel-controls { width: 100%; }
+.channel-row .channel-controls-grid { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.channel-row .channel-control-card { align-items: center; gap: 7px; padding: 8px 10px; border-radius: 9px; }
+.channel-row .channel-control-card input[type="checkbox"] { margin: 0; width: 15px; height: 15px; flex-basis: 15px; }
+.channel-row .channel-control-card strong { font-size: 12px; white-space: nowrap; }
+.channel-row .channel-control-card small { display: none; }
+.channel-row-actions { align-content: center; }
 .channel-row-product { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .channel-row-product > div { display: grid; gap: 4px; min-width: 0; }
+.channel-product-link { color: inherit; font-weight: 700; text-decoration: none; }
+.channel-product-link:hover, .channel-product-link:focus-visible { color: #4021c7; text-decoration: underline; }
 .channel-product-image { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; border-radius: 10px; background: #f5f2ff; overflow: hidden; font-size: 23px; }
 .channel-product-image img { width: 100%; height: 100%; object-fit: cover; }
 .channel-row > .channel-row-publication { display: block; grid-column: 1 / -1; min-width: 0; }
@@ -8254,7 +8284,7 @@ td.strong {
 .scheduled-price-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid #eeeaf5; }
 .scheduled-price-row > div { display: grid; gap: 4px; flex: 1; min-width: 180px; }
 @media (max-width: 700px) { .price-workspace { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .channel-row { grid-template-columns: 1fr 1fr; } .channel-row-product { grid-column: 1 / -1; } }
+@media (max-width: 1000px) { .channel-row-heading { display: none; } .channel-status-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; } .channel-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .channel-row-product, .channel-row .channel-controls, .channel-row-actions { grid-column: 1 / -1; } .channel-row-actions { display: flex !important; flex-wrap: wrap; align-items: center; gap: 12px !important; } }
 
 .menu-sidebar-column,
 .menu-editor-column {

@@ -116,7 +116,7 @@ export function ProductOptionsPanel({ scope, productId, canManage, onChanged }: 
       {!canManage && <p>Seçenekleri değiştirmek için ürün yönetimi bu şubede etkin olmalı.</p>}
       <form onSubmit={addGroup} className="product-option-create">
         <label className="draft-field"><span>Yeni grup adı</span><input value={groupName} disabled={locked} maxLength={100}
-          onChange={event => setGroupName(event.target.value)} placeholder="Örn. Ekstralar" /></label>
+          onChange={event => setGroupName(event.target.value)} /></label>
         <button className="soft-button" type="submit" disabled={locked || !groupName.trim()}>Grup oluştur</button>
       </form>
       {!groups.length && <p>Henüz seçenek grubu yok. İsterseniz bir grup oluşturup bu ürüne bağlayabilirsiniz.</p>}
@@ -187,7 +187,7 @@ export function OptionGroupsPage({ scope, canManage }: { scope: CatalogScope; ca
     {notice && <div className="notice" role="status">{notice}</div>}
     {source === "http" && scope.branchId && <section className="card detail-card product-options"><p>Gruplar firma genelindedir. Bir gruptaki değişiklik onu kullanan tüm ürünleri etkiler. Ürüne bağlama ve seçim sınırları ürün ayrıntısından yapılır.</p>
       {!canManage && <p>Yeni işlem için ürün yönetimi etkin olmalı.</p>}
-      <form className="product-option-create" onSubmit={event => { event.preventDefault(); if (!name.trim() || disabled) return; const input = { requestId: crypto.randomUUID(), name: name.trim(), isActive: true, sortOrder: Math.max(-1, ...groups.map(group => group.sortOrder)) + 1 }; void run(async () => { await provider.createOptionGroup(scope, input); setName(""); }); }}><label className="draft-field"><span>Yeni grup adı</span><input value={name} maxLength={100} disabled={disabled} onChange={event => setName(event.target.value)} placeholder="Örn. Boyut" /></label><button className="soft-button" disabled={disabled || !name.trim()}>Grup oluştur</button></form>
+      <form className="product-option-create" onSubmit={event => { event.preventDefault(); if (!name.trim() || disabled) return; const input = { requestId: crypto.randomUUID(), name: name.trim(), isActive: true, sortOrder: Math.max(-1, ...groups.map(group => group.sortOrder)) + 1 }; void run(async () => { await provider.createOptionGroup(scope, input); setName(""); }); }}><label className="draft-field"><span>Yeni grup adı</span><input value={name} maxLength={100} disabled={disabled} onChange={event => setName(event.target.value)} /></label><button className="soft-button" disabled={disabled || !name.trim()}>Grup oluştur</button></form>
       {!loading && !groups.length && !error && <p>Henüz seçenek grubu yok.</p>}
       {groups.map(group => <div className="product-option-group" key={group.id}><div className="product-option-heading"><strong>{group.name}</strong><small>{group.items.length} seçenek · {group.isActive ? "Aktif" : "Pasif"}</small></div><OptionGroupEditor key={`${group.id}:${group.version}`} group={group} disabled={disabled}
         onGroupSave={(groupName, isActive) => { const input = { requestId: crypto.randomUUID(), name: groupName, isActive, sortOrder: group.sortOrder, expectedVersion: group.version }; void run(() => provider.updateOptionGroup(scope, group.id, input)); }}
