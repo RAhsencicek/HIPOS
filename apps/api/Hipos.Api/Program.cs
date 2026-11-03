@@ -138,6 +138,7 @@ if (storage == "postgres") app.MapCariEndpoints(cariReady);
 if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
 if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapProcurementEndpoints(inventoryReady);
+if (storage == "postgres") app.MapInventoryCompletionEndpoints(inventoryReady);
 if (storage == "postgres") app.MapCashEndpoints(cashReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapExpenseEndpoints(expensesReady);
 if (storage == "postgres") app.MapCatalogProductImageEndpoints(catalogReady);

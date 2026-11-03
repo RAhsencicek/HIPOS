@@ -107,5 +107,7 @@ Tarihsel ürün kararları ve ilk aşama taslakları:
 * [URUN_TANIMI.md](05-gecmis-ve-arsiv/URUN_TANIMI.md): İlk aşama ürün tanımı (eski panel öncelikleri).
 * [ILK_UC_ASAMA.md](05-gecmis-ve-arsiv/ILK_UC_ASAMA.md): Tarihsel ilk 3 aşama geliştirme planı.
 * [YENI_URUN_YONU_TASLAK.md](05-gecmis-ve-arsiv/YENI_URUN_YONU_TASLAK.md): 19 Ekim öncesi ürün yönü tartışma taslağı.
+* [MUTFAK_MODULU_ICIN_YAPILANLAR.md](05-gecmis-ve-arsiv/MUTFAK_MODULU_ICIN_YAPILANLAR.md): Modül 3 (Mutfak & KDS) tarihsel gelişim, tamamlanan adımlar ve kalan backlog raporu.
+* [STOK_MODULU_İÇİN_YAPILANLAR.md](05-gecmis-ve-arsiv/STOK_MODULU_İÇİN_YAPILANLAR.md): Modül 5 stok/reçete çalışmalarının tarihsel özeti, geri alınan denemeler ve kalan işler.
 
 Kasa sözleşmelerinin önceki sürümleri: [Kasa/POS v2](05-gecmis-ve-arsiv/KASA_POS_VE_OPERASYON_SOZLESMESI_V2.md) · [Manuel kasa önceki çalışma kopyası](05-gecmis-ve-arsiv/KASA_MVP_SOZLESMESI_ONCEKI.md) · [Ödeme simülatörü önceki sürümü](05-gecmis-ve-arsiv/ODEME_SIMULATORU_SOZLESMESI_ONCEKI.md).

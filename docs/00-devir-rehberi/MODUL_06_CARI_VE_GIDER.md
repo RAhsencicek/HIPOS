@@ -90,6 +90,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
   * Hangi Kasa?: `Kasa 1 (Ana Kasa)`.
   * Tutar: `5.000,00 TL` · Makbuz No: `MK-88421`.
   * **Tek Atomik İşlem:** Kasa 1'den -5.000 TL nakit düşer, Özlem Kasap'ın cari borcu 13.500 TL'ye iner.
+  * *(Mal kabul sırasında çalışan entegrasyon: Modül 5 Mal Kabul onayında `Hemen Ödensin` seçildiğinde açık kasalardan `cash.movements` nakit çıkışı ve `cari.movements` `supplier_payment` ters kaydı tek PostgreSQL transaction'ında atomik yazılır. Bağımsız tediye ekranı ise serbest toptancı ödemeleri için planlanan kapsamda kalmaya devam eder).*
 
 ### 🧾 EKRAN 4: Dükkan Giderleri ve Masraf Girişi (Mevcut Çalışan Ekran — `ExpenseManagementPage.tsx`)
 * Seçilen şube ve kategori için gider tarihi, tutar ve açıklama elle girilerek kalıcı gider kaydı oluşturulur.
