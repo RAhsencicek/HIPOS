@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
-import { useCatalogProvider, useFeatureProvider } from "../../app/providers";
+import { useCatalogProvider } from "../../app/providers";
 import { formatCatalogMoney, parseCatalogPrice } from "./formatters";
-import { HttpMenuProvider } from "./MenuProvider";
 import { CatalogProviderError } from "./contracts";
 import type { CatalogProductDetail, CatalogScope, PriceVersion, Publication } from "./contracts";
 
@@ -33,13 +32,11 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
   onChanged: (message?: string) => void;
 }) {
   const { provider } = useCatalogProvider();
-  const { notifyChange: notifyFeatures } = useFeatureProvider();
   const [history, setHistory] = useState<HistoryLoad>({ status: "loading" });
   const [priceInput, setPriceInput] = useState("");
   const [priceId, setPriceId] = useState(() => crypto.randomUUID());
-  const [publicationId, setPublicationId] = useState(() => crypto.randomUUID());
-  const [busy, setBusy] = useState<"price" | "publish" | null>(null);
-  const [lastAction, setLastAction] = useState<"price" | "publish" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [lastAction, setLastAction] = useState<"price" | null>(null);
   const [error, setError] = useState<CatalogProviderError | null>(null);
 
   useEffect(() => {
@@ -62,7 +59,6 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
     const next = unknownError instanceof CatalogProviderError
       ? unknownError : new CatalogProviderError("LOAD_FAILED", 503, "API yanıt vermedi.");
     setError(next);
-    if (["FEATURE_DISABLED", "FEATURE_DRAINING", "FEATURE_SETUP_REQUIRED"].includes(next.code)) notifyFeatures();
   }
 
   async function sendPrice() {
@@ -72,7 +68,7 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
       setError(new CatalogProviderError("INVALID_PRICE", 400, "Pozitif bir TL tutarı girin; en fazla iki kuruş basamağı kullanın."));
       return;
     }
-    setBusy("price"); setLastAction("price"); setError(null);
+    setBusy(true); setLastAction("price"); setError(null);
     try {
       const request = { scope, draftId: product.id, priceVersionId: priceId,
         amountMinor: amount, expectedVersion: product.version };
@@ -82,7 +78,7 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
       setPriceId(crypto.randomUUID());
       onChanged(product.status === "published" ? "Yeni fiyat kaydedildi ve yeni satışlarda geçerli." : "Fiyat sürümü kaydedildi.");
     } catch (unknownError) { failed(unknownError); }
-    finally { setBusy(null); }
+    finally { setBusy(false); }
   }
 
   function savePrice(event: FormEvent<HTMLFormElement>) {
@@ -90,58 +86,31 @@ export function PricePublicationPanel({ scope, product, canSetPrice, canPublish,
     void sendPrice();
   }
 
-  async function publish() {
-    if (busy || !canPublish || !product.isActive || !scope.branchId) return;
-    setBusy("publish"); setLastAction("publish"); setError(null);
-    try {
-      await provider.publishDraft({ scope, draftId: product.id, publicationId,
-        expectedVersion: product.version });
-      setPublicationId(crypto.randomUUID());
-      try {
-        await new HttpMenuProvider().ensureProductInActiveMenu(scope, product.id, product.category.name);
-      } catch (menuErr) {
-        console.warn("Menü senkronizasyonu:", menuErr);
-      }
-      onChanged("Ürün POS kanalında yayınlandı; kayıt veritabanında doğrulandı.");
-    } catch (unknownError) { failed(unknownError); }
-    finally { setBusy(null); }
-  }
-
   const hasPrice = history.status === "success" && history.prices.length > 0;
   return <section className="card detail-card publication-panel" aria-label="Fiyat ve yayın">
     <span className="card-kicker">FİYAT VE YAYIN</span>
-    <h2>Şube fiyatı ve POS yayını</h2>
-    <p>{product.status === "draft" ? "Ürünü POS'a yayınladıktan sonra kullanacağınız menüye de ekleyin." : "Yeni fiyat kaydedildiğinde bu şubedeki yeni satışlarda geçerli olur. Önceki siparişlerin fiyatı korunur."}</p>
+    <h2>Şube fiyatı</h2>
+    <p>Fiyat kaydedildiğinde bu şubedeki yeni satışlarda geçerli olur. Önceki siparişlerin fiyatı korunur. Ürünü POS'ta Satış Kanalları bölümünden yayınlayabilirsiniz.</p>
       <form onSubmit={savePrice} aria-label="Ürün fiyatı">
         <label className="draft-field">
           <span>Fiyat (TL)</span>
-          <input inputMode="decimal" value={priceInput} placeholder="325,50"
+          <input inputMode="decimal" value={priceInput}
             disabled={Boolean(busy) || error?.code === "LOAD_FAILED"}
             onChange={(event) => setPriceInput(event.target.value)} />
         </label>
-        <button type="submit" className="primary-button" disabled={Boolean(busy) || !canSetPrice || (product.status === "published" && !canPublish) || error?.code === "LOAD_FAILED"}>
-          {busy === "price" ? "Kaydediliyor…" : product.status === "draft" ? "Fiyat sürümü kaydet" : "Fiyatı güncelle"}
+        <button type="submit" className="primary-button" disabled={busy || !canSetPrice || (product.status === "published" && !canPublish) || error?.code === "LOAD_FAILED"}>
+          {busy ? "Kaydediliyor…" : product.status === "draft" ? "Fiyat sürümü kaydet" : "Fiyatı güncelle"}
         </button>
       </form>
-    {product.status === "draft" && <>
-      <div className="publication-action">
-        <button type="button" className="primary-button" onClick={publish}
-          disabled={Boolean(busy) || !canPublish || !hasPrice || !product.isActive || error?.code === "LOAD_FAILED"}>
-          {busy === "publish" ? "Yayınlanıyor…" : "POS'a yayınla"}
-        </button>
-        {!hasPrice && <small>Yayın için önce fiyat geçmişinde geçerli sürüm görünmeli.</small>}
-        {!product.isActive && <small>Yayınlamak için önce ürünü etkinleştirin.</small>}
-      </div>
-      {(!canSetPrice || !canPublish) && <div className="notice" role="status">
-        {!canSetPrice ? "Fiyat yönetimi" : "POS yayını"} bu şubede hazır değil. <Link to="/admin/settings/modules">Modül ayarları</Link>
-      </div>}
-    </>}
+    {product.status === "draft" && (!hasPrice || !product.isActive || !canPublish) && <div className="notice" role="status">
+      {!hasPrice ? "POS yayını için önce geçerli bir fiyat kaydedin." : !product.isActive ? "POS yayını için ürünü etkinleştirin." : "POS yayını bu şubede hazır değil."}
+    </div>}
     {product.status === "published" && (!canSetPrice || !canPublish) && <div className="notice" role="status">Fiyat güncellemek için fiyat ve POS yayını özellikleri bu şubede hazır olmalı. <Link to="/admin/settings/modules">Modül ayarları</Link></div>}
     {error && <div className="notice" role="alert">
       {commandError(error)} İşlem başarılı olarak işaretlenmedi.
       {error.code === "VERSION_CONFLICT" && <button type="button" className="soft-button" onClick={() => onChanged()}>Güncel ürünü yükle</button>}
       {error.code === "LOAD_FAILED" && lastAction && <button type="button" className="soft-button"
-        onClick={() => { if (lastAction === "price") void sendPrice(); else void publish(); }}>
+        onClick={() => { if (lastAction === "price") void sendPrice(); }}>
         Aynı isteği tekrar dene
       </button>}
       {error.code === "LOAD_FAILED" && <button type="button" className="soft-button" onClick={() => {
