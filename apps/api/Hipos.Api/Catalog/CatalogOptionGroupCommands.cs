@@ -154,6 +154,9 @@ public sealed class CatalogOptionGroupCommands(CatalogDbContext db, CatalogQueri
         var fingerprint = Fingerprint(new { firmId, productId, action = "save_product_groups", input });
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
         if (await ReplayAsync(input.RequestId, fingerprint, cancellationToken) is { } replay) return replay;
+        var draft = await db.Drafts.FromSqlInterpolated(
+            $"SELECT * FROM catalog.drafts WHERE id = {productId} AND firm_id = {firmId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
         var product = await db.Products.FromSqlInterpolated(
             $"SELECT * FROM catalog.products WHERE id = {productId} AND firm_id = {firmId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
@@ -190,7 +193,18 @@ public sealed class CatalogOptionGroupCommands(CatalogDbContext db, CatalogQueri
             ProductId = productId, OptionGroupId = item.GroupId, MinSelections = item.MinSelections,
             MaxSelections = item.MaxSelections, SortOrder = item.SortOrder,
         }));
-        product.Version++; product.UpdatedAt = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        product.Version++; product.UpdatedAt = now;
+        if (draft is not null)
+        {
+            draft.Version = product.Version;
+            draft.UpdatedAt = now;
+            db.DraftAudit.Add(new CatalogDraftAuditRow
+            {
+                DraftId = draft.Id, FirmId = firmId, BranchId = draft.BranchId,
+                Actor = actor, Action = "option_groups_updated", Version = draft.Version, OccurredAt = now,
+            });
+        }
         return await CommitAsync(tx, Audit(input.RequestId, firmId, "product_groups", productId, actor,
             "updated", fingerprint, product.Version),
             async () => await queries.GetProductOptionGroupsAsync(firmId, productId, cancellationToken),

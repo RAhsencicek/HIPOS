@@ -15,6 +15,7 @@ public sealed class CatalogProductRow
     public string Status { get; set; } = "draft";
     public bool IsActive { get; set; } = true;
     public string[] Channels { get; set; } = [];
+    public string[] DesiredChannels { get; set; } = ["pos", "qr"];
     public string Image { get; set; } = "";
     public bool RecipeLinked { get; set; }
     public long BasePriceMinor { get; set; }
@@ -28,6 +29,21 @@ public sealed class CatalogProductRow
     public List<CatalogBranchPriceRow> BranchPrices { get; set; } = [];
 }
 
+public sealed class CatalogProductImageRow
+{
+    public Guid RequestId { get; set; }
+    public Guid ProductId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string ContentType { get; set; } = "";
+    public byte[] Content { get; set; } = [];
+    public string Fingerprint { get; set; } = "";
+    public int ExpectedVersion { get; set; }
+    public int Version { get; set; }
+    public string Actor { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class CatalogBranchPriceRow
 {
     public Guid ProductId { get; set; }
@@ -36,10 +52,11 @@ public sealed class CatalogBranchPriceRow
     public CatalogProductRow Product { get; set; } = null!;
 }
 
-// Firma genelindeki kategori sözlüğü. Ürün satırlarındaki category_name geçiş sürecinde okuma anlık görüntüsüdür.
+// Kategori sözlüğü şube kapsamındadır. Ürün satırlarındaki category_name geçiş sürecinde okuma anlık görüntüsüdür.
 public sealed class CatalogCategoryRow
 {
     public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
     public string Id { get; set; } = "";
     public string? BrandId { get; set; }
     public string Name { get; set; } = "";
@@ -53,6 +70,7 @@ public sealed class CatalogCategoryAuditRow
 {
     public long Id { get; set; }
     public string FirmId { get; set; } = "";
+    public string? BranchId { get; set; }
     public string CategoryId { get; set; } = "";
     public string Actor { get; set; } = "";
     public string Action { get; set; } = "";
@@ -73,6 +91,22 @@ public sealed class CatalogPriceVersionRow
     public string Currency { get; set; } = "TRY";
     public string Actor { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class CatalogScheduledPriceRow
+{
+    public Guid Id { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public Guid ProductId { get; set; }
+    public long AmountMinor { get; set; }
+    public DateTimeOffset EffectiveAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string Actor { get; set; } = "";
+    public string Status { get; set; } = "pending";
+    public int ExpectedVersion { get; set; }
+    public string? Detail { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
 }
 
 public sealed class CatalogPublicationRow
@@ -134,6 +168,32 @@ public sealed class CatalogProductActivationAuditRow
     public DateTimeOffset OccurredAt { get; set; }
 }
 
+public sealed class CatalogProductChannelAuditRow
+{
+    public Guid RequestId { get; set; }
+    public Guid ProductId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string[] DesiredChannels { get; set; } = [];
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
+public sealed class CatalogProductEditAuditRow
+{
+    public Guid RequestId { get; set; }
+    public Guid ProductId { get; set; }
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Actor { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string SnapshotJson { get; set; } = "{}";
+    public int Version { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
 public sealed class CatalogOptionGroupRow
 {
     public Guid Id { get; set; }
@@ -183,6 +243,7 @@ public sealed class CatalogOptionManagementAuditRow
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
     public DbSet<CatalogProductRow> Products => Set<CatalogProductRow>();
+    public DbSet<CatalogProductImageRow> ProductImages => Set<CatalogProductImageRow>();
     public DbSet<CatalogBranchPriceRow> BranchPrices => Set<CatalogBranchPriceRow>();
     public DbSet<CatalogCategoryRow> Categories => Set<CatalogCategoryRow>();
     public DbSet<CatalogCategoryAuditRow> CategoryAudit => Set<CatalogCategoryAuditRow>();
@@ -191,6 +252,9 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     public DbSet<CatalogDraftRow> Drafts => Set<CatalogDraftRow>();
     public DbSet<CatalogDraftAuditRow> DraftAudit => Set<CatalogDraftAuditRow>();
     public DbSet<CatalogProductActivationAuditRow> ProductActivationAudit => Set<CatalogProductActivationAuditRow>();
+    public DbSet<CatalogProductChannelAuditRow> ProductChannelAudit => Set<CatalogProductChannelAuditRow>();
+    public DbSet<CatalogScheduledPriceRow> ScheduledPrices => Set<CatalogScheduledPriceRow>();
+    public DbSet<CatalogProductEditAuditRow> ProductEditAudit => Set<CatalogProductEditAuditRow>();
     public DbSet<CatalogMenuRow> Menus => Set<CatalogMenuRow>();
     public DbSet<CatalogMenuSectionRow> MenuSections => Set<CatalogMenuSectionRow>();
     public DbSet<CatalogMenuItemRow> MenuItems => Set<CatalogMenuItemRow>();
@@ -204,6 +268,24 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     {
         modelBuilder.HasDefaultSchema("catalog");
         CatalogMenuModel.Configure(modelBuilder);
+        modelBuilder.Entity<CatalogProductImageRow>(entity =>
+        {
+            entity.ToTable("product_images");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.ContentType).HasColumnName("content_type").HasMaxLength(32);
+            entity.Property(row => row.Content).HasColumnName("content");
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.ExpectedVersion).HasColumnName("expected_version");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasOne<CatalogProductRow>().WithMany().HasForeignKey(row => row.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ProductId });
+        });
         modelBuilder.Entity<CatalogProductRow>(entity =>
         {
             entity.ToTable("products", table =>
@@ -223,6 +305,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
             entity.Property(row => row.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(row => row.Channels).HasColumnName("channels");
+            entity.Property(row => row.DesiredChannels).HasColumnName("desired_channels").HasDefaultValueSql("ARRAY['pos','qr']::text[]");
             entity.Property(row => row.Image).HasColumnName("image").HasMaxLength(512);
             entity.Property(row => row.RecipeLinked).HasColumnName("recipe_linked");
             entity.Property(row => row.BasePriceMinor).HasColumnName("base_price_minor");
@@ -249,8 +332,9 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
         modelBuilder.Entity<CatalogCategoryRow>(entity =>
         {
             entity.ToTable("categories", table => table.HasCheckConstraint("ck_category_version_positive", "version > 0"));
-            entity.HasKey(row => new { row.FirmId, row.Id });
+            entity.HasKey(row => new { row.FirmId, row.BranchId, row.Id });
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
             entity.Property(row => row.BrandId).HasColumnName("brand_id").HasMaxLength(64);
             entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(160);
@@ -258,7 +342,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.SortOrder).HasColumnName("sort_order");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
-            entity.HasIndex(row => new { row.FirmId, row.SortOrder });
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.SortOrder });
         });
         modelBuilder.Entity<CatalogCategoryAuditRow>(entity =>
         {
@@ -266,6 +350,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id").ValueGeneratedOnAdd();
             entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.CategoryId).HasColumnName("category_id").HasMaxLength(80);
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
             entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(32);
@@ -349,6 +434,38 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Id });
         });
+        modelBuilder.Entity<CatalogScheduledPriceRow>(entity =>
+        {
+            entity.ToTable("scheduled_prices");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
+            entity.Property(row => row.EffectiveAt).HasColumnName("effective_at");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(24);
+            entity.Property(row => row.ExpectedVersion).HasColumnName("expected_version");
+            entity.Property(row => row.Detail).HasColumnName("detail").HasMaxLength(500);
+            entity.Property(row => row.FinishedAt).HasColumnName("finished_at");
+            entity.HasIndex(row => new { row.Status, row.EffectiveAt });
+        });
+        modelBuilder.Entity<CatalogProductChannelAuditRow>(entity =>
+        {
+            entity.ToTable("product_channel_audit");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.DesiredChannels).HasColumnName("desired_channels");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
+        });
         modelBuilder.Entity<CatalogProductActivationAuditRow>(entity =>
         {
             entity.ToTable("product_activation_audit");
@@ -361,6 +478,21 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
             entity.Property(row => row.Action).HasColumnName("action").HasMaxLength(32);
             entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
             entity.Property(row => row.IsActive).HasColumnName("is_active");
+            entity.Property(row => row.Version).HasColumnName("version");
+            entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ProductId, row.OccurredAt });
+        });
+        modelBuilder.Entity<CatalogProductEditAuditRow>(entity =>
+        {
+            entity.ToTable("product_edit_audit");
+            entity.HasKey(row => row.RequestId);
+            entity.Property(row => row.RequestId).HasColumnName("request_id");
+            entity.Property(row => row.ProductId).HasColumnName("product_id");
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
+            entity.Property(row => row.Fingerprint).HasColumnName("fingerprint").HasMaxLength(64);
+            entity.Property(row => row.SnapshotJson).HasColumnName("snapshot_json").HasColumnType("jsonb");
             entity.Property(row => row.Version).HasColumnName("version");
             entity.Property(row => row.OccurredAt).HasColumnName("occurred_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.ProductId, row.OccurredAt });

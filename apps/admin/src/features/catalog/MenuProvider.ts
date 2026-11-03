@@ -4,7 +4,7 @@ import type { CatalogScope, Money } from "./contracts";
 export type MenuSection = { sectionId: string; name: string; productIds: string[] };
 export type RestaurantMenu = { id: string; name: string; description: string; isActive: boolean;
   version: number; updatedAt: string; sections: MenuSection[] };
-export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; image: string; price: Money };
+export type MenuProduct = { id: string; name: string; categoryId: string; status: string; isActive: boolean; channels: string[]; desiredChannels?: string[]; image: string; price: Money };
 export type MenuWorkspace = { source: "postgres" | "mock"; items: RestaurantMenu[];
   categories: { id: string; name: string; isActive: boolean }[]; products: MenuProduct[] };
 export type MenuSaveInput = { requestId: string; expectedVersion: number; name: string; description: string; sections: MenuSection[] };
@@ -38,13 +38,51 @@ export class HttpMenuProvider {
     return this.request<{ id: string }>(scope, `/${encodeURIComponent(menu.id)}/activation`, "POST",
       { requestId, expectedVersion: menu.version, isActive: !menu.isActive });
   }
+  async ensureProductInActiveMenu(scope: CatalogScope, productId: string, categoryName: string): Promise<boolean> {
+    try {
+      const workspace = await this.load(scope);
+      const activeMenu = workspace.items.find(m => m.isActive) ?? workspace.items[0];
+      if (!activeMenu) return false;
+      const catTrimmed = categoryName.trim();
+      const existingSection = activeMenu.sections.find(
+        s => s.name.trim().toLocaleLowerCase("tr-TR") === catTrimmed.toLocaleLowerCase("tr-TR")
+      );
+      let updatedSections: MenuSection[];
+      if (existingSection) {
+        if (existingSection.productIds.includes(productId)) {
+          return true;
+        }
+        updatedSections = activeMenu.sections.map(s =>
+          s.sectionId === existingSection.sectionId
+            ? { ...s, productIds: [...s.productIds, productId] }
+            : s
+        );
+      } else {
+        updatedSections = [
+          ...activeMenu.sections,
+          { sectionId: `cat-${crypto.randomUUID()}`, name: catTrimmed, productIds: [productId] },
+        ];
+      }
+      await this.save(scope, activeMenu.id, {
+        requestId: crypto.randomUUID(),
+        expectedVersion: activeMenu.version,
+        name: activeMenu.name,
+        description: activeMenu.description,
+        sections: updatedSections,
+      });
+      return true;
+    } catch (err) {
+      console.warn("Menü senkronizasyonu başarısız:", err);
+      return false;
+    }
+  }
 }
 
 export function sampleMenus(scope: CatalogScope): MenuWorkspace {
   if (scope.firmId !== demo.firm.id || scope.branchId !== demo.branch.id)
     return { source: "mock", categories: [], products: [], items: [] };
   return { source: "mock", categories: demo.categories.map(x => ({ ...x, isActive: true })),
-    products: demo.products.map(x => ({ id: x.id, name: x.name, categoryId: x.categoryId, status: "published", isActive: true, image: x.image,
+    products: demo.products.map(x => ({ id: x.id, name: x.name, categoryId: x.categoryId, status: "published", isActive: true, channels: ["pos"], image: x.image,
       price: { amountMinor: x.priceMinor, currency: "TRY" } })),
     items: [{ id: "sample-main", name: "Ana Menü", description: "Fırından çıkan lezzetler, tatlılar ve içecekler.", isActive: true,
       version: 1, updatedAt: "2026-10-08T09:00:00Z", sections: demo.categories.map(c => ({ sectionId: `catalog-${c.id}`, name: c.name,

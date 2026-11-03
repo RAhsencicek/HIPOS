@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { featurePresentation, isFutureSidebarItem } from "./featurePresentation";
+import { sections } from "./catalog";
 
 const mockSources = {
   catalogSource: "mock" as const,
@@ -8,6 +9,16 @@ const mockSources = {
 };
 
 describe("alt ekran durum sözleşmesi", () => {
+  it("fiyat ve kanal ekranlarını katalog kaynağına göre gösterir", () => {
+    const httpSources = { ...mockSources, catalogSource: "http" as const };
+    for (const item of ["prices", "channels"]) {
+      expect(featurePresentation("catalog", item, httpSources).stage).toBe("working");
+      expect(isFutureSidebarItem("catalog", item, httpSources)).toBe(false);
+      expect(featurePresentation("catalog", item, mockSources).stage).toBe("demo");
+    }
+    const catalog = sections.find(section => section.id === "catalog")!;
+    expect(catalog.items.some(item => item.slug === "price-versions" || item.slug === "scheduled-prices" || item.slug === "publishing" || item.slug === "publish-history")).toBe(false);
+  });
   it("kasa alt ekranlarını HTTP sağlayıcıyla çalışıyor olarak gösterir", () => {
     for (const item of ["summary", "movements", "shifts", "opening-closing"]) {
       const presentation = featurePresentation("cash", item, {

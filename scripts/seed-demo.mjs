@@ -253,7 +253,7 @@ if (serviceOnly) {
   }
 } else {
 for (const [index, category] of demo.categories.entries()) statements.push(
-  `INSERT INTO catalog.categories (firm_id,id,brand_id,name,is_active,sort_order,version,updated_at) VALUES (${firm},${sqlString(category.id)},NULL,${sqlString(category.name)},true,${index},1,${sqlString(now)}) ON CONFLICT (firm_id,id) DO NOTHING;`
+  `INSERT INTO catalog.categories (firm_id,branch_id,id,brand_id,name,is_active,sort_order,version,updated_at) VALUES (${firm},${branch},${sqlString(category.id)},NULL,${sqlString(category.name)},true,${index},1,${sqlString(now)}) ON CONFLICT (firm_id,branch_id,id) DO NOTHING;`
 );
 for (const product of demo.products) {
   const category = demo.categories.find((item) => item.id === product.categoryId);

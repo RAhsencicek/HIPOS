@@ -19,7 +19,7 @@ Durum: **Test/simülasyon dilimi; gerçek ödeme değildir.** ASP.NET API özel 
 | `unknown` | Sipariş ödeme durumu `unknown`; gerçek başarı varsayılmaz. | Sonuç çözülene dek engelli. |
 | `cancelled` | Yalnız bekleyen/belirsiz girişimin simülatör tarafından doğrulanmış iptal sonucu; tutar eklenmez. | Mümkün. |
 
-Siparişin `paidMinor` değeri yalnız `succeeded` girişimlerden hesaplanır; `remainingMinor = totalMinor - paidMinor`. Tutar kalan kısmı aşamaz. Birden fazla kısmi girişim ve `cash`/`card` karışımı test edilebilir. Tam simüle ödeme sonrası sipariş **`open` kalır**; operasyonel kapanış, iade ve raporlama ayrı işlerdir. Böylece “ödendi” sonucundan sessizce “servis tamamlandı” anlamı çıkarılmaz.
+Siparişin `paidMinor` değeri yalnız `succeeded` girişimlerden hesaplanır; `remainingMinor = totalMinor - paidMinor`. Tutar kalan kısmı aşamaz. Birden fazla kısmi girişim ve `cash`/`card` karışımı test edilebilir. Siparişin kendi `status` alanı **`open` kalabilir**; buna karşılık ortak adisyonun tamamı simüle ödendiğinde adisyon `closed` olur ve son açık adisyonsa masa/grup bağlantısı kapatılır. Bu geliştirme davranışı gerçek tahsilat veya servisin tamamlandığının kanıtı değildir; iade ve gerçek ödeme entegrasyonu ayrı işlerdir.
 
 ## 3. HTTP sözleşmesi
 

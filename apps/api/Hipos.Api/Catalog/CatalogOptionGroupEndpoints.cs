@@ -47,6 +47,19 @@ public static class CatalogOptionGroupEndpoints
             return ToResult(context, result);
         });
 
+        app.MapGet("/api/v1/firms/{firmId}/branches/{branchId}/catalog/products/{productId:guid}/option-groups",
+            async (string firmId, string branchId, Guid productId, HttpContext context, CatalogQueries queries) =>
+            {
+                var actor = DemoAccess.Resolve(context);
+                if (actor is null) return Fail("UNAUTHENTICATED", 401, "Kullanıcı belirtilmedi.");
+                if (!actor.CanRead(firmId, branchId)) return Fail("UNAUTHORIZED_SCOPE", 403, "Bu şubede ürün erişim izni yok.");
+                if (!ready) return Fail("CATALOG_STORAGE_UNAVAILABLE", 503, "Katalog migration'ını uygulayıp API'yi yeniden başlatın.");
+                var product = await queries.GetAsync(new CatalogScope(firmId, branchId), productId, context.RequestAborted);
+                if (product is null) return Fail("PRODUCT_NOT_FOUND", 404, "Ürün bu şubede bulunamadı.");
+                var result = await queries.GetProductOptionGroupsAsync(firmId, productId, context.RequestAborted);
+                return result is null ? Fail("PRODUCT_NOT_FOUND", 404, "Ürün bulunamadı.") : Results.Ok(result);
+            });
+
         var productGroups = app.MapGroup("/api/v1/firms/{firmId}/catalog/products/{productId:guid}/option-groups");
         productGroups.MapGet("", async (string firmId, Guid productId, HttpContext context, CatalogQueries queries) =>
         {

@@ -25,3 +25,7 @@ Tekrarlanabilir otomatik testler: `npm run test:api`, `npm run test:db`, `npm ru
 4. Sepete ürün ekleyin: grup işlemleri kapanmalı. Sepeti gönderin/boşaltın. Aktif grupta taşıma ve adisyon birleştirme kapalı kalmalı, adisyon bölme çalışmalı ve toplam değişmemeli.
 5. **Grubu Ayır** açıklamasını onaylayın: ek masalar boşalmalı; açık siparişler ve adisyon ana masada kalmalı.
 6. API kontrolünde aynı oluşturma isteği tekrarında ikinci grup oluşmamalı; farklı içerikli aynı requestId, dolu ek masa, zaten gruptaki masa, ek masada ayrı adisyon açma ve eski grup sürümü reddedilmeli. Başka firma/şube erişimi engellenmeli.
+
+## Mobil ürün penceresi
+
+Garson ekranında dar telefon genişliğinde bir ürün ekleyin veya sepette düzenleyin. Uzun ürün/seçenek adları ve adet alanları dahil pencere ekranın dışına taşmamalı; seçenekler, not alanı ve sepet düğmeleri dikey kaydırmayla erişilebilir olmalıdır.

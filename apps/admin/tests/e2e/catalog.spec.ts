@@ -77,7 +77,7 @@ test("kategori sayfası seçilen şubeye göre salt okunur özet gösterir", asy
   await page.getByRole("combobox", { name: "İşletme senaryosu" }).selectOption("multi");
   await expect(page.getByRole("heading", { name: "Kategoriler", level: 1 })).toBeVisible();
   await page.getByRole("combobox", { name: "Şube seçimi" }).selectOption("besiktas");
-  await expect(page.getByRole("row").filter({ hasText: "Pizzalar" })).toContainText("2");
+  await expect(page.locator("article").filter({ hasText: "Pizzalar" })).toContainText("2 ürün");
   await expect(page.getByText("Tatlılar", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("kalıcı kayıt yapılmaz", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yeni kategori" })).toBeDisabled();
 });

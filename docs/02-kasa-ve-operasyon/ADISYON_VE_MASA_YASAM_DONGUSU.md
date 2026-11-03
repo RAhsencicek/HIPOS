@@ -10,7 +10,7 @@
 Şu anki HIPOS sisteminde [`sales.checks`](../../apps/api/Hipos.Api/Sales/SalesDbContext.cs) tablosunda bir adisyon açılabilmekte ve içerisine sipariş eklenebilmektedir. Development simüle tahsilat akışında:
 * Tahsilat toplamı adisyonun indirim/ikram/iptal sonrası ödenecek tutarına ulaştığında adisyon `closed` yapılır.
 * Aynı masa veya fiziksel masa grubunda başka açık adisyon varsa masa/grup bağlantıları korunur. Son açık adisyon da kapanınca aktif garson atamaları kapatılır, masa üyeleri boş duruma alınır ve fiziksel grup kapatılır.
-* Bu davranış gerçek kasa/POS tahsilatı değildir; simüle ödeme hareketi kasa kaydı oluşturmaz. `CloseChecksAfterPayment` Sales migration'ı veritabanına uygulanıp API yeniden başlatılmalıdır.
+* Genel simüle ödeme ve kasiyer test ödemeleri kasa kaydı oluşturmaz. Garson ekranındaki başarılı ödeme ise `cash.movements` ve `cash.audit` kayıtlarını aynı PostgreSQL transaction'ında oluşturur ve açık vardiyaya bağlanır; bu bir geliştirme kasa simülasyonudur, gerçek POS tahsilatı değildir. `CloseChecksAfterPayment` Sales migration'ı ve `CashSalesFromPayments` Cash migration'ı veritabanına uygulanmalıdır.
 Ancak:
 * Masa taşıma, ödeme girişimi olmayan açık adisyonları birleştirme ve açık adisyonu kalem/miktar bazında bölme API'leri uygulanmıştır.
 * Garson ekranında gerekçeli ürün iptali/ikramı ve yüzde/sabit indirim API'si vardır. Yönetici onayı yalnızca Development test ortamında atlanır; diğer ortamlarda onaysız kayıt reddedilir. Gerçek yönetici kimliği/PIN onayı henüz yoktur.
@@ -92,7 +92,7 @@ CREATE TABLE sales.check_voids (
    * Mutfak hazırlık içeriği sipariş ilk gönderildiğinde ayrı bir anlık görüntü olarak saklanır. Adisyon bölme yalnızca hesap kalemlerini dağıtır; bu mutfak görüntüsünün miktarını değiştirmez ve yeni bir mutfak bileti oluşturmaz.
 
 ### Adım 2: İptal, İkram ve İskonto Mekanizması (Development test akışı uygulandı)
-* `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/adjustments`: Yüzde/sabit adisyon indirimi veya ürün kalemine miktar bazlı ikram/iptal kaydeder. Gerekçe zorunludur; aktör, zaman ve `development_bypass` onay modu denetim kaydında tutulur.
+* `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/adjustments`: Yüzde/sabit adisyon indirimi veya ürün kalemine miktar bazlı ikram/iptal kaydeder. İndirim ve ikramda gerekçe zorunludur; ürün iptalinde gerekçe isteğe bağlıdır. Aktör, zaman ve `development_bypass` onay modu denetim kaydında tutulur.
 * Gerçek yönetici onayı henüz uygulanmadığından onaysız istekler Development dışındaki ortamlarda `MANAGER_APPROVAL_REQUIRED` ile reddedilir.
   * İptal kaydı adisyon toplamını düşürür. Mutfak ekranında otomatik **"İPTAL EDİLDİ"** uyarısı ayrıca doğrulanmalıdır.
   * İptal gerekçesi (`Müşteri Vazgeçti`, `Hatalı Sipariş`, `Kalite Şikayeti`) seçilmesi zorunludur.
@@ -100,10 +100,11 @@ CREATE TABLE sales.check_voids (
 ### Adım 3: Adisyon Kapatma ve Masa Boşaltma
 * Development simüle ödemeleri toplamı, indirim/ikram/iptal sonrası adisyon bakiyesini karşıladığında adisyon `closed` olur. Tahsilat ve kapanış aynı transaction içindedir.
 * Masa veya fiziksel masa grubunda başka açık adisyon kalmışsa masa/atamalar/grup açık tutulur. Son açık adisyon kapanınca aktif garson atamaları kapatılır, masa üyeleri `idle` yapılır ve varsa grup kapatılır.
-* Salon görünümü Service API'sinden masanın güncel durumunu alır; garson ödeme almaz. Gerçek kasa/POS tahsilatının bu akışa bağlanması ve migration'ın veritabanına uygulanması beklenmektedir.
+* Salon görünümü Service API'sinden masanın güncel durumunu alır. Garson ekranı ortak ödeme simülatörünü kullanarak seçilen açık adisyona serbest tutarlı nakit/kart tahsilatı başlatabilir; tutar adisyandaki siparişlerin kalan bakiyelerine sırayla dağıtılır. Kısmi tahsilat aynı adisyonu açık bırakır, bakiye sıfırlanınca mevcut kapanış/masa boşaltma kuralları işler.
+* Garson tahsilatı gerçek para tahsil etmez; ancak başarılı nakit/kart denemesi hareket olarak yönetim kasasına bağlanır. Nakit beklenen çekmece toplamına eklenir, kart eklenmez. Açık kasa vardiyası bulunmuyorsa veya birden fazla açık vardiya varsa işlem reddedilir. Gerçek banka/POS entegrasyonu ve üretim yetkilendirmesi ayrıca tamamlanmalıdır.
 
 ### Adım 4: Kullanıcı Arayüzü (Garson Ekranı)
-* `/waiter` masa detayında `[ Masayı Taşı ]`, `[ Masaları Birleştir ]`, `[ Adisyon Böl ]` ve `[ İndirim / İkram ]` akışları bulunur.
+* `/waiter` masa detayında `[ Masayı Taşı ]`, `[ Masaları Birleştir ]`, `[ Adisyon Böl ]`, `[ Ödeme Al ]` ve `[ İndirim / İkram ]` akışları bulunur. Ödeme penceresi adisyon seçimi, nakit/kart seçimi, kalan bakiye ve serbest tutar girişi sunar; simülasyon uyarısını gösterir.
 * İndirim/ikram kaydı Development ortamında etkin; üretim kullanımı gerçek yönetici onay/kimlik altyapısı tamamlanana kadar engellenir.
 
 ---

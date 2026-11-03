@@ -1,13 +1,13 @@
-# Modül 4 Devir Şartnamesi — Ürün Kataloğu & Menü Yönetimi (A'dan Z'ye)
+﻿# Modül 4 Devir Şartnamesi — Ürün Kataloğu & Menü Yönetimi (A'dan Z'ye)
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
 > **Kapsam:** Ürün Kartları, Menü Editörü, Fiyat Sürümleri, Seçenek/Varyasyon Grupları (Modifiers) ve QR Menü
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Seçenek grubu ve sipariş backend'i (uygulandı; ekran entegrasyonu sırada) · QR Menü (hedef)
+> **Modül Durumu:** Kalıcı MVP · Ürün seçenek yönetimi ve sipariş backend'i uygulandı · Yapılandırılmış şube için salt okunur QR menü arayüzü ve public okuma API'si var
 > **PostgreSQL Şeması:** `catalog`
 > **Yönetim Paneli:** Var (`CatalogPages.tsx`, `MenusPage.tsx`)
 > **API:** Var (`CatalogDbContext.cs`)
 > **Test:** Var (`MenusPage.test.tsx`, `postgres.test.mjs`)
-> **Üretime Hazır mı?:** Hayır (Seçenek yönetim/sipariş ekranı entegrasyonu ve masaya özel QR menü yayını eksiktir)
+> **Üretime Hazır mı?:** Hayır (Gerçek kimlik/yetki ve masaya özel QR menü yayını eksiktir)
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
 > * **Güncel teslim ve yol haritası için:** [docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
@@ -23,10 +23,12 @@
   - Kategoriler, ürün kartları ve temel fiyat tanımları
   - Fiyat sürümleme mekanizması (eski satışları bozmadan yeni fiyat yayını)
   - Şube menü editörü, bölümler ve ürün sıralama
-  - Şubede tek aktif menü seçimi ve POS kanalına ürün yayını
+  - Aynı şubede birden fazla menüyü etkinleştirme; POS'ta kullanılabilir menüleri sunma ve POS kanalına ürün yayını
+  - Ürün ayrıntı ekranında durum rozetleri (Aktif/Pasif, POS Yayını) ve işlem butonları (Ürünü düzenle, Pasife al/Etkinleştir) görsel hiyerarşiye uygun gruplanmıştır; modern görsel yükleme alanı mevcuttur
+  - Ürün oluşturma formu ile ürün ayrıntı ekranındaki Satış Kanalları bölümü POS'ta yayınlama ve QR'da yayınlama tercihleriyle etkileşimli hale getirilmiştir; yeni ürün eklerken ürün görseli, seçenek grupları ve kanal tercihleri doğrudan belirlenebilmektedir
 * **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
-  - Seçenek grubu yönetim API'si, sipariş sırasında güncel katalogdan doğrulama/fiyatlama ve sipariş anı fiyat snapshot'ı eklendi; yönetim paneli ve sipariş ekranı entegrasyonu bekliyor.
-  - Masalara özel karekodlu QR Menü dış yayını
+  - Seçenek grubu yönetimi ürün ayrıntısına bağlandı; sipariş API'si güncel katalogdan doğrular ve fiyat snapshot'ı alır. Garson ve kasa hızlı satış ekranları seçenekleri katalogdan yükler.
+  - QR kod üretimi, masayla doğrulanmış bağlantı ve internette barındırma; QR menüde sipariş/ödeme
 
 ---
 
@@ -57,7 +59,7 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 ## ✅ 3. Şu An Neler Zaten Hazır? (Neyi Baştan Yazmayacaksın?)
 
 * PostgreSQL `catalog` şeması çalışıyor: Kategoriler, ürünler, fiyat sürümleri ve menüler API'ye tam bağlı.
-* Yönetim panelinden yeni menü oluşturma, ürün sıralama ve POS için tek aktif menü seçimi çalışıyor.
+* Yönetim panelinden menü oluşturma, ürün sıralama ve şube bazında birden fazla menüyü POS'ta kullanılabilir kılma çalışıyor.
 
 ---
 
@@ -67,7 +69,6 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * **Ürün Kartı Detayı:**
   * Ürün Adı, Açıklaması, Barkod / SKU kodu.
   * Kategori Seçimi (Örn: `Pizzalar`).
-  * Alerjenler (Gluten, Laktoz vb. etiketler).
   * Temel Fiyat (Örn: `350,00 ₺`).
 * **Fiyat Sürümleme Mantığı:**
   * Yönetici fiyatı 350 TL'den 400 TL'ye çıkardığında eski tamamlanmış adisyonlar 350 TL kalır; yeni açılan siparişler 400 TL üzerinden başlar.
@@ -77,19 +78,18 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * Menü Bölümleri (Sections):
   * `1. Bölüm: Taş Fırın Pideleri` -> [Ürünleri Ekle ve Sırala]
   * `2. Bölüm: Soğuk İçecekler` -> [Ürünleri Ekle ve Sırala]
-* **Tek Aktif Menü Anahtarı:** Bir şubede sadece tek bir menü *"Aktif"* olarak işaretlenebilir; POS ekranı bu aktif menüyü indirir.
+* **Birden Fazla Aktif Menü:** Bir şubede birden fazla menü aynı anda *"Aktif"* olabilir. Aktif menüler POS'ta kullanılabilir menüler olarak sunulur; POS kullanıcısı örneğin Kahvaltı veya Ana Yemekler menüsünü seçebilir.
 
-### ⚙️ EKRAN 3: Ürün Seçenek Grupları (Modifiers) (Backend var; ekran entegrasyonu bekliyor)
+### ⚙️ EKRAN 3: Ürün Seçenek Grupları (Modifiers)
 * Seçenek grupları firmada tanımlanır ve birden fazla üründe tekrar kullanılabilir. Bir ürüne birden fazla grup bağlanabilir; grubu olmayan ürün de geçerlidir. Örneğin “Boyut” grubu yalnızca boyut seçeneği sunulan ürünlere bağlanır.
 * Grup seçim sınırları ürün-grup bağlantısında tutulur. Böylece aynı grup bir üründe zorunlu, başka bir üründe isteğe bağlı olabilir. `min_selections` ve `max_selections` farklı seçilmiş seçenek sayısını sınırlar; bir seçeneğin adedi bu sayıya dahil değildir. `max_selections` boşsa gruptaki farklı seçeneklerin tümü seçilebilir.
 * Seçeneklerde işaretli `price_delta_minor` fiyat farkı bulunur. TRY için tutar kuruş cinsinden saklanır; negatif fark desteklenir. Seçenek bazında adet girişi açılabilir ve azami adet tanımlanabilir. Adet girişi kapalı seçenek bir kez seçilir.
 * Ürün pasifse yeni siparişe eklenemez. Pasif grup ve seçenekler ise yeni siparişte seçilebilir; bu alanların `is_active` değeri seçim doğrulamasını engellemez.
 * Sipariş sırasında seçenekler güncel katalogdan doğrulanır. Ürün başına fiyat, temel fiyat ile her seçeneğin birim fiyat farkının seçilen adetle çarpılmış toplamıdır. Sonuç sıfırın altındaysa sipariş reddedilir. Temel fiyat ve seçilen seçeneklerin adı, adedi ve birim fiyat farkı sipariş anındaki değerleriyle sipariş kaleminde saklanır.
 
-### 📱 EKRAN 4: Masaya Özel QR Menü Yayını (Hedef Özellik — Geliştirilecek)
-* Masanın üzerine konulacak karekodun çıktısı:
-  * `https://menu.hipos.com/kadikoy/masa-4`
-  * Müşteri telefonundan tarattığında aktif menü mobil uyumlu web arayüzünde açılır.
+### 📱 EKRAN 4: Müşteriye Açık QR Menü (Salt Okunur)
+* Yapılandırılmış şube için `/menu/{token}` adresi, şubedeki bütün aktif menüleri ve QR'a uygun ürünleri mobil uyumlu gösterir.
+* `?masa=` bağlantıdaki isteğe bağlı görüntüleme etiketidir; masa doğrulaması veya masa işlemi değildir. QR kod üretimi ve internette barındırma henüz yoktur. Ayrıntılar [Menü Yönetimi MVP](../03-is-alanlari-ve-yonetim/MENU_YONETIMI_MVP.md) belgesindedir.
 
 ---
 
@@ -104,7 +104,7 @@ graph TD
 1. **1. Adım: Seçenek Grupları (Modifiers) Veri Modeli:**
    * Tamamlandı: `catalog.option_groups`, `catalog.option_items`, `catalog.product_option_groups` tabloları ve firma kapsamlı okuma/yazma API'si. Grup tekrar kullanımı, seçim sınırları, seçenek adedi, sürümleme ve denetim desteklenir.
 2. **2. Adım: Sipariş Kalemine Seçeneklerin Bağlanması:**
-   * Sipariş API'sinin güncel katalogdan seçenek kimliği/adedi doğrulaması, fiyatı sunucuda hesaplaması ve sipariş anı görüntüsünü kalemde saklaması. Yönetim paneli, garson ekranı ve QR menü bu veri modeli/API adımının kapsamı değildir.
+   * Sipariş API'si güncel katalogdan seçenek kimliği/adedi doğrular, fiyatı sunucuda hesaplar ve sipariş anı görüntüsünü kalemde saklar. Yönetim panelinde seçenek yönetimi vardır; garson ve kasa hızlı satış ekranlarına seçim bağlandı; QR menü seçim ekranı henüz tamamlanmadı.
 3. **3. Adım: Masaya Özel QR Kod:**
    * Şube ve masa bazlı QR kod PDF çıktısı üretici.
 
@@ -112,7 +112,7 @@ graph TD
 
 ## 💾 6. Veritabanı ve Şema Tasarımı (EF modeli ve migration mevcut)
 
-Hedef model üç iş tablosu ve bir denetim tablosundan oluşur. EF modeli, `AddCatalogProductOptions` ve `AddCatalogOptionManagementAudit` migration'ları ile grup yönetim API'si eklendi; migration'lar yerel geliştirme PostgreSQL veritabanına uygulandı. Sipariş doğrulaması henüz bu tabloları kullanmaz:
+Model üç iş tablosu ve bir denetim tablosundan oluşur. EF modeli, migration'lar ve grup yönetim API'si eklendi; sipariş doğrulaması bu tabloları kullanır:
 
 | Yapı | Sorumluluk ve alanlar |
 | --- | --- |

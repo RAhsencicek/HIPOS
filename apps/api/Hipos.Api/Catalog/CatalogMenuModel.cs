@@ -57,8 +57,7 @@ public static class CatalogMenuModel
         menu.Property(x => x.Name).HasMaxLength(160);
         menu.Property(x => x.Description).HasMaxLength(1000);
         menu.Property(x => x.Version).IsConcurrencyToken();
-        menu.HasIndex(x => new { x.FirmId, x.BranchId }).IsUnique().HasFilter("is_active");
-
+        menu.HasIndex(x => new { x.FirmId, x.BranchId });
         var section = model.Entity<CatalogMenuSectionRow>();
         section.ToTable("menu_sections");
         section.HasKey(x => new { x.MenuId, x.SectionId });
