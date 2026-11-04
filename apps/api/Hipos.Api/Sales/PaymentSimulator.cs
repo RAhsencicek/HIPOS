@@ -10,7 +10,7 @@ namespace Hipos.Api.Sales;
 // Yalnız Development: burada dış sağlayıcı çağrısı ve gerçek para hareketi yoktur.
 public sealed record StartSimulatedPayment(
     Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
-public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion);
+public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
 public sealed record PaymentAttemptInfo(
     string Id, string OrderId, long AmountMinor, string Currency, string Method,
     string Status, int Version, bool Simulated, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -24,7 +24,7 @@ public sealed record PaymentCommandResult(
 public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate, PaidCheckTableSettlement settlement,
     FeatureRuntimeCapabilities runtime)
 {
-    private sealed record CashShiftLink(Guid Id, Guid RegisterId);
+    public sealed record CashShiftLink(Guid Id, Guid RegisterId);
 
     public async Task<PaymentCommandResult> StartAsync(
         string firmId, string branchId, Guid orderId, StartSimulatedPayment command,
@@ -60,7 +60,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
                 transaction.GetDbTransaction(), firmId, branchId, "cash.management", cancellationToken);
             if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
-            var shiftResult = await LockOpenCashShiftAsync(firmId, branchId, command.RegisterId, transaction.GetDbTransaction(), cancellationToken);
+            var shiftResult = await LockOpenCashShiftAsync(db.Database.GetDbConnection(), firmId, branchId, command.RegisterId, transaction.GetDbTransaction(), cancellationToken);
             if (shiftResult.Count == 0)
                 return PaymentCommandResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, command.RegisterId is null ? "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın." : "Seçili kasada açık vardiya yok. Tahsilat için önce kasa açılışını yapın.");
             if (shiftResult.Count > 1)
@@ -107,7 +107,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         {
             await db.SaveChangesAsync(cancellationToken);
             if (attempt.Status == "succeeded" && command.PostToCash && cashShift is not null)
-                await AddCashMovementAsync(cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
+                await AddCashMovementAsync(db.Database.GetDbConnection(), cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
             if (attempt.Status == "succeeded")
                 await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -123,10 +123,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         return new PaymentCommandResult(ToInfo(attempt), SalesOrders.ToDetail(order), null, true);
     }
 
-    private async Task<IReadOnlyList<CashShiftLink>> LockOpenCashShiftAsync(string firmId, string branchId, Guid? registerId,
+    public static async Task<IReadOnlyList<CashShiftLink>> LockOpenCashShiftAsync(DbConnection connection,
+        string firmId, string branchId, Guid? registerId,
         DbTransaction transaction, CancellationToken cancellationToken)
     {
-        var connection = db.Database.GetDbConnection();
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -150,10 +150,9 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         return shifts;
     }
 
-    private async Task AddCashMovementAsync(CashShiftLink shift, PaymentAttemptRow attempt, string actor,
+    public static async Task AddCashMovementAsync(DbConnection connection, CashShiftLink shift, PaymentAttemptRow attempt, string actor,
         DateTimeOffset now, DbTransaction transaction, CancellationToken cancellationToken)
     {
-        var connection = db.Database.GetDbConnection();
         await using (var movement = connection.CreateCommand())
         {
             movement.Transaction = transaction;
@@ -218,6 +217,21 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
 
         // Başlatılmış iş, modül sonradan kapansa bile güvenle sonuçlandırılabilir.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        CashShiftLink? cashShift = null;
+        if (command.Outcome == "succeeded" && command.PostToCash)
+        {
+            if (!runtime.CashReady)
+                return PaymentCommandResult.Rejected("CASH_STORAGE_UNAVAILABLE", 503, "Kasa veritabanı hazır değil; kasa migration'larını uygulayıp API'yi yeniden başlatın.");
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "cash.management", cancellationToken);
+            if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+            var shiftResult = await LockOpenCashShiftAsync(db.Database.GetDbConnection(), firmId, branchId, command.RegisterId, transaction.GetDbTransaction(), cancellationToken);
+            if (shiftResult.Count == 0)
+                return PaymentCommandResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, command.RegisterId is null ? "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın." : "Seçili kasada açık vardiya yok. Tahsilat için önce kasa açılışını yapın.");
+            if (shiftResult.Count > 1)
+                return PaymentCommandResult.Rejected("CASH_SHIFT_AMBIGUOUS", 409, "Birden fazla açık kasa vardiyası var. Tahsilattan önce yalnız kullanılacak kasanın vardiyasını açık bırakın.");
+            cashShift = shiftResult[0];
+        }
         var order = await LockOrderAsync(firmId, branchId, orderId, cancellationToken);
         if (order is null)
             return PaymentCommandResult.Rejected("ORDER_NOT_FOUND", 404, "Sipariş bu şubede bulunamadı.");
@@ -241,6 +255,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (attempt.Status == "succeeded" && command.PostToCash && cashShift is not null)
+                await AddCashMovementAsync(db.Database.GetDbConnection(), cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
             if (command.Outcome == "succeeded")
                 await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);

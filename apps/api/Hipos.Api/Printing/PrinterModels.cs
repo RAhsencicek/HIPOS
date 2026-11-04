@@ -59,6 +59,6 @@ public sealed record UpdatePrinterConfigRequest(
     bool? KitchenFallbackToUsb,
     bool? CashierFallbackToUsb);
 
-public sealed record SettleTableRequest(string? PaymentMethod = "NAKIT");
+public sealed record SettleTableRequest(string? PaymentMethod = "NAKIT", Guid? RegisterId = null, bool PostToCash = true);
 
 public sealed record PrintResult(bool Success, string Target, string TransportUsed, string? Error = null);

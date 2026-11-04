@@ -3,6 +3,7 @@ using Hipos.Api.Sales;
 using Hipos.Api.Service;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Hipos.Api.Printing;
 
@@ -94,6 +95,7 @@ public static class PrintingEndpoints
             [FromServices] SalesDbContext salesDb,
             [FromServices] PaidCheckTableSettlement settlement,
             [FromServices] PrintingService printing,
+            [FromServices] FeatureRuntimeCapabilities runtime,
             HttpContext context,
             CancellationToken ct) =>
         {
@@ -128,13 +130,30 @@ public static class PrintingEndpoints
             // 2. Satış ve servis şemalarında transaction ile adisyonu ve siparişleri kapat, masayı boşa düşür
             await using var transaction = await salesDb.Database.BeginTransactionAsync(ct);
 
+            PaymentSimulator.CashShiftLink? cashShift = null;
+            if (runtime.CashReady && (req?.PostToCash ?? true))
+            {
+                var shifts = await PaymentSimulator.LockOpenCashShiftAsync(
+                    salesDb.Database.GetDbConnection(), firmId, branchId, req?.RegisterId,
+                    transaction.GetDbTransaction(), ct);
+                if (shifts.Count > 0)
+                {
+                    cashShift = shifts[0];
+                }
+            }
+
             var orders = await salesDb.Orders
                 .Include(o => o.PaymentAttempts)
                 .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
                 .ToListAsync(ct);
 
+            var attemptsToPost = new List<PaymentAttemptRow>();
             foreach (var order in orders)
             {
+                var paidMinor = order.PaymentAttempts.Where(row => row.Status == "succeeded").Sum(row => row.AmountMinor);
+                var remainingMinor = Math.Max(0, order.TotalMinor - paidMinor);
+                if (remainingMinor <= 0) continue;
+
                 order.PaymentStatus = "paid";
                 order.Version++;
                 var attempt = new PaymentAttemptRow
@@ -144,7 +163,7 @@ public static class PrintingEndpoints
                     FirmId = firmId,
                     BranchId = branchId,
                     OrderId = order.Id,
-                    AmountMinor = order.TotalMinor,
+                    AmountMinor = remainingMinor,
                     Currency = "TRY",
                     Method = paymentMethod == "NAKIT" ? "cash" : "card",
                     Status = "succeeded",
@@ -167,6 +186,7 @@ public static class PrintingEndpoints
                     Version = 1,
                     OccurredAt = now
                 });
+                attemptsToPost.Add(attempt);
             }
 
             check.Status = "closed";
@@ -183,6 +203,16 @@ public static class PrintingEndpoints
                 OccurredAt = now,
             });
             await salesDb.SaveChangesAsync(ct);
+
+            if (cashShift is not null)
+            {
+                foreach (var attempt in attemptsToPost)
+                {
+                    await PaymentSimulator.AddCashMovementAsync(
+                        salesDb.Database.GetDbConnection(), cashShift, attempt, actor, now,
+                        transaction.GetDbTransaction(), ct);
+                }
+            }
 
             await settlement.ReleaseAfterPaymentAsync(tableId, firmId, branchId, actor, now, ct);
             await transaction.CommitAsync(ct);

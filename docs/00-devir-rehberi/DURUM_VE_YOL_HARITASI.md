@@ -1,4 +1,4 @@
-﻿# HIPOS — Mevcut Durum ve Modüler Yol Haritası
+# HIPOS — Mevcut Durum ve Modüler Yol Haritası
 
 > **Doküman Durumu:** Canlı Yol Haritası · Sürüm: v2.5 (21 Ekim 2026)
 >
@@ -80,7 +80,7 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. Masa taşıma/birleştirme ve bölme UI akışları eklendi; gerçek veritabanı kabul testleri gereklidir.
   2. İndirim/ikram/kalem iptali API'si ve gerçek yetki/audit altyapısı.
-  3. Gerçek kasa/POS tahsilatını ve kasa hareket kaydını çalışan adisyon kapanışına bağlama.
+  3. Kasa/POS adisyon tahsilatı ve kasa hareket kaydı (`pos_sale`) adisyon kapanışına bağlandı (Tamamlandı).
 
 ---
 

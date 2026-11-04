@@ -130,10 +130,10 @@ graph TD
   * `[ 📑 Cariye Yaz (Veresiye) ]` -> Müşteri arama modalını açar.
 * **Kapanış:** Kalan bakiye sıfırlandığında `[ 🎉 Adisyonu Kapat ve Fiş Bas ]` butonu aktifleşir; adisyon `closed` olur, masa boşalır ve para çekmecesi fırlar.
 
-### 🖥️ EKRAN 2: Yönetici Manuel Kasa MVP'si (Mevcut Çalışan Ekran — `CashManagementPage.tsx`)
-* Tek şubedeki `MAIN` kasasının özetini, vardiya geçmişini ve değiştirilemez nakit hareket defterini gösterir.
+### 🖥️ EKRAN 2: Yönetici Kasa Takibi ve Canlı Defter (`CashManagementPage.tsx`)
+* Şubedeki kasaların özetini, aktif vardiyasını ve değiştirilemez nakit hareket defterini gösterir.
 * Vardiya açılış nakdi, elle nakit giriş/çıkış, fiziksel kapanış sayımı ve gerekçeli ters kayıt desteklenir.
-* Ekrandaki nakit satış kategorisi de elle girilir; POS/adisyon tahsilatı bu kaydı otomatik oluşturmaz. Kart tahsilatı, gerçek POS ve ödeme simülatörü bu kasa bakiyesini değiştirmez.
+* **Adisyon ve Satış Senkronizasyonu (Tamamlandı):** Kasiyer veya masa üzerinden adisyon tahsilatı (nakit veya kart) yapıldığında hareket `pos_sale` (`cash_sale`) olarak ilgili kasanın aktif vardiyasına (`cash.movements`) otomatik işlenir. Nakit tahsilatlar çekmecedeki beklenen nakdi (`expectedCashMinor`) canlı olarak artırır; kart tahsilatları ise ciroya eklenir fakat fiziksel çekmece nakdini şişirmez. Tedarikçi ödemeleri (tediye) de kasadan seçilerek düşülebilir.
 
 ### 🧾 Hedef Kasa Genişletmeleri (Henüz Yapılmayanlar)
 * **Çoklu kasa ve canlı takip:** Kasa 1, Kasa 2 ve diğer kayıtları açık/kapalı durumu, kasiyer oturumu, çekmece bakiyesi ve nakit/kart satış toplamlarıyla yan yana gösterme.

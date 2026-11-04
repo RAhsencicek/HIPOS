@@ -24,7 +24,7 @@ public sealed record CashResponsibleView(string Id, string Name, string? RoleTit
 public sealed record CashMovementView(string Id, string RegisterId, string ShiftId, string Kind, string Category,
     long AmountMinor, string Currency, string Description, string Source, string Actor, DateTimeOffset CreatedAt,
     string? TenderMethod,
-    string? OriginalMovementId, string? CorrectionType, string? CorrectionReason);
+    string? OriginalMovementId, string? CorrectionType, string? CorrectionReason, string? ExternalReference = null);
 public sealed record CashShiftView(string Id, string RegisterId, string Status, long OpeningCashMinor,
     long? ExpectedCashMinor, long? CountedCashMinor, long? DifferenceMinor, string OpenedBy,
     DateTimeOffset OpenedAt, string? ClosedBy, DateTimeOffset? ClosedAt, string? CloseNote, int Version, string? OpeningNote,
@@ -914,7 +914,7 @@ public static class CashEndpoints
     private static CashMovementView ToView(CashMovementRow row) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.ShiftId.ToString(), row.Kind, row.Category,
             row.AmountMinor, row.Currency, row.Description, row.Source, row.Actor, row.CreatedAt, row.TenderMethod,
-            row.OriginalMovementId?.ToString(), row.CorrectionType, row.CorrectionReason);
+            row.OriginalMovementId?.ToString(), row.CorrectionType, row.CorrectionReason, row.ExternalReference);
 
     private static CashShiftView ToView(CashShiftRow row, IReadOnlyList<CashDenominationView>? denominations = null) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.Status, row.OpeningCashMinor,
