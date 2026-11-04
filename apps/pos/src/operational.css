@@ -120,6 +120,9 @@ button, select { font: inherit; }
 .waiter-bill-summary .new-order { border-color: #c6d7c4; background: #edf3e9; }
 .waiter-bill-summary .new-order strong { color: #397447; }
 .waiter-catalog-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 20px 0 12px; }
+.waiter-catalog-views { display: flex; gap: 8px; margin-bottom: 12px; }
+.waiter-catalog-views button { min-height: 40px; padding: 8px 16px; border: 1px solid #d6cebf; border-radius: 10px; background: #fffcf6; color: #28332b; font-weight: 700; }
+.waiter-catalog-views button[aria-pressed="true"] { background: #286d40; border-color: #286d40; color: #fff; }
 .waiter-catalog-title { margin: 0; color: #303831; font-size: 20px; letter-spacing: -.02em; }
 .waiter-menu-select { display: grid; gap: 5px; min-width: min(260px, 48%); color: #68736a; font-size: 12px; font-weight: 650; }
 .waiter-menu-select select { min-height: 40px; padding: 0 34px 0 12px; border: 1px solid #d6cebf; border-radius: 10px; background: #fffcf6; color: #28332b; font: inherit; font-size: 14px; }
@@ -683,6 +686,146 @@ button, select { font: inherit; }
 .ops-shell .cashier-keypad button:disabled, .ops-shell .cashier-quick-amounts button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 650px) { .cashier-keypad { grid-template-rows: repeat(5, 62px); } }
 .cashier-shift-strip { margin: 0 0 14px; padding: 12px 16px; border: 1px solid #d5dfd4; border-radius: 12px; background: #f7faf5; color: #536558; font-size: 12px; line-height: 1.5; }
+.cashier-register-select, .morning-register-select { display: inline-flex; align-items: center; gap: 7px; color: #405548; font-size: 13px; font-weight: 700; }
+.cashier-register-select select, .morning-register-select select { min-height: 40px; max-width: 240px; padding: 6px 9px; border: 1px solid #b9d1bf; border-radius: 8px; background: #fff; color: #253e2d; font: inherit; }
+
+/* Kasa Terminal & Sorumlu Seçim Kartı */
+.cashier-terminal-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: #ffffff;
+  border: 1px solid #cad9ce;
+  border-radius: 10px;
+  padding: 4px 12px 4px 6px;
+  box-shadow: 0 1px 3px rgba(32, 60, 40, 0.05);
+  font-size: 13px;
+  min-height: 40px;
+}
+
+.cashier-terminal-reg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cashier-terminal-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #245836;
+  background: #eaf3ec;
+  border-radius: 6px;
+  padding: 4px 7px;
+  line-height: 1.1;
+}
+
+.cashier-terminal-select {
+  border: 1px solid transparent;
+  background: #f7faf7;
+  color: #1a3323;
+  font-weight: 700;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 5px 8px;
+  outline: none;
+  cursor: pointer;
+  border-radius: 7px;
+  transition: all 0.15s ease;
+  max-width: 260px;
+}
+
+.cashier-terminal-select:hover:not(:disabled) {
+  background: #edf5ee;
+  border-color: #c0d8c6;
+}
+
+.cashier-terminal-select:focus {
+  background: #ffffff;
+  border-color: #72a982;
+  box-shadow: 0 0 0 3px rgba(43, 122, 75, 0.12);
+}
+
+.cashier-terminal-divider {
+  width: 1px;
+  height: 22px;
+  background: #d8e5da;
+  margin: 0 1px;
+}
+
+.cashier-terminal-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.cashier-user-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cashier-user-label {
+  color: #6b8171;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.cashier-user-val {
+  color: #1a3823;
+  font-weight: 750;
+  background: #edf5ee;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid #d4e4d7;
+}
+
+.cashier-user-empty {
+  color: #92a296;
+  font-weight: 500;
+  font-style: italic;
+}
+
+/* Kasa Header İşlem Butonları */
+.ops-shell .cashier-receipt-btn {
+  background: #ffffff;
+  border-color: #d2ddd4;
+  color: #274b34;
+  transition: all 0.15s ease;
+}
+
+.ops-shell .cashier-receipt-btn:hover {
+  background: #f2f7f3;
+  border-color: #acc8b4;
+}
+
+.ops-shell .cashier-shift-close-btn {
+  background: #fff8f5;
+  border-color: #edd5cb;
+  color: #91391e;
+  transition: all 0.15s ease;
+}
+
+.ops-shell .cashier-shift-close-btn:hover:not(:disabled) {
+  background: #f8ece6;
+  border-color: #debdb0;
+  color: #7d2e15;
+}
+
+@media (max-width: 768px) {
+  .cashier-terminal-card {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    min-height: auto;
+  }
+  .cashier-terminal-divider {
+    display: none;
+  }
+}
 .cashier-shift-register { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; min-height: 30px; }
 .cashier-shift-register + .cashier-shift-register { margin-top: 10px; padding-top: 10px; border-top: 1px solid #dfe8df; }
 .cashier-shift-register > strong, .cashier-shift-register b { color: #253e2d; }

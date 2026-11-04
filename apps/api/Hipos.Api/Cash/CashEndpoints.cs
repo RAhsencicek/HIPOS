@@ -9,13 +9,18 @@ namespace Hipos.Api.Cash;
 
 public sealed record OpenCashShift(string RequestId, string RegisterId, long OpeningCashMinor, string? Note = null);
 public sealed record ProvisionDefaultCashRegister(string RequestId);
-public sealed record AddCashMovement(string RequestId, string Kind, long AmountMinor, string Category, string Description);
+public sealed record CreateCashRegister(string RequestId, string Name, string Responsible, string? Code = null);
+public sealed record UpdateCashRegisterResponsible(string RequestId, string Responsible);
+public sealed record CreateCashResponsible(string RequestId, string Name, string? RoleTitle = null);
+public sealed record DeleteCashResponsible(string RequestId);
+public sealed record AddCashMovement(string RequestId, string Kind, long AmountMinor, string Category, string? Description = null);
 public sealed record CorrectCashMovement(string RequestId, string CorrectionType, string CorrectionReason);
 public sealed record CashDenominationCount(int DenominationMinor, int Quantity);
 public sealed record CashDenominationView(int DenominationMinor, int Quantity, long TotalMinor);
 public sealed record CloseCashShift(string RequestId, int ExpectedVersion, long CountedCashMinor, string? Note,
     IReadOnlyList<CashDenominationCount>? Denominations = null);
-public sealed record CashRegisterView(string Id, string Code, string Name, string ProviderMode, bool IsActive);
+public sealed record CashRegisterView(string Id, string Code, string Name, string ProviderMode, bool IsActive, string? Responsible = null);
+public sealed record CashResponsibleView(string Id, string Name, string? RoleTitle, DateTimeOffset CreatedAt);
 public sealed record CashMovementView(string Id, string RegisterId, string ShiftId, string Kind, string Category,
     long AmountMinor, string Currency, string Description, string Source, string Actor, DateTimeOffset CreatedAt,
     string? TenderMethod,
@@ -51,6 +56,342 @@ public static class CashEndpoints
                 : Results.Ok(new { source = "postgres", register = ToView(result.Register!) });
         });
 
+        group.MapPost("/registers", async (string firmId, string branchId, CreateCashRegister command,
+            HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var name = command.Name?.Trim() ?? "";
+            var responsible = command.Responsible?.Trim() ?? "";
+            var requestedCode = string.IsNullOrWhiteSpace(command.Code) ? null : command.Code.Trim().ToUpperInvariant();
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
+                name.Length is < 2 or > 128 || responsible.Length is < 2 or > 128 ||
+                requestedCode is { Length: < 2 or > 48 } ||
+                name.Contains(';') || responsible.Contains(';'))
+                return Fail(context, "INVALID_REGISTER", 400, "Kasa adı ve kasa sorumlusu 2–128 karakter arasında olmalı.");
+
+            var actor = DemoAccess.Resolve(context)!;
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var lockKey = $"cash-register-create:{firmId}:{branchId}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", context.RequestAborted);
+
+            var existingAudit = await db.Audit.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.RequestId == requestId && row.EntityType == "register" && row.Action == "register_created",
+                    context.RequestAborted);
+            if (existingAudit is not null)
+            {
+                var existingReg = await db.Registers.AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == existingAudit.EntityId, context.RequestAborted);
+                var existingResp = ParseDetailValue(existingAudit.Detail, "responsible");
+                if (existingReg is not null && existingReg.Name == name && existingResp == responsible &&
+                    (requestedCode is null || existingReg.Code == requestedCode))
+                {
+                    await transaction.CommitAsync(context.RequestAborted);
+                    return Results.Ok(new { source = "postgres", register = ToView(existingReg, existingResp) });
+                }
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği farklı kasa bilgileriyle kullanılmış.");
+            }
+
+            var branchRegisters = await db.Registers.AsNoTracking()
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId)
+                .ToListAsync(context.RequestAborted);
+
+            if (branchRegisters.Any(row => row.IsActive && string.Equals(row.Name, name, StringComparison.OrdinalIgnoreCase)))
+                return Fail(context, "REGISTER_NAME_EXISTS", 409, "Bu şubede aynı isimde aktif bir kasa zaten tanımlı.");
+
+            var existingCodes = new HashSet<string>(branchRegisters.Select(row => row.Code), StringComparer.OrdinalIgnoreCase);
+            string code;
+            if (requestedCode is not null)
+            {
+                if (existingCodes.Contains(requestedCode))
+                    return Fail(context, "REGISTER_CODE_EXISTS", 409, "Bu kasa kodu şubede zaten kullanılıyor.");
+                code = requestedCode;
+            }
+            else
+            {
+                var nextNumber = branchRegisters.Count + 1;
+                do
+                {
+                    code = $"KASA-{nextNumber:D2}";
+                    nextNumber++;
+                } while (existingCodes.Contains(code));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var register = new CashRegisterRow
+            {
+                Id = Guid.NewGuid(),
+                FirmId = firmId,
+                BranchId = branchId,
+                Code = code,
+                Name = name,
+                ProviderMode = "manual",
+                IsActive = true,
+                Version = 1,
+            };
+            db.Registers.Add(register);
+            db.Audit.Add(new CashAuditRow
+            {
+                FirmId = firmId,
+                BranchId = branchId,
+                RegisterId = register.Id,
+                ShiftId = null,
+                RequestId = requestId,
+                EntityType = "register",
+                EntityId = register.Id,
+                Action = "register_created",
+                Actor = actor.Name,
+                Detail = $"code={register.Code};name={register.Name};responsible={responsible};providerMode=manual",
+                OccurredAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "REGISTER_CODE_EXISTS", 409, "Kasa kodu çakışması oluştu; tekrar deneyin.");
+            }
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/registers/{register.Id}",
+                new { source = "postgres", register = ToView(register, responsible) });
+        });
+
+        group.MapPut("/registers/{registerId:guid}/responsible", async (string firmId, string branchId, Guid registerId,
+            UpdateCashRegisterResponsible command, HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            if (denied is not null) return denied;
+            var responsible = command.Responsible?.Trim() ?? "";
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
+                responsible.Length is < 2 or > 128 || responsible.Contains(';'))
+                return Fail(context, "INVALID_RESPONSIBLE", 400, "Kasa sorumlusu 2–128 karakter arasında olmalıdır.");
+
+            var actor = DemoAccess.Resolve(context)!;
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var existingAudit = await db.Audit.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.RequestId == requestId && row.EntityType == "register" && row.Action == "register_responsible_updated",
+                    context.RequestAborted);
+            if (existingAudit is not null)
+            {
+                var existingReg = await db.Registers.AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == existingAudit.EntityId && row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);
+                var existingResp = ParseDetailValue(existingAudit.Detail, "responsible");
+                if (existingReg is not null && existingReg.Id == registerId && existingResp == responsible)
+                {
+                    await transaction.CommitAsync(context.RequestAborted);
+                    return Results.Ok(new { source = "postgres", register = ToView(existingReg, existingResp) });
+                }
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği farklı bir sorumlu güncellemesinde kullanılmış.");
+            }
+
+            var register = await LockRegister(db, firmId, branchId, registerId, context.RequestAborted);
+            if (register is null || !register.IsActive)
+                return Fail(context, "REGISTER_NOT_FOUND", 404, "Etkin kasa bu şubede bulunamadı.");
+
+            var now = DateTimeOffset.UtcNow;
+            db.Audit.Add(new CashAuditRow
+            {
+                FirmId = firmId,
+                BranchId = branchId,
+                RegisterId = register.Id,
+                ShiftId = null,
+                RequestId = requestId,
+                EntityType = "register",
+                EntityId = register.Id,
+                Action = "register_responsible_updated",
+                Actor = actor.Name,
+                Detail = $"code={register.Code};name={register.Name};responsible={responsible}",
+                OccurredAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği başka bir kasa işleminde kullanılmış.");
+            }
+            return Results.Ok(new { source = "postgres", register = ToView(register, responsible) });
+        });
+
+        group.MapGet("/responsibles", async (string firmId, string branchId, HttpContext context, CashDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, false);
+            if (denied is not null) return denied;
+            var regResponsibles = await LoadRegisterResponsiblesAsync(db, firmId, branchId, context.RequestAborted);
+            var items = await LoadCashResponsiblesAsync(db, firmId, branchId, regResponsibles, context.RequestAborted);
+            return Results.Ok(new { source = "postgres", items });
+        });
+
+        group.MapPost("/responsibles", async (string firmId, string branchId, CreateCashResponsible command,
+            HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            if (denied is not null) return denied;
+            var name = command.Name?.Trim() ?? "";
+            var roleTitle = string.IsNullOrWhiteSpace(command.RoleTitle) ? null : command.RoleTitle.Trim();
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
+                name.Length is < 2 or > 128 || roleTitle is { Length: > 80 } ||
+                name.Contains(';') || (roleTitle?.Contains(';') ?? false))
+                return Fail(context, "INVALID_RESPONSIBLE", 400, "Sorumlu adı 2–128 karakter arasında olmalıdır.");
+
+            var actor = DemoAccess.Resolve(context)!;
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var lockKey = $"cash-responsible-manage:{firmId}:{branchId}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", context.RequestAborted);
+
+            var existingAudit = await db.Audit.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.RequestId == requestId && row.EntityType == "responsible" && row.Action == "responsible_created",
+                    context.RequestAborted);
+            if (existingAudit is not null)
+            {
+                var existingName = ParseDetailValue(existingAudit.Detail, "name");
+                var existingRole = ParseDetailValue(existingAudit.Detail, "role");
+                if (existingName == name && existingRole == roleTitle)
+                {
+                    await transaction.CommitAsync(context.RequestAborted);
+                    return Results.Ok(new
+                    {
+                        source = "postgres",
+                        responsible = new CashResponsibleView(existingAudit.EntityId.ToString(), name, roleTitle, existingAudit.OccurredAt),
+                    });
+                }
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği farklı sorumlu bilgileriyle kullanılmış.");
+            }
+
+            var regResponsibles = await LoadRegisterResponsiblesAsync(db, firmId, branchId, context.RequestAborted);
+            var currentList = await LoadCashResponsiblesAsync(db, firmId, branchId, regResponsibles, context.RequestAborted);
+            if (currentList.Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
+                return Fail(context, "RESPONSIBLE_NAME_EXISTS", 409, "Bu isimde bir kasa sorumlusu zaten listede kayıtlı.");
+
+            var now = DateTimeOffset.UtcNow;
+            var responsibleId = Guid.NewGuid();
+            var detail = roleTitle is not null ? $"name={name};role={roleTitle}" : $"name={name}";
+            db.Audit.Add(new CashAuditRow
+            {
+                FirmId = firmId,
+                BranchId = branchId,
+                RegisterId = Guid.Empty,
+                ShiftId = null,
+                RequestId = requestId,
+                EntityType = "responsible",
+                EntityId = responsibleId,
+                Action = "responsible_created",
+                Actor = actor.Name,
+                Detail = detail,
+                OccurredAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği başka bir işlemde kullanılmış.");
+            }
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/responsibles/{responsibleId}",
+                new { source = "postgres", responsible = new CashResponsibleView(responsibleId.ToString(), name, roleTitle, now) });
+        });
+
+        group.MapPost("/responsibles/{responsibleId:guid}/delete", async (string firmId, string branchId, Guid responsibleId,
+            DeleteCashResponsible command, HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty)
+                return Fail(context, "INVALID_REQUEST_ID", 400, "Geçerli bir requestId gereklidir.");
+
+            var actor = DemoAccess.Resolve(context)!;
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await Gate(db, gate, transaction.GetDbTransaction(), firmId, branchId, context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            var lockKey = $"cash-responsible-manage:{firmId}:{branchId}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", context.RequestAborted);
+
+            var regResponsibles = await LoadRegisterResponsiblesAsync(db, firmId, branchId, context.RequestAborted);
+            var currentList = await LoadCashResponsiblesAsync(db, firmId, branchId, regResponsibles, context.RequestAborted);
+            var target = currentList.FirstOrDefault(item => item.Id == responsibleId.ToString());
+            if (target is null && regResponsibles.TryGetValue(responsibleId, out var regRespName))
+            {
+                target = new CashResponsibleView(responsibleId.ToString(), regRespName, null, DateTimeOffset.UtcNow);
+            }
+            if (target is null)
+                return Fail(context, "RESPONSIBLE_NOT_FOUND", 404, "Kasa sorumlusu bulunamadı.");
+
+            var now = DateTimeOffset.UtcNow;
+
+            // Bu sorumlu herhangi bir kasaya atanmışsa, o kasalardaki atamayı temizle
+            var affectedRegisters = await db.Registers.AsNoTracking()
+                .Where(r => r.FirmId == firmId && r.BranchId == branchId && r.IsActive)
+                .ToListAsync(context.RequestAborted);
+
+            foreach (var reg in affectedRegisters)
+            {
+                if (regResponsibles.TryGetValue(reg.Id, out var assigned) &&
+                    string.Equals(assigned, target.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    db.Audit.Add(new CashAuditRow
+                    {
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        RegisterId = reg.Id,
+                        ShiftId = null,
+                        RequestId = Guid.NewGuid(),
+                        EntityType = "register",
+                        EntityId = reg.Id,
+                        Action = "register_responsible_updated",
+                        Actor = actor.Name,
+                        Detail = $"code={reg.Code};name={reg.Name};responsible=",
+                        OccurredAt = now,
+                    });
+                }
+            }
+
+            db.Audit.Add(new CashAuditRow
+            {
+                FirmId = firmId,
+                BranchId = branchId,
+                RegisterId = Guid.Empty,
+                ShiftId = null,
+                RequestId = requestId,
+                EntityType = "responsible",
+                EntityId = responsibleId,
+                Action = "responsible_deleted",
+                Actor = actor.Name,
+                Detail = $"name={target.Name}",
+                OccurredAt = now,
+            });
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
+            catch (DbUpdateException error) when (Unique(error))
+            {
+                return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği başka bir işlemde kullanılmış.");
+            }
+            return Results.Ok(new { source = "postgres", deletedId = responsibleId.ToString(), deletedName = target.Name });
+        });
+
         group.MapGet("/registers", async (string firmId, string branchId, HttpContext context, CashDbContext db) =>
         {
             var denied = Guard(context, firmId, branchId, ready, false);
@@ -58,7 +399,8 @@ public static class CashEndpoints
             var items = await db.Registers.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.IsActive)
                 .OrderBy(row => row.Code).ToListAsync(context.RequestAborted);
-            return Results.Ok(new { source = "postgres", items = items.Select(ToView).ToArray() });
+            var responsibles = await LoadRegisterResponsiblesAsync(db, firmId, branchId, context.RequestAborted);
+            return Results.Ok(new { source = "postgres", items = items.Select(row => ToView(row, responsibles.GetValueOrDefault(row.Id))).ToArray() });
         });
 
         group.MapGet("/overview", async (string firmId, string branchId, HttpContext context, CashDbContext db) =>
@@ -68,6 +410,8 @@ public static class CashEndpoints
             var registers = await db.Registers.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.IsActive)
                 .OrderBy(row => row.Code).ToListAsync(context.RequestAborted);
+            var responsibles = await LoadRegisterResponsiblesAsync(db, firmId, branchId, context.RequestAborted);
+            var responsiblePool = await LoadCashResponsiblesAsync(db, firmId, branchId, responsibles, context.RequestAborted);
             var activeShifts = await db.Shifts.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.Status == "open")
                 .OrderBy(row => row.OpenedAt).ToListAsync(context.RequestAborted);
@@ -89,10 +433,12 @@ public static class CashEndpoints
                 });
             }
             return Results.Ok(new { source = "postgres", simulated = false,
-                registers = registers.Select(ToView).ToArray(), openShifts = open });
+                registers = registers.Select(row => ToView(row, responsibles.GetValueOrDefault(row.Id))).ToArray(),
+                responsibles = responsiblePool,
+                openShifts = open });
         });
 
-        group.MapGet("/movements", async (string firmId, string branchId, Guid? shiftId, DateTimeOffset? from,
+        group.MapGet("/movements", async (string firmId, string branchId, Guid? registerId, Guid? shiftId, DateTimeOffset? from,
             DateTimeOffset? to, int? page, int? pageSize, HttpContext context, CashDbContext db) =>
         {
             var denied = Guard(context, firmId, branchId, ready, false);
@@ -104,6 +450,7 @@ public static class CashEndpoints
             if (from.HasValue && to.HasValue && from > to)
                 return Fail(context, "INVALID_DATE_RANGE", 400, "Başlangıç tarihi bitiş tarihinden sonra olamaz.");
             var query = db.Movements.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId);
+            if (registerId.HasValue) query = query.Where(row => row.RegisterId == registerId.Value);
             if (shiftId.HasValue) query = query.Where(row => row.ShiftId == shiftId.Value);
             if (from.HasValue) query = query.Where(row => row.CreatedAt >= from.Value);
             if (to.HasValue) query = query.Where(row => row.CreatedAt <= to.Value);
@@ -114,7 +461,7 @@ public static class CashEndpoints
             return Results.Ok(new { source = "postgres", page = requestedPage, pageSize = requestedSize, total, items = items.Select(ToView).ToArray() });
         });
 
-        group.MapGet("/shifts", async (string firmId, string branchId, string? status, DateTimeOffset? from,
+        group.MapGet("/shifts", async (string firmId, string branchId, Guid? registerId, string? status, DateTimeOffset? from,
             DateTimeOffset? to, int? page, int? pageSize, HttpContext context, CashDbContext db) =>
         {
             var denied = Guard(context, firmId, branchId, ready, false);
@@ -125,6 +472,7 @@ public static class CashEndpoints
                 status is not (null or "open" or "closed") || from.HasValue && to.HasValue && from > to)
                 return Fail(context, "INVALID_SHIFT_QUERY", 400, "Vardiya filtresi veya sayfalama geçersiz.");
             var query = db.Shifts.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId);
+            if (registerId.HasValue) query = query.Where(row => row.RegisterId == registerId.Value);
             if (status is not null) query = query.Where(row => row.Status == status);
             if (from.HasValue) query = query.Where(row => row.OpenedAt >= from.Value);
             if (to.HasValue) query = query.Where(row => row.OpenedAt <= to.Value);
@@ -199,7 +547,24 @@ public static class CashEndpoints
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
-            var description = command.Description?.Trim() ?? "";
+            var description = string.IsNullOrWhiteSpace(command.Description)
+                ? (command.Kind switch
+                {
+                    "manual_in" => command.Category switch
+                    {
+                        "cash_sale" => "Nakit Satış",
+                        "other" => "Kasa Bozuk Para / Avans Takviyesi",
+                        _ => "Nakit Girişi"
+                    },
+                    "manual_out" => command.Category switch
+                    {
+                        "expense" => "İşletme Gideri / Masraf",
+                        "cash_drop" => "Kasadan Teslim (Safe Drop)",
+                        _ => "Nakit Çıkışı"
+                    },
+                    _ => "Nakit Hareketi"
+                })
+                : command.Description.Trim();
             var validCategory = command.Kind switch
             {
                 "manual_in" => command.Category is "cash_sale" or "other",
@@ -207,7 +572,7 @@ public static class CashEndpoints
                 _ => false,
             };
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
-                command.AmountMinor is <= 0 or > MaxAmountMinor || !validCategory || description.Length is < 3 or > 500)
+                command.AmountMinor is <= 0 or > MaxAmountMinor || !validCategory || description.Length > 500)
                 return Fail(context, "INVALID_CASH_MOVEMENT", 400, "Nakit hareketinin türü, tutarı, kategorisi veya açıklaması geçersiz.");
             var actor = DemoAccess.Resolve(context)!;
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
@@ -389,11 +754,27 @@ public static class CashEndpoints
             }
             if (shift.Version != command.ExpectedVersion)
                 return Fail(context, "VERSION_CONFLICT", 409, "Vardiya başka bir işlemle değişti; güncel bilgiyi yenileyin.");
-            var openCheckCount = await salesDb.Checks.AsNoTracking().CountAsync(row =>
-                row.FirmId == firmId && row.BranchId == branchId && row.Status == "open", context.RequestAborted);
-            if (openCheckCount > 0)
+            var openChecks = await salesDb.Checks.AsNoTracking()
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.Status == "open")
+                .Select(row => row.TableId)
+                .ToListAsync(context.RequestAborted);
+            if (openChecks.Count > 0)
+            {
+                var tableLabels = openChecks
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(t => t!.StartsWith("table-", StringComparison.OrdinalIgnoreCase) && int.TryParse(t[6..], out var num)
+                        ? $"Masa {num}"
+                        : t!)
+                    .Distinct()
+                    .OrderBy(t => t)
+                    .ToList();
+                var quickCount = openChecks.Count(t => string.IsNullOrWhiteSpace(t));
+                if (quickCount > 0)
+                    tableLabels.Add(quickCount == 1 ? "Hızlı Satış (1 adisyon)" : $"Hızlı Satış ({quickCount} adisyon)");
+                var locations = string.Join(", ", tableLabels);
                 return Fail(context, "OPEN_CHECKS_PREVENT_SHIFT_CLOSE", 409,
-                    $"Vardiya kapatılamadı. Bu şubede kapatılmamış {openCheckCount} adisyon var. Önce açık adisyonları kapatın.");
+                    $"Açık hesaplar olduğu için vardiya kapatılamıyor ({openChecks.Count} açık adisyon: {locations}). Önce Kasa ekranından bu hesapların ödemesini alıp adisyonları kapatın.");
+            }
             var movements = await db.Movements.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.ShiftId == shiftId)
                 .ToListAsync(context.RequestAborted);
@@ -451,8 +832,84 @@ public static class CashEndpoints
         _ => 0,
     });
 
-    private static CashRegisterView ToView(CashRegisterRow row) =>
-        new(row.Id.ToString(), row.Code, row.Name, row.ProviderMode, row.IsActive);
+    private static CashRegisterView ToView(CashRegisterRow row, string? responsible = null) =>
+        new(row.Id.ToString(), row.Code, row.Name, row.ProviderMode, row.IsActive, responsible);
+
+    private static async Task<Dictionary<Guid, string>> LoadRegisterResponsiblesAsync(CashDbContext db,
+        string firmId, string branchId, CancellationToken cancellationToken)
+    {
+        var audits = await db.Audit.AsNoTracking()
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId &&
+                row.EntityType == "register" &&
+                (row.Action == "register_created" || row.Action == "register_responsible_updated"))
+            .OrderBy(row => row.OccurredAt).ThenBy(row => row.Id)
+            .ToListAsync(cancellationToken);
+        var map = new Dictionary<Guid, string>();
+        foreach (var audit in audits)
+        {
+            var resp = ParseDetailValue(audit.Detail, "responsible");
+            if (!string.IsNullOrWhiteSpace(resp))
+                map[audit.RegisterId] = resp;
+            else
+                map.Remove(audit.RegisterId);
+        }
+        return map;
+    }
+
+    private static async Task<CashResponsibleView[]> LoadCashResponsiblesAsync(CashDbContext db,
+        string firmId, string branchId, Dictionary<Guid, string> registerResponsibles, CancellationToken cancellationToken)
+    {
+        var audits = await db.Audit.AsNoTracking()
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId &&
+                row.EntityType == "responsible" &&
+                (row.Action == "responsible_created" || row.Action == "responsible_deleted"))
+            .OrderBy(row => row.OccurredAt).ThenBy(row => row.Id)
+            .ToListAsync(cancellationToken);
+
+        var activeById = new Dictionary<Guid, CashResponsibleView>();
+        var deletedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var audit in audits)
+        {
+            if (audit.Action == "responsible_created")
+            {
+                var name = ParseDetailValue(audit.Detail, "name");
+                var role = ParseDetailValue(audit.Detail, "role");
+                if (!string.IsNullOrWhiteSpace(name))
+                    activeById[audit.EntityId] = new CashResponsibleView(audit.EntityId.ToString(), name, role, audit.OccurredAt);
+            }
+            else if (audit.Action == "responsible_deleted")
+            {
+                activeById.Remove(audit.EntityId);
+                var deletedName = ParseDetailValue(audit.Detail, "name");
+                if (!string.IsNullOrWhiteSpace(deletedName))
+                    deletedNames.Add(deletedName);
+            }
+        }
+
+        foreach (var (regId, respName) in registerResponsibles)
+        {
+            if (!string.IsNullOrWhiteSpace(respName) &&
+                !deletedNames.Contains(respName) &&
+                !activeById.Values.Any(v => string.Equals(v.Name, respName, StringComparison.OrdinalIgnoreCase)))
+            {
+                activeById[regId] = new CashResponsibleView(regId.ToString(), respName, "Atanmış Kasa Sorumlusu", DateTimeOffset.UtcNow);
+            }
+        }
+
+        return activeById.Values.OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
+
+    private static string? ParseDetailValue(string detail, string key)
+    {
+        var prefix = $"{key}=";
+        foreach (var part in detail.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part.StartsWith(prefix, StringComparison.Ordinal))
+                return part[prefix.Length..];
+        }
+        return null;
+    }
 
     private static CashMovementView ToView(CashMovementRow row) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.ShiftId.ToString(), row.Kind, row.Category,

@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { featurePresentation, isFutureSidebarItem } from "./featurePresentation";
 import { sections } from "./catalog";
 
@@ -20,7 +20,7 @@ describe("alt ekran durum sözleşmesi", () => {
     expect(catalog.items.some(item => item.slug === "price-versions" || item.slug === "scheduled-prices" || item.slug === "publishing" || item.slug === "publish-history")).toBe(false);
   });
   it("kasa alt ekranlarını HTTP sağlayıcıyla çalışıyor olarak gösterir", () => {
-    for (const item of ["summary", "movements", "shifts", "opening-closing"]) {
+    for (const item of ["summary", "registers", "movements", "shifts", "cash", "card", "opening-closing"]) {
       const presentation = featurePresentation("cash", item, {
         ...mockSources,
         cashSource: "http",

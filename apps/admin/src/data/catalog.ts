@@ -1,4 +1,4 @@
-﻿import singleDemo from "../../../../contracts/demo-single-branch.v1.json";
+import singleDemo from "../../../../contracts/demo-single-branch.v1.json";
 
 export type NavItem = { label: string; slug: string };
 export type NavSection = {
@@ -89,9 +89,9 @@ export const sections: NavSection[] = [
     icon: "wallet",
     items: [
       { label: "Kasa Özeti", slug: "summary" },
+      { label: "Mevcut Kasalar", slug: "registers" },
       { label: "Kasa Hareketleri", slug: "movements" },
       { label: "Kasa Vardiyaları", slug: "shifts" },
-      { label: "Açılış / Kapanış", slug: "opening-closing" },
       { label: "Nakit", slug: "cash" },
       { label: "Kart", slug: "card" },
       { label: "Yemek Kartı", slug: "meal-card" },

@@ -581,6 +581,20 @@ test(
       assert.equal(cashOverview.data.registers.length, 1);
       assert.equal(cashOverview.data.openShifts.length, 0);
       assert.equal((await request(`${cashPath}/overview`, "GET", undefined, "viewer-multi")).status, 403);
+      // Günlük toplam, açık/kapalı vardiyalardan yalnız bugünün test tahsilatlarını toplar.
+      const dailyRows = ["99999999-9999-4999-8999-99999999dd01", "99999999-9999-4999-8999-99999999dd02", "99999999-9999-4999-8999-99999999dd03"];
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `INSERT INTO cash.movements (id,firm_id,branch_id,register_id,shift_id,kind,category,tender_method,amount_minor,currency,description,source,provider,provider_event_id,actor,created_at) VALUES
+        ('${dailyRows[0]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','cash',12500,'TRY','test','pos','test','daily-1','test',now()),
+        ('${dailyRows[1]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','card',7500,'TRY','test','pos','test','daily-2','test',now()),
+        ('${dailyRows[2]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','cash',5000,'TRY','test','pos','test','daily-3','test',now() - interval '2 days')`]);
+      const dailyCollections = await request(`${cashPath}/daily-collections`, "GET", undefined, "manager-single");
+      assert.equal(dailyCollections.status, 200);
+      assert.deepEqual([dailyCollections.data.cashMinor, dailyCollections.data.cardMinor, dailyCollections.data.totalMinor, dailyCollections.data.count], [12500, 7500, 20000, 2]);
+      assert.equal(dailyCollections.data.simulated, true);
+      assert.equal((await request(`${cashPath}/daily-collections`, "GET", undefined, "viewer-multi")).status, 403);
+      await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
+        `DELETE FROM cash.movements WHERE id IN ('${dailyRows.join("','")}')`]);
       const cashStates = await request(featureSettingsPath, "GET", undefined, "manager-single");
       const cashFeature = cashStates.data.find((row) => row.key === "cash.management");
       assert.equal(cashFeature.effectiveForNewWork, true);

@@ -13,7 +13,11 @@ using Hipos.Api.Overview;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
 
@@ -134,7 +138,11 @@ if (storage == "postgres")
     var overviewDb = scope.ServiceProvider.GetRequiredService<OverviewDbContext>();
     overviewReady = !(await overviewDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
-    if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
+    if (serviceReady)
+    {
+        await ServiceDbContextFactory.EnsureFloorSchemaAsync(serviceDb, CancellationToken.None);
+        await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
+    }
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
     if (inventoryReady) await FeatureDbInitializer.PromoteInventoryAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;

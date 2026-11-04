@@ -101,9 +101,20 @@ public sealed class ServiceTableTransferRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class ServiceFloorRow
+{
+    public string Id { get; set; } = "";
+    public string FirmId { get; set; } = "";
+    public string BranchId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options) : DbContext(options)
 {
     public DbSet<ServiceTableRow> Tables => Set<ServiceTableRow>();
+    public DbSet<ServiceFloorRow> Floors => Set<ServiceFloorRow>();
     public DbSet<ServiceTableGroupRow> TableGroups => Set<ServiceTableGroupRow>();
     public DbSet<ServiceWaiterRow> Employees => Set<ServiceWaiterRow>();
     public DbSet<ServiceWaiterRow> Waiters => Set<ServiceWaiterRow>(); // Geriye dönük servis API'si uyumluluğu.
@@ -119,7 +130,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.ToTable("tables", table =>
             {
                 table.HasCheckConstraint("ck_table_number", "number BETWEEN 1 AND 999");
-                table.HasCheckConstraint("ck_table_floor", "floor IS NULL OR floor IN ('lower','upper')");
+                table.HasCheckConstraint("ck_table_floor", "floor IS NULL OR (length(btrim(floor)) BETWEEN 1 AND 80)");
                 table.HasCheckConstraint("ck_table_status", "status IN ('idle','occupied','bill_requested','reserved')");
                 table.HasCheckConstraint("ck_table_reserved_for", "(status = 'reserved') = (reserved_for IS NOT NULL)");
             });
@@ -129,7 +140,7 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
             entity.Property(row => row.Number).HasColumnName("number");
             entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(80);
-            entity.Property(row => row.Floor).HasColumnName("floor").HasMaxLength(16);
+            entity.Property(row => row.Floor).HasColumnName("floor").HasMaxLength(80);
             entity.Property(row => row.IsActive).HasColumnName("is_active");
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(24).HasDefaultValue("idle");
             entity.Property(row => row.ReservedFor).HasColumnName("reserved_for");
@@ -139,6 +150,18 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at");
             entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Number }).IsUnique();
+        });
+        modelBuilder.Entity<ServiceFloorRow>(entity =>
+        {
+            entity.ToTable("floors");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64);
+            entity.Property(row => row.BranchId).HasColumnName("branch_id").HasMaxLength(64);
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(80);
+            entity.Property(row => row.SortOrder).HasColumnName("sort_order");
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(row => new { row.FirmId, row.BranchId, row.Name }).IsUnique();
         });
         modelBuilder.Entity<ServiceTableGroupRow>(entity =>
         {
@@ -254,6 +277,26 @@ public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options)
 
 public sealed class ServiceDbContextFactory : IDesignTimeDbContextFactory<ServiceDbContext>
 {
+    public static async Task EnsureFloorSchemaAsync(ServiceDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS service.floors (
+                id character varying(80) NOT NULL PRIMARY KEY,
+                firm_id character varying(64) NOT NULL,
+                branch_id character varying(64) NOT NULL,
+                name character varying(80) NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamp with time zone NOT NULL DEFAULT now()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_floors_firm_branch_name ON service.floors (firm_id, branch_id, name);
+            ALTER TABLE service.tables DROP CONSTRAINT IF EXISTS ck_table_floor;
+            ALTER TABLE service.tables ALTER COLUMN floor TYPE character varying(80);
+            UPDATE service.tables SET floor = 'Alt kat' WHERE floor = 'lower';
+            UPDATE service.tables SET floor = 'Üst kat' WHERE floor = 'upper';
+            ALTER TABLE service.tables ADD CONSTRAINT ck_table_floor CHECK (floor IS NULL OR (length(btrim(floor)) BETWEEN 1 AND 80));
+            """, cancellationToken);
+    }
+
     public ServiceDbContext CreateDbContext(string[] args)
     {
         var connection = Environment.GetEnvironmentVariable("HIPOS_FEATURES_CONNECTION")

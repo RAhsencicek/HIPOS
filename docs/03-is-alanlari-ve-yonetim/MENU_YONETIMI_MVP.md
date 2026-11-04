@@ -4,6 +4,8 @@ Yönetici `/admin/catalog/menus` sayfasında menülerini, şubede POS'ta kullan�
 
 Menü bölümü, katalog kategorisiyle aynı şey değildir. Yönetici ister bir katalog kategorisini hazır bölüm olarak ekler, ister “Kahvaltı Favorileri” gibi menüye özel bir başlık açar. Sonra şubedeki mevcut ürünleri ürün adı veya katalog kategorisiyle arayıp farklı kategorilerden seçebilir. Menüdeki fiyat ve ürün bilgisi ortak katalog kaynağından gelir; menü düzenlemek ürün kartı ya da bağımsız fiyat oluşturmaz.
 
+Garson ekranı aktif menü bölümlerine ek olarak aktif katalog kategorilerini ayrı bir görünümde sunar. Kategori görünümünde aktif, yayımlanmış, POS kanalına açık ve pozitif fiyatlı ürünler gösterilir; bunların bir menüye eklenmiş olması gerekmez.
+
 ## Kalıcı sözleşme
 
 - `catalog.menus`: UUID, firma, şube, ad, açıklama, şubede yayın/aktiflik durumu, sürüm, oluşturma/güncelleme zamanı. Aynı şubede birden fazla menü aktif olabilir.
