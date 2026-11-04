@@ -18,6 +18,10 @@ type Summary = { source: string; activeCustomers: number; activeSuppliers: numbe
   customerCreditMinor: number; supplierPayableMinor: number; supplierAdvanceMinor: number;
   recentMovements: Array<Movement & { partyId: string; partyName: string }>;
   capabilities: { managementWritesEnabled: boolean } };
+type CashRegisterInfo = { id: string; code: string; name: string };
+type CashShiftInfo = { id: string; registerId: string; expectedCashMinor: number };
+type OpenRegister = { registerId: string; code: string; name: string; shiftId: string; expectedCashMinor: number };
+type AllocationEntry = { registerId: string; amount: string };
 
 const money = (minor: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(minor / 100);
 const entryLabel = (type: EntryType) => ({
@@ -93,26 +97,50 @@ export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: K
   const [showInactive, setShowInactive] = useState(false);
   const [statementError, setStatementError] = useState("");
   const [statementLoading, setStatementLoading] = useState(false);
+  const [openRegisters, setOpenRegisters] = useState<OpenRegister[]>([]);
+  const [paymentSource, setPaymentSource] = useState<"cash" | "other">("cash");
+  const [splitPayment, setSplitPayment] = useState(false);
+  const [selectedRegisterId, setSelectedRegisterId] = useState("");
+  const [allocations, setAllocations] = useState<AllocationEntry[]>([]);
   const scope = ctx.scenarioId === "single" && ctx.branchApiId
     ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/caris`
+    : null;
+  const cashScope = ctx.scenarioId === "single" && ctx.branchApiId
+    ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/cash/overview`
     : null;
 
   const reload = useCallback(async () => {
     if (!scope) { setParties([]); setHasLoaded(false); setLoading(false); return; }
     setLoading(true);
     try {
-      const [result, summaryResult] = await Promise.all([
-        api<{ items: Party[] }>(scope), api<Summary>(`${scope}/summary`),
+      const [result, summaryResult, cashResult] = await Promise.all([
+        api<{ items: Party[] }>(scope),
+        api<Summary>(`${scope}/summary`),
+        cashScope ? api<{ registers: CashRegisterInfo[]; openShifts: { shift: CashShiftInfo }[] }>(cashScope).catch(() => null) : Promise.resolve(null),
       ]);
       setParties(result.items);
       setSummary(summaryResult);
+      if (cashResult) {
+        const active: OpenRegister[] = (cashResult.openShifts ?? []).map((os) => {
+          const reg = cashResult.registers?.find((r) => r.id === os.shift.registerId);
+          return {
+            registerId: os.shift.registerId,
+            code: reg?.code ?? "",
+            name: reg?.name ?? "Kasa",
+            shiftId: os.shift.id,
+            expectedCashMinor: os.shift.expectedCashMinor ?? 0,
+          };
+        });
+        setOpenRegisters(active);
+        setSelectedRegisterId((prev) => (active.some((r) => r.registerId === prev) ? prev : active[0]?.registerId ?? ""));
+      }
       setHasLoaded(true);
       setError("");
     } catch (reason) {
       setHasLoaded(false);
       setError((reason as Error).message);
     } finally { setLoading(false); }
-  }, [scope]);
+  }, [scope, cashScope]);
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { setNewKind(kind === "supplier" ? "supplier" : "customer"); }, [kind]);
@@ -187,14 +215,73 @@ export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: K
     if (!scope || !selected || busy) return;
     const amountMinor = Math.round(Number(amount) * 100);
     if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) { setError("Tutar pozitif olmalı."); return; }
+
+    const isSupplierPayment = movementKind === "supplier" && entryType === "supplier_payment";
+    let cashAllocations: { registerId: string; amountMinor: number }[] | undefined = undefined;
+
+    if (isSupplierPayment && paymentSource === "cash") {
+      if (openRegisters.length === 0) {
+        setError("Bu şubede açık kasa bulunmadığı için kasadan nakit ödeme yapılamaz. Kasa açın veya 'Kasa Dışı / Diğer' seçin.");
+        return;
+      }
+      if (splitPayment) {
+        if (allocations.length < 2) {
+          setError("Bölüştürerek ödeme için en az 2 kasa gereklidir.");
+          return;
+        }
+        const regIds = allocations.map((a) => a.registerId);
+        if (new Set(regIds).size !== regIds.length) {
+          setError("Aynı kasayı birden fazla kez seçemezsiniz.");
+          return;
+        }
+        const parsed: { registerId: string; amountMinor: number }[] = [];
+        for (const alloc of allocations) {
+          const aMinor = Math.round(Number(alloc.amount) * 100);
+          if (!Number.isSafeInteger(aMinor) || aMinor <= 0) {
+            setError("Her kasanın ödeme payı pozitif olmalıdır.");
+            return;
+          }
+          const reg = openRegisters.find((r) => r.registerId === alloc.registerId);
+          if (aMinor > (reg?.expectedCashMinor ?? 0)) {
+            setError(`${reg?.name ?? "Kasa"} kasasında yeterli nakit yok (Mevcut: ${money(reg?.expectedCashMinor ?? 0)}, İstenen: ${money(aMinor)}).`);
+            return;
+          }
+          parsed.push({ registerId: alloc.registerId, amountMinor: aMinor });
+        }
+        const sumAlloc = parsed.reduce((sum, a) => sum + a.amountMinor, 0);
+        if (sumAlloc !== amountMinor) {
+          setError(`Kasalardan dağıtılan tutarların toplamı (${money(sumAlloc)}) toplam ödeme tutarına (${money(amountMinor)}) eşit olmalıdır.`);
+          return;
+        }
+        cashAllocations = parsed;
+      } else {
+        if (!selectedRegisterId) {
+          setError("Lütfen ödemenin yapılacağı kasayı seçin.");
+          return;
+        }
+        const reg = openRegisters.find((r) => r.registerId === selectedRegisterId);
+        if (amountMinor > (reg?.expectedCashMinor ?? 0)) {
+          setError(`${reg?.name ?? "Kasa"} kasasında yeterli nakit yok (Mevcut: ${money(reg?.expectedCashMinor ?? 0)}, İstenen: ${money(amountMinor)}).`);
+          return;
+        }
+        cashAllocations = [{ registerId: selectedRegisterId, amountMinor }];
+      }
+    }
+
     setBusy(true); setError(""); setNotice("");
     try {
       await api(`${scope}/${encodeURIComponent(selected.id)}/movements`, "POST", {
         requestId: crypto.randomUUID(), kind: movementKind, entryType, amountMinor,
         description: description.trim(), effectiveDate, reference: reference.trim() || null, expectedVersion: selected.version,
+        cashAllocations,
       });
       setAmount(""); setDescription(""); setReference("");
-      setNotice("Cari hareketi kaydedildi. Tahsilat/ödeme, banka veya POS'tan değil elle girilmiş bir işletme kaydıdır.");
+      setAllocations([]);
+      setNotice(
+        cashAllocations && cashAllocations.length > 0
+          ? `Tedarikçi ödemesi kaydedildi ve ${cashAllocations.length > 1 ? "ilgili kasalardan bölüştürülerek" : "kasadan"} ${money(amountMinor)} nakit çıkışı yapıldı.`
+          : "Cari hareketi kaydedildi. Tahsilat/ödeme, banka veya POS'tan değil elle girilmiş bir işletme kaydıdır."
+      );
       await reload();
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
@@ -349,6 +436,172 @@ export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: K
             <option value="adjustment_increase">Bakiye artırma düzeltmesi</option>
             <option value="adjustment_decrease">Bakiye azaltma düzeltmesi</option>
           </select></label>
+          {movementKind === "supplier" && entryType === "supplier_payment" && <div className="cari-cash-payment-section">
+            <span className="card-kicker">ÖDEME KAYNAĞI</span>
+            <div className="cari-payment-source-options">
+              <label className="cari-radio-label">
+                <input
+                  type="radio"
+                  name="paymentSource"
+                  value="cash"
+                  checked={paymentSource === "cash"}
+                  onChange={() => setPaymentSource("cash")}
+                />
+                Kasadan Nakit Ödeme (Kasadan otomatik çıkış yapılır)
+              </label>
+              <label className="cari-radio-label">
+                <input
+                  type="radio"
+                  name="paymentSource"
+                  value="other"
+                  checked={paymentSource === "other"}
+                  onChange={() => setPaymentSource("other")}
+                />
+                Kasa Dışı / Diğer (Banka transferi, havale veya merkezden)
+              </label>
+            </div>
+            {paymentSource === "cash" && (
+              openRegisters.length === 0 ? (
+                <div className="notice" role="alert" style={{ margin: "4px 0" }}>
+                  ⚠️ Bu şubede şu anda açık bir kasa vardiyası yok. Kasadan ödeme yapabilmek için <em>Kasa Yönetimi</em> ekranından bir vardiya açılmalıdır. Alternatif olarak yukarıdan <em>Kasa Dışı / Diğer</em> seçebilirsiniz.
+                </div>
+              ) : (
+                <div className="cari-cash-registers-box">
+                  <div className="cari-split-toggle-row">
+                    <label className="cari-check">
+                      <input
+                        type="checkbox"
+                        checked={splitPayment}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSplitPayment(checked);
+                          if (checked && allocations.length === 0) {
+                            setAllocations([
+                              { registerId: openRegisters[0]?.registerId ?? "", amount: "" },
+                              { registerId: openRegisters[1]?.registerId ?? openRegisters[0]?.registerId ?? "", amount: "" },
+                            ]);
+                          }
+                        }}
+                        disabled={openRegisters.length < 2}
+                      />
+                      Birden fazla kasadan bölüştürerek öde {openRegisters.length < 2 && "(En az 2 açık kasa gerekir)"}
+                    </label>
+                  </div>
+                  {!splitPayment ? (
+                    <label>
+                      Ödemenin Yapılacağı Kasa
+                      <select
+                        value={selectedRegisterId}
+                        onChange={(e) => setSelectedRegisterId(e.target.value)}
+                        required
+                      >
+                        {openRegisters.map((reg) => (
+                          <option key={reg.registerId} value={reg.registerId}>
+                            {reg.name} ({reg.code}) — Mevcut Nakit: {money(reg.expectedCashMinor)}
+                          </option>
+                        ))}
+                      </select>
+                      {(() => {
+                        const reg = openRegisters.find((r) => r.registerId === selectedRegisterId);
+                        const aMinor = Math.round(Number(amount || 0) * 100);
+                        if (reg && aMinor > reg.expectedCashMinor) {
+                          return <small style={{ color: "#c62828" }}>⚠️ Kasadaki mevcut nakit aşıldı ({money(reg.expectedCashMinor)})</small>;
+                        }
+                        return null;
+                      })()}
+                    </label>
+                  ) : (
+                    <div className="cari-allocations-list">
+                      <span className="card-kicker">KASALARA DAĞILIM</span>
+                      {allocations.map((alloc, idx) => {
+                        const reg = openRegisters.find((r) => r.registerId === alloc.registerId);
+                        const allocMinor = Math.round(Number(alloc.amount || 0) * 100);
+                        const isOver = reg && allocMinor > reg.expectedCashMinor;
+                        return (
+                          <div key={idx} className="cari-allocation-row">
+                            <label style={{ flex: 2 }}>
+                              Kasa
+                              <select
+                                value={alloc.registerId}
+                                onChange={(e) => {
+                                  const next = [...allocations];
+                                  next[idx].registerId = e.target.value;
+                                  setAllocations(next);
+                                }}
+                              >
+                                {openRegisters.map((r) => (
+                                  <option key={r.registerId} value={r.registerId}>
+                                    {r.name} ({r.code}) — Mevcut: {money(r.expectedCashMinor)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label style={{ flex: 1.5 }}>
+                              Kasa Payı (₺)
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={alloc.amount}
+                                onChange={(e) => {
+                                  const next = [...allocations];
+                                  next[idx].amount = e.target.value;
+                                  setAllocations(next);
+                                }}
+                                required
+                              />
+                            </label>
+                            {allocations.length > 2 && (
+                              <button
+                                type="button"
+                                className="subtle-link"
+                                style={{ marginTop: 22 }}
+                                onClick={() => setAllocations(allocations.filter((_, i) => i !== idx))}
+                              >
+                                ✕ Sil
+                              </button>
+                            )}
+                            {isOver && (
+                              <small style={{ color: "#c62828", width: "100%" }}>
+                                ⚠️ Kasadaki mevcut nakit aşıldı ({money(reg?.expectedCashMinor ?? 0)})
+                              </small>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {allocations.length < openRegisters.length && (
+                        <button
+                          type="button"
+                          className="subtle-link"
+                          onClick={() => {
+                            const unused = openRegisters.find((r) => !allocations.some((a) => a.registerId === r.registerId));
+                            setAllocations([
+                              ...allocations,
+                              { registerId: unused?.registerId ?? openRegisters[0].registerId, amount: "" },
+                            ]);
+                          }}
+                        >
+                          + Kasa Ekle
+                        </button>
+                      )}
+                      <div style={{ marginTop: 4, padding: "6px 10px", background: "#f1f5f9", borderRadius: 6 }}>
+                        <small>
+                          Toplam Tutar: <strong>{money(Math.round(Number(amount || 0) * 100))}</strong> · Dağıtılan: <strong>{money(allocations.reduce((s, a) => s + Math.round(Number(a.amount || 0) * 100), 0))}</strong> ·{" "}
+                          {(() => {
+                            const diff = Math.round(Number(amount || 0) * 100) - allocations.reduce((s, a) => s + Math.round(Number(a.amount || 0) * 100), 0);
+                            return diff === 0
+                              ? <span style={{ color: "#2e7d32", fontWeight: 600 }}>✓ Tam eşleşti</span>
+                              : <span style={{ color: "#c62828", fontWeight: 600 }}>Fark: {money(Math.abs(diff))} {diff > 0 ? "eksik" : "fazla"}</span>;
+                          })()}
+                        </small>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+          </div>}
           <label>Tutar (₺) <input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
           <label>İşlem tarihi <input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} required /></label>
           <label>Referans <input value={reference} onChange={(event) => setReference(event.target.value)} maxLength={80} placeholder="İsteğe bağlı belge / fiş no" /></label>

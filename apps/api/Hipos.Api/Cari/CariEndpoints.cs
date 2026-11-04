@@ -1,3 +1,4 @@
+using Hipos.Api.Cash;
 using Hipos.Api.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -6,11 +7,14 @@ using System.Globalization;
 
 namespace Hipos.Api.Cari;
 
+public sealed record CashAllocationItem(Guid RegisterId, long AmountMinor);
+
 public sealed record CreateCariParty(string Name, string[] Types, string? Phone = null, string? Email = null, string? Note = null);
 public sealed record UpdateCariParty(string Name, string[] Types, bool IsActive, int ExpectedVersion,
     string? Phone = null, string? Email = null, string? Note = null);
 public sealed record AddCariMovement(string RequestId, string Kind, string? EntryType, long? AmountMinor,
-    string Description, int ExpectedVersion, DateOnly? EffectiveDate = null, string? Reference = null, long? DeltaMinor = null);
+    string Description, int ExpectedVersion, DateOnly? EffectiveDate = null, string? Reference = null,
+    long? DeltaMinor = null, IReadOnlyList<CashAllocationItem>? CashAllocations = null);
 public sealed record CariMovementView(string Id, string Kind, string EntryType, long DeltaMinor, string Currency,
     string Description, string? Reference, DateOnly EffectiveDate, string Source, bool IsDemo, DateTimeOffset CreatedAt);
 public sealed record CariPartyView(string Id, string Name, string[] Types, string? Phone, string? Email, string? Note, bool IsActive, int Version,
@@ -29,7 +33,7 @@ public sealed record CariRecentMovementView(string Id, string PartyId, string Pa
 
 public static class CariEndpoints
 {
-    public static void MapCariEndpoints(this WebApplication app, bool ready)
+    public static void MapCariEndpoints(this WebApplication app, bool ready, bool cashReady = true)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/caris");
 
@@ -184,7 +188,7 @@ public static class CariEndpoints
         });
 
         group.MapPost("/{partyId}/movements", async (string firmId, string branchId, string partyId,
-            AddCariMovement command, HttpContext context, CariDbContext db, FeatureNewWorkGate gate) =>
+            AddCariMovement command, HttpContext context, CariDbContext db, CashDbContext cashDb, FeatureNewWorkGate gate) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -195,10 +199,44 @@ public static class CariEndpoints
                 deltaMinor is null || description.Length is < 3 or > 500 || command.ExpectedVersion < 1 ||
                 effectiveDate is null || reference == "\0" || validation is not null)
                 return Fail(context, "INVALID_CARI_MOVEMENT", 400, validation ?? "Hareket kimliği, hesap türü, işlem türü, pozitif tutar, açıklama, tarih veya kart sürümü geçersiz.");
+
+            var hasCashAllocations = command.CashAllocations is { Count: > 0 };
+            if (hasCashAllocations)
+            {
+                if (!cashReady)
+                    return Fail(context, "CASH_STORAGE_UNAVAILABLE", 503, "Kasa altyapısı hazır olmadan kasadan ödeme yapılamaz.");
+
+                if (command.Kind != "supplier" || entryType != "supplier_payment")
+                    return Fail(context, "INVALID_CASH_ALLOCATION", 400, "Kasadan ödeme yalnız tedarikçi ödemesi için yapılabilir.");
+
+                var allocations = command.CashAllocations!;
+                if (allocations.Any(a => a.AmountMinor <= 0))
+                    return Fail(context, "INVALID_CASH_ALLOCATION", 400, "Kasa ödeme payları pozitif olmalıdır.");
+
+                if (allocations.Select(a => a.RegisterId).Distinct().Count() != allocations.Count)
+                    return Fail(context, "INVALID_CASH_ALLOCATION", 400, "Aynı kasa birden fazla kez seçilemez.");
+
+                var totalAllocated = allocations.Sum(a => a.AmountMinor);
+                if (totalAllocated != command.AmountMinor)
+                    return Fail(context, "INVALID_CASH_ALLOCATION", 400,
+                        $"Kasalardan yapılacak ödeme tutarlarının toplamı ({totalAllocated / 100.0:N2} TL) ödeme tutarına ({command.AmountMinor!.Value / 100.0:N2} TL) eşit olmalıdır.");
+            }
+
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             var blocked = await LockManagementCapability(db, transaction.GetDbTransaction(), gate, firmId, branchId,
                 context.RequestAborted);
             if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
+            if (hasCashAllocations)
+            {
+                var cashBlocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                    firmId, branchId, "cash.management", context.RequestAborted);
+                if (cashBlocked is not null) return Fail(context, cashBlocked.Code, cashBlocked.Status, cashBlocked.Message);
+
+                cashDb.Database.SetDbConnection(db.Database.GetDbConnection(), false);
+                await cashDb.Database.UseTransactionAsync(transaction.GetDbTransaction(), context.RequestAborted);
+            }
+
             var party = await db.Parties.FromSqlInterpolated($"SELECT * FROM cari.parties WHERE id = {partyId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (party is null) return Fail(context, "CARI_NOT_FOUND", 404, "Cari kartı bulunamadı.");
@@ -212,18 +250,95 @@ public static class CariEndpoints
             if (party.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Cari kartı başka bir işlemle değişti.");
             if (!party.IsActive || !party.Types.Contains(command.Kind))
                 return Fail(context, "CARI_TYPE_UNAVAILABLE", 409, "Bu türde aktif cari kartı yok.");
+
             var now = DateTimeOffset.UtcNow;
+            var actor = DemoAccess.Resolve(context)!;
+
+            if (hasCashAllocations)
+            {
+                foreach (var alloc in command.CashAllocations!)
+                {
+                    var register = await cashDb.Registers.FromSqlInterpolated(
+                        $"SELECT * FROM cash.registers WHERE firm_id = {firmId} AND branch_id = {branchId} AND id = {alloc.RegisterId} FOR UPDATE")
+                        .SingleOrDefaultAsync(context.RequestAborted);
+                    if (register is null || !register.IsActive)
+                        return Fail(context, "REGISTER_NOT_FOUND", 404, $"Etkin kasa bulunamadı ({alloc.RegisterId}).");
+
+                    var shift = await cashDb.Shifts.FromSqlInterpolated(
+                        $"SELECT * FROM cash.shifts WHERE firm_id = {firmId} AND branch_id = {branchId} AND register_id = {alloc.RegisterId} AND status = 'open' FOR UPDATE")
+                        .SingleOrDefaultAsync(context.RequestAborted);
+                    if (shift is null)
+                        return Fail(context, "SHIFT_NOT_FOUND", 409, $"{register.Name} kasasında açık bir vardiya bulunamadı.");
+
+                    var shiftMovements = await cashDb.Movements.AsNoTracking()
+                        .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.ShiftId == shift.Id)
+                        .ToListAsync(context.RequestAborted);
+
+                    var expectedCash = CashEndpoints.Expected(shiftMovements);
+                    if (alloc.AmountMinor > expectedCash)
+                    {
+                        return Fail(context, "INSUFFICIENT_CASH", 409,
+                            $"{register.Name} kasasında yeterli nakit yok (Mevcut: {expectedCash / 100.0:N2} TL, İstenen: {alloc.AmountMinor / 100.0:N2} TL).");
+                    }
+
+                    var cashMovementId = Guid.NewGuid();
+                    var cashMovement = new CashMovementRow
+                    {
+                        Id = cashMovementId,
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        RegisterId = register.Id,
+                        ShiftId = shift.Id,
+                        Kind = "manual_out",
+                        Category = "expense",
+                        AmountMinor = alloc.AmountMinor,
+                        Currency = "TRY",
+                        Description = string.IsNullOrWhiteSpace(description)
+                            ? $"Tedarikçi Ödemesi: {party.Name}"
+                            : $"Tedarikçi Ödemesi ({party.Name}): {description}",
+                        Source = "manual",
+                        Actor = actor.Name,
+                        CreatedAt = now
+                    };
+                    cashDb.Movements.Add(cashMovement);
+                    shift.Version++;
+
+                    cashDb.Audit.Add(new CashAuditRow
+                    {
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        RegisterId = register.Id,
+                        ShiftId = shift.Id,
+                        RequestId = Guid.NewGuid(),
+                        EntityType = "movement",
+                        EntityId = cashMovement.Id,
+                        Action = "supplier_payment_out",
+                        Actor = actor.Name,
+                        Detail = $"supplierId={party.Id};supplierName={party.Name};cariMovementId={command.RequestId};amountMinor={alloc.AmountMinor}",
+                        OccurredAt = now
+                    });
+                }
+            }
+
             var movement = new CariMovementRow { Id = command.RequestId, FirmId = firmId, BranchId = branchId,
                 PartyId = partyId, Kind = command.Kind, EntryType = entryType!, DeltaMinor = deltaMinor!.Value,
                 Description = description, Reference = reference, EffectiveDate = effectiveDate!.Value,
-                Source = "manual", Actor = DemoAccess.Resolve(context)!.Name, CreatedAt = now };
+                Source = "manual", Actor = actor.Name, CreatedAt = now };
             db.Movements.Add(movement);
             party.Version++;
             party.UpdatedAt = now;
-            AddAudit(db, party, "movement_added", movement.Actor,
-                $"{movement.EntryType}: {movement.DeltaMinor} TRY kuruş · {description}", now);
+
+            var auditDetail = hasCashAllocations
+                ? $"{movement.EntryType}: {movement.DeltaMinor} TRY kuruş · Kasadan nakit ödeme ({command.CashAllocations!.Count} kasa) · {description}"
+                : $"{movement.EntryType}: {movement.DeltaMinor} TRY kuruş · {description}";
+            AddAudit(db, party, "movement_added", movement.Actor, auditDetail, now);
+
             try
             {
+                if (hasCashAllocations)
+                {
+                    await cashDb.SaveChangesAsync(context.RequestAborted);
+                }
                 await db.SaveChangesAsync(context.RequestAborted);
                 await transaction.CommitAsync(context.RequestAborted);
             }

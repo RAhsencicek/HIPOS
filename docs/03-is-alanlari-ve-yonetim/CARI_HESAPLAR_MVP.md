@@ -13,6 +13,7 @@
 | Alan / Özellik | Durum | Açıklama |
 | :--- | :--- | :--- |
 | **Cari kartı / hareketi** | **Kalıcı** | `cari.parties` ve `cari.movements` üzerinde manuel borç/alacak/bakiye çalışır |
+| **Kasadan tedarikçi ödemesi** | **Kalıcı** | Tek veya çoklu kasadan bölüştürerek atomik nakit çıkışı ve tedarikçi borç düşümü çalışır |
 | **Gider kaydı** | **Kalıcı** | `finance.expenses` üzerinde kategorili şube gider girişi çalışır |
 | **Satıştan cari hareketi** | **Yok** | Kasada veresiye/açık hesap ile adisyondan otomatik cariye yazma henüz yoktur |
 | **Satın almadan tedarikçi borcu** | **Yok** | Toptancı irsaliyesinden otomatik tedarikçi borçlandırma henüz yoktur |
@@ -72,14 +73,12 @@ Tutar kuruş cinsinden tamsayıdır; sıfır/negatif tutar, TRY dışı para bir
 
 ## Bilinçli sınırlar ve sonraki dilim
 
-### Planlanan kasadan tedarikçi ödemesi
+### Kasadan tedarikçi ödemesi ve kasalara bölüştürerek ödeme
 
-Bu akış henüz uygulanmamıştır. Yönetici aktif bir tedarikçi ve açık vardiyası olan bir kasa seçerek nakit ödeme tutarı, açıklama ve isteğe bağlı belge referansı girer. Kasa seçicisinde açık vardiyanın hareketlerden hesaplanan beklenen nakdi gösterilir; bu değer fiziksel sayım olarak sunulmaz.
+Bu akış kalıcı olarak uygulanmıştır. Yönetici aktif bir tedarikçi için nakit ödeme kaydederken iki kaynaktan birini seçebilir:
+1. **Kasadan Nakit Ödeme (Kalıcı / Atomik):** Tek bir kasa seçilebilir veya "Birden fazla kasadan bölüştürerek öde" seçeneğiyle şubedeki açık kasalar arasında ödeme paylaştırılabilir. Kasa seçicisinde açık vardiyanın hareketlerden hesaplanan beklenen nakdi gösterilir. Tek veritabanı transaction'ında seçili kasalara `manual_out` (kategori: `expense`) nakit çıkışı işlenir, tedarikçi hesabından aynı toplam tutarda `supplier_payment` düşülür ve her iki tarafta denetim logları ortak işlem kimliğiyle kaydedilir. Kasada yetersiz nakit varsa işlem `409 INSUFFICIENT_CASH` ile reddedilir ve hiçbir tarafta değişiklik yapılmaz.
+2. **Kasa Dışı / Diğer:** Banka transferi, havale veya merkezden ödeme gibi kasaya dokunmayan ödemeler bağımsız cari kaydı olarak işlenir.
 
-Ödeme tek sunucu komutuyla kaydedilmelidir: aynı şube ve firma kapsamındaki seçili kasa vardiyasına nakit çıkışı, tedarikçi hesabına aynı tutarda `supplier_payment` ve her iki alana ait denetim kayıtları tek veritabanı transaction'ında yazılır. Bir taraf başarısızsa hiçbir kayıt kesinleşmez. Kasa ve cari yetkileri/capability durumları, aktif tedarikçi, açık vardiya ve yeterli beklenen nakit sunucuda doğrulanır. Eşzamanlı isteklerde bakiye ve vardiya denetimleri kilit altında yapılır. İstek kimliği tekrarında aynı sonuç döner; farklı içerikle aynı kimlik kullanımı reddedilir. İki hareket ortak işlem kimliğiyle izlenebilir olmalıdır.
-
-Mevcut bağımsız manuel cari ödeme ve kasa çıkışı formları bu bağlantıyı oluşturmaz. Bağlı ödemenin düzeltilmesi yalnız kasa tarafında ters kayıt bırakılarak yapılamaz; iki defteri birlikte düzelten gerekçeli karşı işlem ayrıca tasarlanıp test edilmelidir. Banka havalesi, resmi ödeme belgesi, fatura tahsisi ve otomatik gider kaydı bu nakit akışının kapsamında değildir.
-
-Bu dilimde satın alma talebi/siparişi, resmi alış faturası muhasebesi, vade/yaşlandırma, tahsilatın tek tek faturaya dağıtımı, satış adisyonundan otomatik cari hareket, kasa defteri, banka mutabakatı, e-fatura/vergi ve çoklu para birimi yoktur. Stok modülündeki mal kabul ile tedarikçi borcu bağlantısı çalışır; bu kayıt ödeme veya resmi muhasebe belgesi değildir. Dolayısıyla “vadesi geçmiş tutar” hesaplanmaz. Bu alanlar eklenecekse belge ve ödeme tahsisi ayrı kalıcı kavramlar olarak tasarlanmalıdır; salt hareket tarihinden vade çıkarılmaz.
+Bu dilimde satın alma talebi/siparişi, resmi alış faturası muhasebesi, vade/yaşlandırma, tahsilatın tek tek faturaya dağıtımı, satış adisyonundan otomatik cari hareket, banka mutabakatı, e-fatura/vergi ve çoklu para birimi yoktur. Stok modülündeki mal kabul ile tedarikçi borcu bağlantısı çalışır; bu kayıt ödeme veya resmi muhasebe belgesi değildir.
 
 Uygulama sırası: additive PostgreSQL source doğrulama migration'ı ve eski capability tercihlerini idempotent birleştirme → ana capability gate/idempotent API → tekrar çalıştırılabilir kurgusal demo seed → rol filtresinden bağımsız kart/ekstre ve işlem formları → PostgreSQL ve tarayıcı kabul testleri.

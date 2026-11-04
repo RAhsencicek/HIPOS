@@ -6155,6 +6155,65 @@ td.strong {
   margin: 0;
 }
 
+.cari-cash-payment-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 6px 0;
+}
+
+.cari-payment-source-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.cari-radio-label {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1e293b !important;
+}
+
+.cari-cash-registers-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.cari-split-toggle-row {
+  display: flex;
+  align-items: center;
+}
+
+.cari-allocations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cari-allocation-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  background: #ffffff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
 .cari-statement {
   margin: 24px 0;
   padding: 20px 0;

@@ -824,7 +824,7 @@ public static class CashEndpoints
 
     private const long MaxAmountMinor = 999_999_999_999;
 
-    private static long Expected(IEnumerable<CashMovementRow> rows) => rows.Sum(row => row.Kind switch
+    public static long Expected(IEnumerable<CashMovementRow> rows) => rows.Sum(row => row.Kind switch
     {
         "opening_float" or "manual_in" => row.AmountMinor,
         "pos_sale" when row.TenderMethod == "cash" => row.AmountMinor,

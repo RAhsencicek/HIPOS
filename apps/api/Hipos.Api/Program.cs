@@ -156,7 +156,7 @@ if (storage == "postgres")
     if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");
-if (storage == "postgres") app.MapCariEndpoints(cariReady);
+if (storage == "postgres") app.MapCariEndpoints(cariReady, cashReady);
 if (storage == "postgres") app.MapServiceEndpoints(serviceReady);
 if (storage == "postgres") app.MapInventoryEndpoints(inventoryReady);
 if (storage == "postgres") app.MapProcurementEndpoints(inventoryReady);
