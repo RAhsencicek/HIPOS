@@ -47,6 +47,8 @@ type Shift = {
   expectedCashMinor: number | null;
   countedCashMinor: number | null;
   differenceMinor: number | null;
+  retainedFloatMinor?: number | null;
+  droppedRevenueMinor?: number | null;
   openedBy: string;
   openedAt: string;
   closedBy: string | null;
@@ -55,6 +57,47 @@ type Shift = {
   version: number;
   openingNote?: string | null;
   denominations?: { denominationMinor: number; quantity: number; totalMinor: number }[];
+};
+
+type ZReportTax = { taxRatePercent: number; taxBaseMinor: number; taxAmountMinor: number; grossTotalMinor: number };
+type ZReportTender = { method: string; label: string; amountMinor: number; transactionCount: number };
+type ZReport = {
+  reportType: "Z" | "X";
+  reportNumber: string;
+  shiftId: string;
+  registerId: string;
+  registerCode: string;
+  registerName: string;
+  firmId: string;
+  branchId: string;
+  openedAt: string;
+  openedBy: string;
+  closedAt: string | null;
+  closedBy: string | null;
+  closeNote: string | null;
+  sales: {
+    grossSalesMinor: number;
+    discountAmountMinor: number;
+    compAmountMinor: number;
+    voidAmountMinor: number;
+    netSalesMinor: number;
+    checkCount: number;
+  };
+  cashDrawer: {
+    openingFloatMinor: number;
+    cashSalesMinor: number;
+    cashInMinor: number;
+    cashOutMinor: number;
+    expectedCashMinor: number;
+    countedCashMinor: number | null;
+    differenceMinor: number | null;
+    retainedFloatMinor: number | null;
+    droppedRevenueMinor: number | null;
+  };
+  tenders: ZReportTender[];
+  taxes: ZReportTax[];
+  denominations: Array<{ denominationMinor: number; quantity: number; totalMinor: number }>;
+  generatedAt: string;
 };
 type Movement = {
   id: string;
@@ -212,11 +255,27 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
   const [cardRegisterFilter, setCardRegisterFilter] = useState<string>("");
   const [cardSearch, setCardSearch] = useState<string>("");
   const [cardProviderFilter, setCardProviderFilter] = useState<string>("all");
+  const [retainedFloat, setRetainedFloat] = useState<string>("");
+  const [activeZReport, setActiveZReport] = useState<ZReport | null>(null);
+  const [zReportLoading, setZReportLoading] = useState(false);
 
   const actor = ctx.isMulti ? "manager-multi" : "manager-single";
   const scope = ctx.branchApiId
     ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/cash`
     : null;
+
+  async function openZReport(shiftId: string) {
+    if (!scope) return;
+    setZReportLoading(true);
+    try {
+      const res = await api<{ report: ZReport }>(`${scope}/shifts/${encodeURIComponent(shiftId)}/z-report`);
+      setActiveZReport(res.report);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Z-Raporu yüklenemedi.");
+    } finally {
+      setZReportLoading(false);
+    }
+  }
 
   const responsibleList = useMemo<CashResponsible[]>(() => {
     const saved = overview?.responsibles ?? [];
@@ -588,16 +647,20 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
       .map((denominationMinor) => ({ denominationMinor, quantity: denominationCounts[denominationMinor] }));
     const denominationTotal = denominations.reduce((sum, item) => sum + item.denominationMinor * item.quantity, 0);
     if (denominations.length > 0 && denominationTotal !== countedCashMinor) { setError("Kupür dökümü toplamı kasada sayılan tutarla aynı olmalı."); return; }
+    const retainedMinor = retainedFloat.trim() ? amountMinor(retainedFloat) : undefined;
+    const closedShiftId = active.shift.id;
     await run(async () => {
-      await api(`${scope}/shifts/${encodeURIComponent(active.shift.id)}/close`, "POST", {
+      await api(`${scope}/shifts/${encodeURIComponent(closedShiftId)}/close`, "POST", {
         requestId: crypto.randomUUID(),
         expectedVersion: active.shift.version,
         countedCashMinor,
         note: closeNote.trim() || null,
+        retainedFloatMinor: retainedMinor,
         ...(denominations.length > 0 ? { denominations } : {}),
       });
-      setCountedCash(""); setDenominationCounts({}); setCloseNote("");
-    }, "Vardiya kapatıldı; sayım farkı ve açıklaması saklandı.");
+      setCountedCash(""); setDenominationCounts({}); setCloseNote(""); setRetainedFloat("");
+      void openZReport(closedShiftId);
+    }, "Vardiya kapatıldı; gün sonu Z-Raporu hazırlandı.");
   }
 
   async function reverseMovement(event: FormEvent) {
@@ -2169,6 +2232,18 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
                             <span>Kasa Farkı</span>
                             <strong>{money(lastClosedShift.differenceMinor ?? 0)}</strong>
                           </div>
+                          {(lastClosedShift.retainedFloatMinor != null || lastClosedShift.droppedRevenueMinor != null) && (
+                            <>
+                              <div className="cash-settlement-stat">
+                                <span>Devreden Bozuk Para</span>
+                                <strong>{money(lastClosedShift.retainedFloatMinor ?? 0)}</strong>
+                              </div>
+                              <div className="cash-settlement-stat">
+                                <span>Teslim Edilen Hasılat</span>
+                                <strong style={{ color: "#2b6cb0" }}>{money(lastClosedShift.droppedRevenueMinor ?? 0)}</strong>
+                              </div>
+                            </>
+                          )}
                         </div>
                         {lastClosedShift.closeNote && (
                           <div className="cash-settlement-note">
@@ -2180,7 +2255,16 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
                             <strong>Kupür Sayım Detayı:</strong> {lastClosedShift.denominations.map((item) => `${money(item.denominationMinor)} × ${item.quantity}`).join(" · ")}
                           </div>
                         )}
-                        <div className="cash-settlement-footer">
+                        <div className="cash-settlement-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            style={{ padding: "6px 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}
+                            onClick={() => void openZReport(lastClosedShift.id)}
+                            disabled={zReportLoading}
+                          >
+                            🧾 Z-Raporunu Aç / Yazdır
+                          </button>
                           <Link className="cash-history-link" to="/admin/cash/shifts">Tüm vardiya geçmişini gör →</Link>
                         </div>
                       </section>
@@ -2395,6 +2479,11 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
                             <div>
                               <small>Sayılan · fark</small>
                               <b>{money(shift.countedCashMinor ?? 0)} · {money(shift.differenceMinor ?? 0)}</b>
+                              {shift.droppedRevenueMinor != null && (
+                                <span style={{ display: "block", fontSize: 11.5, color: "#2b6cb0", marginTop: 2 }}>
+                                  Teslim: {money(shift.droppedRevenueMinor)} · Devir: {money(shift.retainedFloatMinor ?? 0)}
+                                </span>
+                              )}
                               {!!shift.denominations?.length && (
                                 <span>
                                   Kupür dökümü: {shift.denominations.map((item) => `${money(item.denominationMinor)} × ${item.quantity}`).join(" · ")}
@@ -2402,6 +2491,17 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
                               )}
                             </div>
                           )}
+                          <div style={{ marginTop: 6 }}>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              style={{ fontSize: 12, padding: "4px 8px" }}
+                              onClick={() => void openZReport(shift.id)}
+                              disabled={zReportLoading}
+                            >
+                              🧾 {shift.status === "open" ? "X-Raporu" : "Z-Raporu"}
+                            </button>
+                          </div>
                           {shift.closeNote && <p>{shift.closeNote}</p>}
                         </article>
                       ))}
@@ -2450,6 +2550,33 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
                         onChange={(event) => setCountedCash(event.target.value)}
                       />
                     </label>
+                    <label>
+                      Yarına Devreden Bozuk Para / Avans (TL)
+                      <input
+                        inputMode="decimal"
+                        placeholder={`Varsayılan: ${Math.floor(Math.min(Number.isSafeInteger(amountMinor(countedCash)) ? amountMinor(countedCash) : 0, active.shift.openingCashMinor) / 100)},00`}
+                        value={retainedFloat}
+                        onChange={(event) => setRetainedFloat(event.target.value)}
+                      />
+                      <small style={{ color: "#718096", fontSize: 12, marginTop: 4, display: "block" }}>
+                        Kasadaki madeni/bozuk para olarak bırakılacak tutar. Kalan tutar kasadan alınıp patrona/çelik kasaya teslim edilir (Safe Drop).
+                      </small>
+                    </label>
+                    {(() => {
+                      const counted = amountMinor(countedCash);
+                      if (!Number.isSafeInteger(counted) || counted <= 0) return null;
+                      const retainedParsed = retainedFloat.trim() ? amountMinor(retainedFloat) : NaN;
+                      const retained = Number.isSafeInteger(retainedParsed) ? retainedParsed : Math.min(counted, active.shift.openingCashMinor);
+                      const safeDrop = Math.max(0, counted - retained);
+                      return (
+                        <div style={{ background: "#edf2f7", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 12 }}>
+                          <div>Devreden Bozuk Para: <strong>{money(retained)}</strong></div>
+                          <div style={{ marginTop: 4 }}>
+                            Patrona / Çelik Kasaya Teslim Edilecek Hasılat (Safe Drop): <strong style={{ color: "#2b6cb0", fontSize: 14 }}>{money(safeDrop)}</strong>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <label>
                       Fark açıklaması (fark varsa zorunlu)
                       <textarea
@@ -2503,6 +2630,184 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
           </>
         )}
       </>
+    )}
+    {activeZReport && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="admin-z-report-title"
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0, 0, 0, 0.55)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 10000,
+          padding: 16,
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setActiveZReport(null);
+        }}
+      >
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+            maxWidth: 460,
+            width: "100%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            padding: "20px 24px",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          }}
+        >
+          <header style={{ borderBottom: "2px dashed #cbd5e0", paddingBottom: 12, marginBottom: 14, textAlign: "center", position: "relative" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#718096", letterSpacing: 2, textTransform: "uppercase" }}>
+              {activeZReport.registerName} ({activeZReport.registerCode})
+            </span>
+            <h2 id="admin-z-report-title" style={{ margin: "6px 0 2px", fontSize: 20, color: "#1a202c" }}>
+              {activeZReport.reportType === "Z" ? "GÜN SONU Z-RAPORU" : "GÜN İÇİ X-RAPORU"}
+            </h2>
+            <small style={{ color: "#4a5568", fontSize: 12, fontWeight: 700 }}>
+              Rapor No: {activeZReport.reportNumber}
+            </small>
+            <button
+              type="button"
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                border: "none",
+                background: "transparent",
+                fontSize: 22,
+                cursor: "pointer",
+                lineHeight: 1,
+                color: "#718096",
+              }}
+              onClick={() => setActiveZReport(null)}
+              aria-label="Kapat"
+            >
+              ×
+            </button>
+          </header>
+
+          <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "#2d3748" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #edf2f7", paddingBottom: 6 }}>
+              <span>Açılış:</span>
+              <strong>{new Date(activeZReport.openedAt).toLocaleString("tr-TR")} ({activeZReport.openedBy})</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #edf2f7", padding: "6px 0" }}>
+              <span>{activeZReport.reportType === "Z" ? "Kapanış:" : "Rapor Anı:"}</span>
+              <strong>{activeZReport.closedAt ? `${new Date(activeZReport.closedAt).toLocaleString("tr-TR")} (${activeZReport.closedBy})` : "Vardiya Açık"}</strong>
+            </div>
+
+            {/* Satış Özeti */}
+            <div style={{ marginTop: 12, background: "#f7fafc", padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+              <div style={{ fontWeight: 800, fontSize: 12, color: "#4a5568", marginBottom: 6, textTransform: "uppercase" }}>📊 Satış & Ciro Özeti</div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Brüt Satış:</span><strong>{money(activeZReport.sales.grossSalesMinor)}</strong></div>
+              {activeZReport.sales.discountAmountMinor + activeZReport.sales.compAmountMinor > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#c53030" }}>
+                  <span>İndirim / İkram:</span>
+                  <strong>−{money(activeZReport.sales.discountAmountMinor + activeZReport.sales.compAmountMinor)}</strong>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed #cbd5e0", marginTop: 4, paddingTop: 4, fontWeight: 800, fontSize: 14 }}>
+                <span>Net Ciro:</span>
+                <strong style={{ color: "#2b6cb0" }}>{money(activeZReport.sales.netSalesMinor)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#718096", marginTop: 2 }}>
+                <span>Tamamlanan Adisyon:</span>
+                <span>{activeZReport.sales.checkCount} adet</span>
+              </div>
+            </div>
+
+            {/* Ödeme Kanalları */}
+            <div style={{ marginTop: 10, background: "#f7fafc", padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+              <div style={{ fontWeight: 800, fontSize: 12, color: "#4a5568", marginBottom: 6, textTransform: "uppercase" }}>💳 Ödeme Kanalları Dağılımı</div>
+              {activeZReport.tenders.map((tender) => (
+                <div key={tender.method} style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>{tender.label} ({tender.transactionCount} işlem):</span>
+                  <strong>{money(tender.amountMinor)}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* KDV Dağılımı */}
+            {activeZReport.taxes.length > 0 && (
+              <div style={{ marginTop: 10, background: "#f7fafc", padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#4a5568", marginBottom: 6, textTransform: "uppercase" }}>🧾 KDV Dağılımı</div>
+                {activeZReport.taxes.map((t) => (
+                  <div key={t.taxRatePercent} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                    <span>%{t.taxRatePercent} KDV (Matrah: {money(t.taxBaseMinor)}):</span>
+                    <strong>{money(t.taxAmountMinor)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Kasa & Çekmece Mutabakatı */}
+            <div style={{ marginTop: 10, background: "#fffaf0", padding: "10px 12px", borderRadius: 8, border: "1px solid #feebc8" }}>
+              <div style={{ fontWeight: 800, fontSize: 12, color: "#7b341e", marginBottom: 6, textTransform: "uppercase" }}>💵 Kasa & Çekmece Mutabakatı</div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Sabah Açılış Avansı:</span><strong>{money(activeZReport.cashDrawer.openingFloatMinor)}</strong></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>Nakit Satışlar:</span><strong style={{ color: "#2f855a" }}>+{money(activeZReport.cashDrawer.cashSalesMinor)}</strong></div>
+              {activeZReport.cashDrawer.cashInMinor > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Kasaya Nakit Girişi:</span><strong style={{ color: "#2f855a" }}>+{money(activeZReport.cashDrawer.cashInMinor)}</strong></div>
+              )}
+              {activeZReport.cashDrawer.cashOutMinor > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Kasadan Nakit Çıkışı (Masraf/Tediye):</span><strong style={{ color: "#c53030" }}>−{money(activeZReport.cashDrawer.cashOutMinor)}</strong></div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed #e2e8f0", marginTop: 4, paddingTop: 4 }}>
+                <span>Çekmecede Olması Gereken Nakit:</span>
+                <strong>{money(activeZReport.cashDrawer.expectedCashMinor)}</strong>
+              </div>
+              {activeZReport.cashDrawer.countedCashMinor != null && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Kapanışta Fiziksel Sayılan Nakit:</span>
+                  <strong>{money(activeZReport.cashDrawer.countedCashMinor)}</strong>
+                </div>
+              )}
+              {activeZReport.cashDrawer.differenceMinor != null && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: activeZReport.cashDrawer.differenceMinor === 0 ? "#2f855a" : activeZReport.cashDrawer.differenceMinor > 0 ? "#2b6cb0" : "#c53030" }}>
+                  <span>Kasa Farkı:</span>
+                  <span>{activeZReport.cashDrawer.differenceMinor === 0 ? "Kasa Denk (0,00 ₺)" : activeZReport.cashDrawer.differenceMinor > 0 ? `+${money(activeZReport.cashDrawer.differenceMinor)} (Kasa Fazlası)` : `${money(activeZReport.cashDrawer.differenceMinor)} (Kasa Açığı)`}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Hasılat Teslim & Devir */}
+            {(activeZReport.cashDrawer.retainedFloatMinor != null || activeZReport.cashDrawer.droppedRevenueMinor != null) && (
+              <div style={{ marginTop: 10, background: "#ebf8ff", padding: "10px 12px", borderRadius: 8, border: "1px solid #bee3f8" }}>
+                <div style={{ fontWeight: 800, fontSize: 12, color: "#2b6cb0", marginBottom: 6, textTransform: "uppercase" }}>🏦 Hasılat Teslim & Devir (Safe Drop)</div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>Yarına Devreden Bozuk Para:</span><strong>{money(activeZReport.cashDrawer.retainedFloatMinor ?? 0)}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 13 }}>
+                  <span>Teslim Edilen Günlük Hasılat:</span>
+                  <strong style={{ color: "#2b6cb0" }}>{money(activeZReport.cashDrawer.droppedRevenueMinor ?? 0)}</strong>
+                </div>
+              </div>
+            )}
+
+            {/* Kupürler */}
+            {activeZReport.denominations.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: "#718096", borderTop: "1px dashed #cbd5e0", paddingTop: 6 }}>
+                <strong>Kupür Sayım Detayı: </strong>
+                {activeZReport.denominations.map(d => `${money(d.denominationMinor)} × ${d.quantity}`).join(" · ")}
+              </div>
+            )}
+
+            {activeZReport.closeNote && (
+              <div style={{ marginTop: 6, fontSize: 12, fontStyle: "italic", color: "#4a5568" }}>
+                <strong>Kapanış Notu: </strong> {activeZReport.closeNote}
+              </div>
+            )}
+          </div>
+          <footer style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button type="button" className="secondary-button" onClick={() => window.print()}>🖨️ Yazdır</button>
+            <button type="button" className="primary-button" onClick={() => setActiveZReport(null)}>Tamam</button>
+          </footer>
+        </section>
+      </div>
     )}
   </>;
 }

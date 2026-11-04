@@ -29,6 +29,8 @@ public sealed class CashShiftRow
     public long? ExpectedCashMinor { get; set; }
     public long? CountedCashMinor { get; set; }
     public long? DifferenceMinor { get; set; }
+    public long? RetainedFloatMinor { get; set; }
+    public long? DroppedRevenueMinor { get; set; }
     public string? CloseNote { get; set; }
     public Guid? CloseRequestId { get; set; }
     public string? ClosedBy { get; set; }
@@ -145,6 +147,8 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
             entity.Property(row => row.ExpectedCashMinor).HasColumnName("expected_cash_minor");
             entity.Property(row => row.CountedCashMinor).HasColumnName("counted_cash_minor");
             entity.Property(row => row.DifferenceMinor).HasColumnName("difference_minor");
+            entity.Property(row => row.RetainedFloatMinor).HasColumnName("retained_float_minor");
+            entity.Property(row => row.DroppedRevenueMinor).HasColumnName("dropped_revenue_minor");
             entity.Property(row => row.CloseNote).HasColumnName("close_note").HasMaxLength(500);
             entity.Property(row => row.CloseRequestId).HasColumnName("close_request_id");
             entity.Property(row => row.ClosedBy).HasColumnName("closed_by").HasMaxLength(128);

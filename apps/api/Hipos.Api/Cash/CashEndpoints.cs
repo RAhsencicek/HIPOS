@@ -18,7 +18,7 @@ public sealed record CorrectCashMovement(string RequestId, string CorrectionType
 public sealed record CashDenominationCount(int DenominationMinor, int Quantity);
 public sealed record CashDenominationView(int DenominationMinor, int Quantity, long TotalMinor);
 public sealed record CloseCashShift(string RequestId, int ExpectedVersion, long CountedCashMinor, string? Note,
-    IReadOnlyList<CashDenominationCount>? Denominations = null);
+    IReadOnlyList<CashDenominationCount>? Denominations = null, long? RetainedFloatMinor = null);
 public sealed record CashRegisterView(string Id, string Code, string Name, string ProviderMode, bool IsActive, string? Responsible = null);
 public sealed record CashResponsibleView(string Id, string Name, string? RoleTitle, DateTimeOffset CreatedAt);
 public sealed record CashMovementView(string Id, string RegisterId, string ShiftId, string Kind, string Category,
@@ -28,7 +28,48 @@ public sealed record CashMovementView(string Id, string RegisterId, string Shift
 public sealed record CashShiftView(string Id, string RegisterId, string Status, long OpeningCashMinor,
     long? ExpectedCashMinor, long? CountedCashMinor, long? DifferenceMinor, string OpenedBy,
     DateTimeOffset OpenedAt, string? ClosedBy, DateTimeOffset? ClosedAt, string? CloseNote, int Version, string? OpeningNote,
-    IReadOnlyList<CashDenominationView>? Denominations = null);
+    IReadOnlyList<CashDenominationView>? Denominations = null,
+    long? RetainedFloatMinor = null, long? DroppedRevenueMinor = null);
+
+public sealed record ZReportTaxBreakdown(int TaxRatePercent, long TaxBaseMinor, long TaxAmountMinor, long GrossTotalMinor);
+public sealed record ZReportTenderBreakdown(string Method, string Label, long AmountMinor, int TransactionCount);
+public sealed record ZReportCashDrawerSummary(
+    long OpeningFloatMinor,
+    long CashSalesMinor,
+    long CashInMinor,
+    long CashOutMinor,
+    long ExpectedCashMinor,
+    long? CountedCashMinor,
+    long? DifferenceMinor,
+    long? RetainedFloatMinor,
+    long? DroppedRevenueMinor);
+public sealed record ZReportSalesSummary(
+    long GrossSalesMinor,
+    long DiscountAmountMinor,
+    long CompAmountMinor,
+    long VoidAmountMinor,
+    long NetSalesMinor,
+    int CheckCount);
+public sealed record ZReportView(
+    string ReportType,
+    string ReportNumber,
+    string ShiftId,
+    string RegisterId,
+    string RegisterCode,
+    string RegisterName,
+    string FirmId,
+    string BranchId,
+    DateTimeOffset OpenedAt,
+    string OpenedBy,
+    DateTimeOffset? ClosedAt,
+    string? ClosedBy,
+    string? CloseNote,
+    ZReportSalesSummary Sales,
+    ZReportCashDrawerSummary CashDrawer,
+    IReadOnlyList<ZReportTenderBreakdown> Tenders,
+    IReadOnlyList<ZReportTaxBreakdown> Taxes,
+    IReadOnlyList<CashDenominationView> Denominations,
+    DateTimeOffset GeneratedAt);
 
 public static class CashEndpoints
 {
@@ -783,10 +824,17 @@ public static class CashEndpoints
             if (difference != 0 && string.IsNullOrWhiteSpace(note))
                 return Fail(context, "CASH_DIFFERENCE_NOTE_REQUIRED", 400, "Kasa farkı için açıklama zorunludur.");
             var now = DateTimeOffset.UtcNow;
+            long retainedFloat = command.RetainedFloatMinor ?? Math.Min(command.CountedCashMinor, shift.OpeningCashMinor);
+            if (retainedFloat < 0 || retainedFloat > command.CountedCashMinor)
+                return Fail(context, "INVALID_RETAINED_FLOAT", 400, "Yarına devreden bozuk para tutarı sayılan nakitten fazla veya negatif olamaz.");
+            long droppedRevenue = command.CountedCashMinor - retainedFloat;
+
             shift.Status = "closed";
             shift.ExpectedCashMinor = expected;
             shift.CountedCashMinor = command.CountedCashMinor;
             shift.DifferenceMinor = difference;
+            shift.RetainedFloatMinor = retainedFloat;
+            shift.DroppedRevenueMinor = droppedRevenue;
             shift.CloseNote = note;
             shift.CloseRequestId = requestId;
             shift.ClosedBy = actor.Name;
@@ -802,7 +850,7 @@ public static class CashEndpoints
             db.Audit.Add(new CashAuditRow { FirmId = firmId, BranchId = branchId, RegisterId = shift.RegisterId,
                 ShiftId = shift.Id, RequestId = requestId, EntityType = "shift", EntityId = shift.Id,
                 Action = "shift_closed", Actor = actor.Name,
-                Detail = $"expected={expected};counted={command.CountedCashMinor};difference={difference};denominations={denominationDetail};note={note}", OccurredAt = now });
+                Detail = $"expected={expected};counted={command.CountedCashMinor};difference={difference};retainedFloat={retainedFloat};droppedRevenue={droppedRevenue};denominations={denominationDetail};note={note}", OccurredAt = now });
             try
             {
                 await db.SaveChangesAsync(context.RequestAborted);
@@ -819,6 +867,25 @@ public static class CashEndpoints
             return Results.Ok(new { source = "postgres", simulated = false,
                 shift = ToView(shift, countedDenominations.Select(item => new CashDenominationView(item.DenominationMinor,
                     item.Quantity, (long)item.DenominationMinor * item.Quantity)).ToArray()) });
+        });
+
+        group.MapGet("/shifts/{shiftId:guid}/z-report", async (string firmId, string branchId, Guid shiftId,
+            HttpContext context, CashDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, false);
+            if (denied is not null) return denied;
+
+            var shift = await db.Shifts.AsNoTracking()
+                .Include(s => s.Register)
+                .Include(s => s.Denominations)
+                .Include(s => s.Movements)
+                .SingleOrDefaultAsync(s => s.FirmId == firmId && s.BranchId == branchId && s.Id == shiftId,
+                    context.RequestAborted);
+
+            if (shift is null) return Fail(context, "SHIFT_NOT_FOUND", 404, "Vardiya bulunamadı.");
+
+            var report = BuildZReport(shift);
+            return Results.Ok(new { source = "postgres", simulated = false, report });
         });
     }
 
@@ -919,7 +986,101 @@ public static class CashEndpoints
     private static CashShiftView ToView(CashShiftRow row, IReadOnlyList<CashDenominationView>? denominations = null) =>
         new(row.Id.ToString(), row.RegisterId.ToString(), row.Status, row.OpeningCashMinor,
             row.ExpectedCashMinor, row.CountedCashMinor, row.DifferenceMinor, row.OpenedBy,
-            row.OpenedAt, row.ClosedBy, row.ClosedAt, row.CloseNote, row.Version, row.OpeningNote, denominations);
+            row.OpenedAt, row.ClosedBy, row.ClosedAt, row.CloseNote, row.Version, row.OpeningNote, denominations,
+            row.RetainedFloatMinor, row.DroppedRevenueMinor);
+
+    private static ZReportView BuildZReport(CashShiftRow shift)
+    {
+        var activeMovements = shift.Movements.Where(m => m.CorrectionType != "reversal").ToList();
+        var posSales = activeMovements.Where(m => m.Kind == "pos_sale").ToList();
+        var manualSales = activeMovements.Where(m => m.Kind == "manual_in" && m.Category == "cash_sale").ToList();
+
+        var cashSales = posSales.Where(m => m.TenderMethod == "cash").Sum(m => m.AmountMinor) +
+                        manualSales.Sum(m => m.AmountMinor);
+        var cardSales = posSales.Where(m => m.TenderMethod == "card").Sum(m => m.AmountMinor);
+        var otherSales = posSales.Where(m => m.TenderMethod != "cash" && m.TenderMethod != "card").Sum(m => m.AmountMinor);
+        var totalSales = cashSales + cardSales + otherSales;
+
+        var cashIn = activeMovements.Where(m => m.Kind == "manual_in" && m.Category != "cash_sale").Sum(m => m.AmountMinor);
+        var cashOut = activeMovements.Where(m => m.Kind == "manual_out").Sum(m => m.AmountMinor);
+
+        var expectedCash = shift.ExpectedCashMinor ?? Expected(shift.Movements);
+        var countedCash = shift.CountedCashMinor;
+        var difference = shift.DifferenceMinor ?? (countedCash.HasValue ? countedCash.Value - expectedCash : null);
+
+        var openingFloat = activeMovements.FirstOrDefault(m => m.Kind == "opening_float")?.AmountMinor ?? shift.OpeningCashMinor;
+        var retainedFloat = shift.RetainedFloatMinor ?? (shift.Status == "closed" ? Math.Min(countedCash ?? 0, openingFloat) : null);
+        var droppedRevenue = shift.DroppedRevenueMinor ?? (shift.Status == "closed" && countedCash.HasValue ? Math.Max(0, countedCash.Value - (retainedFloat ?? 0)) : null);
+
+        var uniqueChecks = posSales.Select(m => m.ExternalReference ?? m.Id.ToString())
+            .Concat(manualSales.Select(m => m.Id.ToString())).Distinct().Count();
+
+        var tenders = new List<ZReportTenderBreakdown>();
+        var cashTxCount = posSales.Count(m => m.TenderMethod == "cash") + manualSales.Count;
+        if (cashSales > 0 || shift.Status == "closed")
+            tenders.Add(new ZReportTenderBreakdown("cash", "Nakit", cashSales, cashTxCount));
+        if (cardSales > 0)
+            tenders.Add(new ZReportTenderBreakdown("card", "Kredi / Banka Kartı", cardSales, posSales.Count(m => m.TenderMethod == "card")));
+        if (otherSales > 0)
+            tenders.Add(new ZReportTenderBreakdown("other", "Diğer Ödemeler", otherSales, posSales.Count(m => m.TenderMethod != "cash" && m.TenderMethod != "card")));
+
+        var taxes = new List<ZReportTaxBreakdown>();
+        if (totalSales > 0)
+        {
+            var taxBase = (long)Math.Round(totalSales / 1.10);
+            var taxAmount = totalSales - taxBase;
+            taxes.Add(new ZReportTaxBreakdown(10, taxBase, taxAmount, totalSales));
+        }
+
+        var reportType = shift.Status == "closed" ? "Z" : "X";
+        var datePrefix = (shift.ClosedAt ?? shift.OpenedAt).ToString("yyyyMMdd");
+        var reportNumber = $"{reportType}-{datePrefix}-{shift.Id.ToString()[..8].ToUpperInvariant()}";
+
+        var salesSummary = new ZReportSalesSummary(
+            GrossSalesMinor: totalSales,
+            DiscountAmountMinor: 0,
+            CompAmountMinor: 0,
+            VoidAmountMinor: 0,
+            NetSalesMinor: totalSales,
+            CheckCount: uniqueChecks);
+
+        var drawerSummary = new ZReportCashDrawerSummary(
+            OpeningFloatMinor: openingFloat,
+            CashSalesMinor: cashSales,
+            CashInMinor: cashIn,
+            CashOutMinor: cashOut,
+            ExpectedCashMinor: expectedCash,
+            CountedCashMinor: countedCash,
+            DifferenceMinor: difference,
+            RetainedFloatMinor: retainedFloat,
+            DroppedRevenueMinor: droppedRevenue);
+
+        var denominations = shift.Denominations
+            .OrderByDescending(d => d.DenominationMinor)
+            .Select(ToView)
+            .ToList();
+
+        return new ZReportView(
+            ReportType: reportType,
+            ReportNumber: reportNumber,
+            ShiftId: shift.Id.ToString(),
+            RegisterId: shift.RegisterId.ToString(),
+            RegisterCode: shift.Register?.Code ?? "KASA",
+            RegisterName: shift.Register?.Name ?? "Kasa",
+            FirmId: shift.FirmId,
+            BranchId: shift.BranchId,
+            OpenedAt: shift.OpenedAt,
+            OpenedBy: shift.OpenedBy,
+            ClosedAt: shift.ClosedAt,
+            ClosedBy: shift.ClosedBy,
+            CloseNote: shift.CloseNote,
+            Sales: salesSummary,
+            CashDrawer: drawerSummary,
+            Tenders: tenders,
+            Taxes: taxes,
+            Denominations: denominations,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
 
     private static CashDenominationView ToView(CashShiftDenominationRow row) =>
         new(row.DenominationMinor, row.Quantity, (long)row.DenominationMinor * row.Quantity);

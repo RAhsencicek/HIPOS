@@ -46,16 +46,16 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
   - İdempotent `MAIN` kasa provisioning mekanizması ve hareket düzeltme (reversal) zinciri mevcuttur.
   - Adisyon ödemeleri (parçalı nakit/kart ve masa hesap kapatmaları) aktif kasa vardiyasına `pos_sale` hareketi olarak otomatik yansıtılır ve nakit çekmece bakiyesi senkronize edilir.
   - Kasiyer ve Garson ekranlarında adisyon indirimleri, ürün ikramları ve kalem iptallerinde müdür/yetkili PIN kodu (`auth.pin_codes` - role: `owner` veya `manager`) doğrulaması ve `sales.check_audit` / `sales.check_adjustments` izlenebilirliği tamamlanmıştır.
+  - Gün Sonu Z-Raporu ve gün içi X-Raporu altyapısı (`GET /cash/shifts/{id}/z-report`) geliştirilmiştir. Ciro özeti (brüt/net/indirim/ikram), ödeme kanalları dağılımı (nakit/kart/cari vb.), KDV dağılımı (%10 matrah ve vergi), kasa çekmecesi mutabakatı, kupür sayım dökümü (`cash.shifts.denominations`), kasa farkı, yarına devreden bozuk para avansı (`retained_float_minor`) ve patrona/çelik kasaya teslim edilen net hasılat tutanağı (Safe Drop - `dropped_revenue_minor`) hem POS Kasiyer ekranında hem de Yönetim Paneli Kasa Özeti ekranında termal fiş formatında tam entegredir. Açık adisyon varken vardiya kapatma kilidi sunucu ve arayüzde zorunludur.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
   - Çoklu kasa (Ana Kasa, Bar vb.) ve kasiyer PIN ile kasa seçimi yoktur.
-  - Kasiyer vardiya kapatma ekranında isteğe bağlı kupür girişi sayılan toplamı hesaplar; kupür kırılımı ayrıca saklanmaz. Şubede açık adisyon varsa vardiya kapanışı sunucu tarafından reddedilir. Gün sonu Z-Raporu ve hasılat teslim tutanağı (Safe Drop) yoktur.
   - Hızlı satışta açık masasız adisyonlar listelenip sürdürülebilir; sonuçlanmamış oluşturma isteği aynı terminalde saklanarak aynı kimlikle tekrar edilir. Liste şubedeki ilk 100 açık masasız adisyonla sınırlıdır ve yalnız hızlı satışa ait kayıtları ayırmaz.
   - Açılış notu vardiyada saklanır; hesap fişi tarayıcı üzerinden mali olmayan çıktı olarak yazdırılır. Tam simüle tahsilat sonrasında yazdırma penceresi açılır; gerçek ÖKC ve otomatik donanım baskısı yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
   1. `sales.check_payments` tablosunun eklenmesi ve parçalı ödeme tiplerinin desteklenmesi. (Tamamlandı)
   2. Adisyon kapatıldığında nakit tutarın otomatik `cash.movements`'a işlenmesi. (Tamamlandı)
   3. Kasiyerlerin 4 haneli PIN ile istasyon/kasa seçerek oturum açması.
-  4. Gün sonu açık masa kilit denetimi, kupür sayımı ve Z-Raporu dökümü.
+  4. Gün sonu açık masa kilit denetimi, kupür sayımı ve Z-Raporu dökümü. (Tamamlandı)
 
 ---
 

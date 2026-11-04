@@ -147,12 +147,12 @@ graph TD
 * Müşterinin mevcut borç bakiyesi ve veresiye limit kontrolü.
 * "Hesabı Cari Bakiyeye Yaz" onayıyla adisyondan düşme ve borçlandırma.
 
-### 🏁 EKRAN 4: Gün Sonu Z-Raporu ve Sayım Sihirbazı Modalı (Hedef Modal — Geliştirilecek)
-* 1. Adım: Salondaki açık adisyon denetimi.
+### 🏁 EKRAN 4: Gün Sonu Z-Raporu ve Sayım Sihirbazı Modalı (Tamamlandı)
+* 1. Adım: Salondaki açık adisyon denetimi (`409 OPEN_CHECKS_PREVENT_SHIFT_CLOSE` kuralı).
 * 2. Adım: Dokunmatik kupür sayım ekranı (200, 100, 50, 20, 10, 5 TL ve madeni paralar).
 * 3. Adım: Beklenen nakit vs Sayılan nakit karşılaştırması ve fark raporu.
-* 4. Adım: Yarına bırakılacak avans (örn. 1.000 TL) ile teslim hasılat ayrımı.
-* 5. Adım: Z-Raporu basımı ve vardiya kapatma.
+* 4. Adım: Yarına bırakılacak devir avansı (`retained_float_minor`) ile çelik kasaya teslim edilecek hasılat ayrımı (Safe Drop - `dropped_revenue_minor`).
+* 5. Adım: Termal fiş formatında resmi Z-Raporu (`GET /cash/shifts/{shiftId}/z-report`) basımı (brüt/net ciro, indirimler, KDV matrah ve vergi dökümü, ödeme kanalları, kasa mutabakatı ve kupür detayı) ve vardiya kapatma. Gün içinde ara döküm için X-Raporu desteği.
 
 ---
 
