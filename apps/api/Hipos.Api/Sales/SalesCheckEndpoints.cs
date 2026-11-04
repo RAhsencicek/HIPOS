@@ -17,6 +17,7 @@ public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long Amount
     string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
 public sealed record SplitCheckLine(long OrderLineId, int Quantity);
 public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
+public sealed record CancelSalesCheck(int ExpectedVersion, string Reason, string? ManagerPin = null);
 public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
 public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, string Action, string? ValueType,
     int? Value, long? OrderLineId, int Quantity, string Reason, string? ManagerPin = null);
@@ -513,6 +514,88 @@ public static class SalesCheckEndpoints
             if (check.TableId is not null)
                 await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+            return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
+        });
+
+        // Açık adisyonu (ödeme alınmamışsa) gerekçeli ve opsiyonel yönetici onayıyla iptal eder.
+        group.MapPost("/{checkId:guid}/cancel", async (string firmId, string branchId, Guid checkId,
+            CancelSalesCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement,
+            [FromServices] AuthDbContext? authDb) =>
+        {
+            var denied = Guard(context, firmId, branchId, salesReady, true);
+            if (denied is not null) return denied;
+            if (command.ExpectedVersion < 1)
+                return Fail(context, "INVALID_VERSION", 400, "expectedVersion pozitif olmalı.");
+
+            var reason = command.Reason?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(reason))
+                return Fail(context, "REASON_REQUIRED", 400, "İptal gerekçesi zorunludur.");
+
+            string? approvedBy = null;
+            if (!string.IsNullOrWhiteSpace(command.ManagerPin))
+            {
+                if (!authReady || authDb is null)
+                    return Fail(context, "AUTH_SERVICE_UNAVAILABLE", 503, "Kimlik doğrulama veritabanı hazır değil.");
+
+                var managerMemberships = await authDb.Memberships
+                    .Include(m => m.User)
+                    .Include(m => m.PinCode)
+                    .Where(m => m.FirmId == firmId && m.IsActive && (m.Role == "owner" || m.Role == "manager"))
+                    .ToListAsync(context.RequestAborted);
+
+                var matched = managerMemberships.FirstOrDefault(m =>
+                    m.PinCode != null &&
+                    m.PinCode.IsActive &&
+                    BCrypt.Net.BCrypt.Verify(command.ManagerPin, m.PinCode.PinHash));
+
+                if (matched is null || matched.User is null)
+                {
+                    return Fail(context, "INVALID_MANAGER_PIN", 401, "Girdiğiniz yönetici PIN kodu hatalı veya bu işlem için yetkisiz.");
+                }
+
+                approvedBy = matched.User.FullName;
+            }
+            else if (!allowUnapprovedAdjustments)
+            {
+                return Fail(context, "MANAGER_PIN_REQUIRED", 403, "Adisyon iptali için yönetici PIN kodu onayı zorunludur.");
+            }
+
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var check = await db.Checks.FromSqlInterpolated($"""
+                SELECT * FROM sales.checks WHERE id = {checkId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE
+                """).SingleOrDefaultAsync(context.RequestAborted);
+            if (check is null) return Fail(context, "CHECK_NOT_FOUND", 404, "Adisyon bu şubede bulunamadı.");
+            if (check.Status == "closed")
+                return Results.Ok(new { repeated = true, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
+            if (check.Status != "open") return Fail(context, "CHECK_NOT_OPEN", 409, "Yalnız açık adisyon iptal edilebilir.");
+            if (check.Version != command.ExpectedVersion)
+                return Fail(context, "VERSION_CONFLICT", 409, "Adisyon başka bir işlemle değişti; yeniden yükleyin.");
+
+            var orders = await db.Orders.AsNoTracking().Include(row => row.PaymentAttempts)
+                .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+                .ToArrayAsync(context.RequestAborted);
+
+            if (orders.SelectMany(row => row.PaymentAttempts).Any(row => row.Status == "succeeded"))
+                return Fail(context, "CHECK_HAS_PAYMENTS", 409, "Ödeme alınmış adisyon doğrudan iptal edilemez; önce ödeme iadesi yapılmalıdır.");
+
+            var actor = DemoAccess.Resolve(context)!.Name;
+            var now = DateTimeOffset.UtcNow;
+            check.Status = "closed";
+            check.ClosedAt = now;
+            check.Version++;
+
+            var auditActor = approvedBy != null ? $"{actor} (Onaylayan: {approvedBy})" : actor;
+            db.CheckAudit.Add(new SalesCheckAuditRow
+            {
+                CheckId = check.Id, FirmId = firmId, BranchId = branchId, Actor = auditActor,
+                Action = "check_cancelled", Version = check.Version, OccurredAt = now,
+            });
+
+            await db.SaveChangesAsync(context.RequestAborted);
+            if (check.TableId is not null)
+                await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+
             return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
     }

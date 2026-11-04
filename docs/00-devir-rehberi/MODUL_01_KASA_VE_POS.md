@@ -154,6 +154,12 @@ graph TD
 * 4. Adım: Yarına bırakılacak devir avansı (`retained_float_minor`) ile çelik kasaya teslim edilecek hasılat ayrımı (Safe Drop - `dropped_revenue_minor`).
 * 5. Adım: Termal fiş formatında resmi Z-Raporu (`GET /cash/shifts/{shiftId}/z-report`) basımı (brüt/net ciro, indirimler, KDV matrah ve vergi dökümü, ödeme kanalları, kasa mutabakatı ve kupür detayı) ve vardiya kapatma. Gün içinde ara döküm için X-Raporu desteği.
 
+### ⚡ EKRAN 5: Hızlı Satış (Tezgâh / Al-Götür) ve Bekleyen Siparişler (Park Order) (Tamamlandı)
+* **Siparişi Askıya Alma (Park Order):** Kasiyer siparişi sepete ekledikten sonra `[ ⏸️ Askıya Al / Beklet ]` butonuna basarak siparişe etiket verebilir (Örn: "Paket #18 - Canan Hanım", "Çağrı Cihazı #4"). Terminal anında sıfırlanarak kuyruktaki sonraki müşterinin siparişine hazır hale gelir.
+* **Bekleyen Tezgâh Satışları Paneli:** Açık tezgâh adisyonları dokunmatik kartlar halinde listelenir. Kart üzerinde etiket, geçen bekleme süresi (örn. "3 dk önce"), ürün özeti, kalan tutar ve `[ ⚡ Tahsil Et → ]` butonu yer alır.
+* **Ödeme Adımından Bekletme:** Kasiyer ödeme ekranındayken `[ ⏸️ Beklet & Menüye Dön ]` butonuna basarak işlemi askıya alıp menüye dönebilir.
+* **Terk Edilen Siparişi İptal Etme:** Müşteri almaktan vazgeçtiyse sipariş `POST /sales/checks/{id}/cancel` ile gerekçe ve yönetici PIN onayıyla güvenli biçimde iptal edilip kapatılır. Salondaki masa hesaplarıyla tezgâh satışları tamamen izoledir.
+
 ---
 
 ## 💾 5. Veritabanı ve API Mimarisi

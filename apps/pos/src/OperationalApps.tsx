@@ -49,7 +49,7 @@ function buildFloorSections(tables: Table[], configuredFloors: string[] = []): A
   list.push({ key: "unassigned", label: "Katı belirlenmemiş masalar" });
   return list;
 }
-type OpenCheck = { id: string; status: string; paymentStatus?: string; tableId?: string | null; version: number; totalMinor: number; paidMinor?: number; remainingMinor?: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[]; payments: Array<{ id: string; amountMinor?: number; status?: string }>; orders: Array<{ id: string; version?: number; remainingMinor?: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number }> }> };
+type OpenCheck = { id: string; status: string; paymentStatus?: string; tableId?: string | null; version: number; totalMinor: number; paidMinor?: number; remainingMinor?: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[]; payments: Array<{ id: string; amountMinor?: number; status?: string }>; orders: Array<{ id: string; version?: number; remainingMinor?: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; note?: string | null }> }> };
 type KitchenStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
 type KitchenStatusItem = { id: string; orderId: string; productName: string; quantity: number; note?: string | null; status: KitchenStatus; statusChangedAt?: string | null };
 type Order = { id: string; source: string; status: string; paymentStatus: string; totalMinor: number; createdAt: string; tableName?: string; waiterName?: string; items: Array<{ productName: string; quantity: number; lineTotalMinor?: number; note?: string | null; options?: ProductOption[]; status?: KitchenStatus; statusChangedAt?: string | null }>; kitchenItems?: Array<{ productId: string; productName: string; quantity: number; note?: string | null; options: ProductOption[]; status?: KitchenStatus; statusChangedAt?: string | null }> };
@@ -77,7 +77,7 @@ function PosProductImage({ image, productId, name }: { image: string; productId:
   return url ? <img src={url} alt={name} /> : <span aria-label="Görsel yüklenemedi">🍽️</span>;
 }
 
-async function request<T>(path: string, actor: string, body?: unknown, method?: "PUT"): Promise<T> {
+async function request<T>(path: string, actor: string, body?: unknown, method?: "PUT" | "POST" | "DELETE"): Promise<T> {
   let response: Response;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15_000);
@@ -166,7 +166,7 @@ type ZReport = {
 type CashierCustomer = { id: string; name: string; phone: string | null; isActive: boolean; customerBalanceMinor: number };
 type CashierCheck = Omit<OpenCheck, "orders" | "payments"> & { createdAt: string; paymentStatus: "unpaid" | "partially_paid" | "paid" | "pending" | "unknown"; payments: Array<{ id: string; amountMinor: number; method: string; status: string; createdAt: string }>; paidMinor: number; remainingMinor: number; orders: Array<{ id: string; version: number; remainingMinor: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number; note?: string | null; options?: ProductOption[] }> }> };
 type AccountReceipt = { check: CashierCheck; location: string; printedAt: string };
-type QuickCreate = { requestId: string; firstOrderId: string; items: Array<{ productId: string; quantity: number; options: Array<{ groupId: string; optionId: string; quantity: number }> }>; customerId: null; tableId: null; waiterId: null };
+type QuickCreate = { requestId: string; firstOrderId: string; items: Array<{ productId: string; quantity: number; note?: string | null; options: Array<{ groupId: string; optionId: string; quantity: number }> }>; customerId: null; tableId: null; waiterId: null };
 const quickRequestKey = `hipos.quick-create.${firmId}.${branchId}`;
 const morningOpenRequestKey = `hipos.cash-opening.${firmId}.${branchId}`;
 
@@ -402,6 +402,26 @@ export function CashierApp() {
     payments: Array<{ id: string; amountMinor: number; method: string }>;
   } | null>(null);
 
+  const [parkDialogOpen, setParkDialogOpen] = useState(false);
+  const [parkLabelInput, setParkLabelInput] = useState("");
+  const parkDialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = parkDialogRef.current;
+    if (parkDialogOpen && dialog && !dialog.open) dialog.showModal();
+    if (!parkDialogOpen && dialog?.open) dialog.close();
+  }, [parkDialogOpen]);
+
+  const [cancellingCheck, setCancellingCheck] = useState<{ id: string; version: number; label: string } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelManagerPin, setCancelManagerPin] = useState("");
+  const [cancellingBusy, setCancellingBusy] = useState(false);
+  const cancelDialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = cancelDialogRef.current;
+    if (cancellingCheck && dialog && !dialog.open) dialog.showModal();
+    if (!cancellingCheck && dialog?.open) dialog.close();
+  }, [cancellingCheck]);
+
   useEffect(() => {
     let live = true;
     request<MenuWorkspace>(`/api/v1/firms/${firmId}/branches/${branchId}/catalog/menus`, "pos-single")
@@ -451,6 +471,82 @@ export function CashierApp() {
     }).filter((item): item is { id: string; product: Product; quantity: number; options: SelectedOption[] } => item !== null));
   }
 
+  function formatElapsedMinutes(createdAt: string): string {
+    const diffMs = Date.now() - new Date(createdAt).getTime();
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return "Az önce";
+    if (diffMinutes === 1) return "1 dk önce";
+    if (diffMinutes < 60) return `${diffMinutes} dk önce`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    return `${diffHours} sa ${diffMinutes % 60} dk önce`;
+  }
+
+  async function parkQuickCart(customNote?: string) {
+    if (quickBusy || (!pendingQuick && quickCart.length === 0)) return;
+    if (!isShiftOpen) {
+      setMorningDismissed(false);
+      setQuickError("İşlem yapabilmek için önce sabah kasa açılışını tamamlamalısınız.");
+      return;
+    }
+    setQuickBusy(true);
+    setQuickError("");
+    setQuickNotice("");
+    try {
+      const defaultLabel = `Paket #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`;
+      const label = customNote?.trim() || defaultLabel;
+      const items = quickCart.map((item, index) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+        note: index === 0 ? label : undefined,
+        options: item.options.map((option) => ({ groupId: option.groupId, optionId: option.optionId, quantity: option.quantity })),
+      }));
+      const payload: QuickCreate = {
+        requestId: createRequestId(),
+        firstOrderId: createRequestId(),
+        items,
+        customerId: null,
+        tableId: null,
+        waiterId: null,
+      };
+      await request<CashierCheck>(checksPath, "pos-single", payload);
+      setQuickCart([]);
+      setParkDialogOpen(false);
+      setParkLabelInput("");
+      setQuickNotice(`Sipariş askıya alındı: ${label}`);
+      await loadUnfinishedChecks();
+    } catch (cause) {
+      setQuickError(`${cause instanceof Error ? cause.message : "Adisyon askıya alınamadı."}`);
+    } finally {
+      setQuickBusy(false);
+    }
+  }
+
+  async function cancelQuickCheck(checkId: string, version: number, reason: string, managerPin?: string) {
+    setCancellingBusy(true);
+    setQuickError("");
+    try {
+      await request(
+        `${checksPath}/${encodeURIComponent(checkId)}/cancel`,
+        "pos-single",
+        { expectedVersion: version, reason: reason.trim() || "Müşteri vazgeçti / terk etti", managerPin: managerPin?.trim() || undefined },
+        "POST"
+      );
+      if (quickActiveCheck?.id === checkId) {
+        setQuickActiveCheck(null);
+        setQuickStep("menu");
+      }
+      setCancellingCheck(null);
+      setCancelReason("");
+      setCancelManagerPin("");
+      setQuickNotice("Sipariş iptal edildi.");
+      await loadUnfinishedChecks();
+    } catch (cause) {
+      setQuickError(cause instanceof Error ? cause.message : "Sipariş iptal edilemedi.");
+    } finally {
+      setCancellingBusy(false);
+    }
+  }
+
   async function proceedToPayment() {
     if (quickBusy || (!pendingQuick && quickCart.length === 0)) return;
     if (!isShiftOpen) {
@@ -462,9 +558,11 @@ export function CashierApp() {
     setQuickError("");
     setQuickNotice("");
     try {
-      const items = quickCart.map((item) => ({
+      const defaultLabel = `Hızlı Satış #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`;
+      const items = quickCart.map((item, index) => ({
         productId: item.product.id,
         quantity: item.quantity,
+        note: index === 0 ? defaultLabel : undefined,
         options: item.options.map(option => ({ groupId: option.groupId, optionId: option.optionId, quantity: option.quantity })),
       }));
 
@@ -1393,6 +1491,31 @@ export function CashierApp() {
               🗑️ Sepeti Temizle
             </button>
           )}
+          {quickCart.length > 0 && (
+            <button
+              type="button"
+              style={{
+                background: "#fef3c7",
+                color: "#92400e",
+                border: "1.5px solid #f59e0b",
+                fontWeight: 700,
+                padding: "8px 14px",
+                borderRadius: 8,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+              }}
+              disabled={quickBusy || Boolean(pendingQuick)}
+              onClick={() => {
+                setParkLabelInput(`Paket #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`);
+                setParkDialogOpen(true);
+              }}
+            >
+              ⏸️ Askıya Al / Beklet
+            </button>
+          )}
           <button
             type="button"
             className={`cashier-quick-enter-cart-btn ${quickCart.length > 0 ? "active" : "disabled"}`}
@@ -1426,7 +1549,138 @@ export function CashierApp() {
       {catalogError && <p className="ops-error" role="alert">Ürünler yüklenemedi: {catalogError} <button type="button" onClick={() => setCatalogRevision(value => value + 1)}>Tekrar dene</button></p>}
       {pendingQuick && <p className="ops-error" role="status">Önceki satış isteğinin sonucu kesinleşmedi. Yeni satışa başlamadan aynı isteği tekrar deneyin.</p>}
       {unfinishedError && <p className="ops-error" role="alert">Açık satışlar alınamadı: {unfinishedError} <button type="button" onClick={() => void loadUnfinishedChecks()}>Tekrar dene</button></p>}
-      {unfinishedChecks.length > 0 && <section className="quick-cart-compact" aria-label="Açık masasız adisyonlar"><header><h2>Açık masasız adisyonlar <span>{unfinishedChecks.length} kayıt</span></h2></header><div className="quick-cart-compact-list">{unfinishedChecks.map(check => <div className="quick-cart-compact-row" key={check.id}><div className="quick-cart-compact-info"><strong>{new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(check.createdAt))} · {check.orders.flatMap(order => order.items).map(item => `${item.quantity} × ${item.productName}`).join(", ")}</strong><span>Kalan: {money(check.remainingMinor)}{check.paidMinor > 0 ? ` · Simüle ödeme: ${money(check.paidMinor)}` : ""}</span></div><button type="button" className="waiter-back" disabled={quickBusy || Boolean(pendingQuick)} onClick={() => void resumeQuickCheck(check.id)}>Devam et</button></div>)}</div><small>Bu liste şubedeki açık masasız adisyonları gösterir.</small></section>}
+      {unfinishedChecks.length > 0 && (
+        <section
+          style={{
+            background: "#fffbeb",
+            border: "1.5px solid #fde68a",
+            borderRadius: 12,
+            padding: "14px 16px",
+            marginBottom: 16,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+          }}
+          aria-label="Bekleyen Hızlı Satışlar"
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }} aria-hidden="true">⏸️</span>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#92400e", letterSpacing: 0.5 }}>
+                BEKLEYEN TEZGÂH & PAKET SATIŞLARI
+              </h2>
+              <span style={{ background: "#fef3c7", color: "#b45309", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, border: "1px solid #fcd34d" }}>
+                {unfinishedChecks.length} Bekleyen
+              </span>
+            </div>
+            <button
+              type="button"
+              className="ops-secondary"
+              style={{ padding: "4px 10px", fontSize: 12, fontWeight: 600, background: "#ffffff", border: "1px solid #d1d5db" }}
+              onClick={() => void loadUnfinishedChecks()}
+              disabled={quickBusy}
+            >
+              🔄 Listeyi Yenile
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {unfinishedChecks.map((check) => {
+              const label = check.orders[0]?.items[0]?.note || `Satış #${check.id.slice(0, 6)}`;
+              const itemsSummary = check.orders.flatMap((order) => order.items).map((item) => `${item.quantity}× ${item.productName}`).join(", ");
+              const isPartiallyPaid = (check.paidMinor ?? 0) > 0;
+
+              return (
+                <article
+                  key={check.id}
+                  style={{
+                    background: "#ffffff",
+                    border: "1.5px solid #e5e7eb",
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                  }}
+                >
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6, marginBottom: 4 }}>
+                      <strong style={{ fontSize: 14, color: "#1f2937", display: "flex", alignItems: "center", gap: 4 }}>
+                        <span>🏷️</span>
+                        <span>{label}</span>
+                      </strong>
+                      <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, whiteSpace: "nowrap" }}>
+                        ⏱️ {formatElapsedMinutes(check.createdAt)}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#4b5563", lineHeight: 1.4, margin: "4px 0" }}>
+                      {itemsSummary}
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: "1px dashed #e5e7eb", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>Kalan Tutar</div>
+                      <b style={{ fontSize: 15, color: "#1e40af", fontWeight: 800 }}>{money(check.remainingMinor)}</b>
+                      {isPartiallyPaid && (
+                        <span style={{ fontSize: 10.5, color: "#059669", display: "block" }}>
+                          (Ödenen: {money(check.paidMinor ?? 0)})
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        style={{
+                          background: "#fee2e2",
+                          color: "#991b1b",
+                          border: "1px solid #fca5a5",
+                          borderRadius: 6,
+                          padding: "6px 9px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                        disabled={quickBusy || Boolean(pendingQuick) || check.payments.length > 0}
+                        title={check.payments.length > 0 ? "Ödeme alınmış adisyon iptal edilemez" : "Siparişi iptal et"}
+                        onClick={() => setCancellingCheck({ id: check.id, version: check.version, label })}
+                      >
+                        🗑️ İptal
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          background: "#2563eb",
+                          color: "#ffffff",
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "6px 14px",
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                        disabled={quickBusy || Boolean(pendingQuick)}
+                        onClick={() => void resumeQuickCheck(check.id)}
+                      >
+                        ⚡ Tahsil Et →
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="cashier-quick-catalog-full">
         <div className="cashier-quick-categories" aria-label="Kategoriler">
@@ -1490,10 +1744,10 @@ export function CashierApp() {
           <header className="cashier-bill-header">
             {!isQuickPayment && <span className="cashier-table-number"><small>MASA</small>{selected?.number}</span>}
             <div className="cashier-bill-heading-copy">
-              <h1>{isQuickPayment ? "Hızlı Satış (Gel-Al)" : selected?.name}</h1>
+              <h1>{isQuickPayment ? (activeCheck?.orders[0]?.items[0]?.note ? `📦 ${activeCheck.orders[0].items[0].note}` : "Hızlı Satış (Gel-Al)") : selected?.name}</h1>
               <span>{activeCheck ? (isQuickPayment ? "1 açık adisyon" : `${selectedChecks.length} açık adisyon`) : "Açık adisyon yok"}</span>
               <span className="cashier-table-meta">{isQuickPayment ? "Kasa: Hızlı Satış Terminali" : `Garson: ${selected?.assignment?.waiterName ?? "Atanmamış"}`}</span>
-              {activeCheck?.createdAt && <span className="cashier-table-meta">Adisyon açılışı: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(activeCheck.createdAt))}</span>}
+              {activeCheck?.createdAt && <span className="cashier-table-meta">Adisyon açılışı: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(activeCheck.createdAt))} ({formatElapsedMinutes(activeCheck.createdAt)})</span>}
             </div>
             <span className="cashier-open-badge">{isQuickPayment ? (activeCheck?.paymentStatus === "partially_paid" ? "Kısmi Ödeme" : "Açık Adisyon") : selected?.status === "bill_requested" ? "Hesap istendi" : activeCheck ? "Açık adisyon" : "Boş"}</span>
           </header>
@@ -1504,6 +1758,39 @@ export function CashierApp() {
           {activeCheck && <footer className="cashier-bill-footer"><div><span>Ara toplam</span><b>{money(activeCheck.grossTotalMinor)}</b></div>{activeCheck.adjustmentMinor > 0 && <div><span>İndirim / düzeltmeler</span><b>−{money(activeCheck.adjustmentMinor)}</b></div>}{activeCheck.adjustments.length > 0 && <section className="cashier-adjustments"><strong>İşlem detayları</strong>{activeCheck.adjustments.map((adjustment, index) => <div key={adjustment.requestId ?? index}><span>{adjustment.action === "discount" ? "İndirim" : adjustment.action === "comp" ? "İkram" : "Ürün iptali"} · −{money(adjustment.amountMinor)}</span><small>Gerekçe: {adjustment.reason}</small><small>İşlemi yapan: {adjustment.actor ?? "Bilinmiyor"}</small><small>{adjustment.approvalMode === "development_bypass" ? "Yönetici onayı alınmadı (geliştirme)" : "Yönetici onayı bilgisi yok"}</small></div>)}</section>}<div><span>Toplam adisyon tutarı</span><b>{money(activeCheck.totalMinor)}</b></div>{activeCheck.paidMinor > 0 && <div className="cashier-simulated"><span>Simüle ödeme</span><b>{money(activeCheck.paidMinor)}</b></div>}</footer>}
           {activeCheck?.payments.length ? <p className="cashier-action-warning">Ödeme girişimi olan adisyon bölünemez veya indirim/ikram işlemine alınamaz.</p> : null}
           <div className="cashier-bill-actions cashier-action-grid">
+            {isQuickPayment && (
+              <button
+                type="button"
+                className="cashier-split-button"
+                style={{ background: "#fef3c7", color: "#92400e", borderColor: "#f59e0b", fontWeight: 700 }}
+                onClick={() => {
+                  setQuickActiveCheck(null);
+                  setQuickStep("menu");
+                  setQuickNotice("Açık satış beklemeye alındı. Sıradaki müşterinin siparişini alabilirsiniz.");
+                  void loadUnfinishedChecks();
+                }}
+              >
+                ⏸️ Beklet & Menüye Dön
+              </button>
+            )}
+            {isQuickPayment && activeCheck && (
+              <button
+                type="button"
+                className="cashier-split-button"
+                style={{ background: "#fee2e2", color: "#991b1b", borderColor: "#f87171", fontWeight: 700 }}
+                disabled={activeCheck.payments.length > 0}
+                title={activeCheck.payments.length > 0 ? "Ödeme alınmış adisyon doğrudan iptal edilemez" : "Siparişi iptal et"}
+                onClick={() => {
+                  setCancellingCheck({
+                    id: activeCheck.id,
+                    version: activeCheck.version,
+                    label: activeCheck.orders[0]?.items[0]?.note || `Satış #${activeCheck.id.slice(0, 6)}`,
+                  });
+                }}
+              >
+                🗑️ Siparişi İptal Et
+              </button>
+            )}
             <button className="cashier-split-button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) { setSplitCheck(activeCheck); setSplitQuantities({}); setSplitError(""); setSplitNotice(""); } }}>Adisyonu böl</button>
             {!isQuickPayment && <button className="cashier-split-button" disabled={!selected?.assignment || Boolean(selected?.group) || Boolean(error)} onClick={() => showCashierAction("transfer")}>Masayı taşı</button>}
             {!isQuickPayment && <button className="cashier-split-button" disabled={!selected?.assignment || Boolean(selected?.group) || Boolean(error)} onClick={() => showCashierAction("merge")}>Masaları birleştir</button>}
@@ -1679,6 +1966,131 @@ export function CashierApp() {
             </button>
           </footer>
         </section>
+      )}
+    </dialog>
+    {/* Siparişi Askıya Al / Beklet Dialogu */}
+    <dialog
+      ref={parkDialogRef}
+      className="waiter-reservation-dialog"
+      aria-labelledby="park-order-title"
+      onCancel={() => setParkDialogOpen(false)}
+      onClose={() => setParkDialogOpen(false)}
+    >
+      {parkDialogOpen && (
+        <form
+          className="waiter-custom-modal"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void parkQuickCart(parkLabelInput);
+          }}
+        >
+          <header>
+            <div>
+              <span className="ops-eyebrow">TEZGÂH & AL-GÖTÜR</span>
+              <h2 id="park-order-title">Siparişi Askıya Al / Beklet</h2>
+            </div>
+            <button type="button" className="waiter-modal-close" onClick={() => setParkDialogOpen(false)} aria-label="Kapat">×</button>
+          </header>
+          <p className="waiter-action-description">
+            Müşteri geçici olarak kasadan ayrıldıysa siparişi beklemeye alabilir ve sıradaki müşteriyi alabilirsiniz.
+          </p>
+          <div style={{ background: "#f8fafc", padding: "10px 14px", borderRadius: 8, border: "1px solid #e2e8f0", marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Sepet Özeti: </span>
+            <strong style={{ fontSize: 13, color: "#1e293b" }}>{quickCartCount} Ürün · {money(quickTotalMinor)}</strong>
+          </div>
+          <label className="waiter-note-field">
+            Tanıtıcı İsim / Not / Çağrı Cihazı No
+            <input
+              autoFocus
+              type="text"
+              maxLength={80}
+              value={parkLabelInput}
+              onChange={(e) => setParkLabelInput(e.target.value)}
+              placeholder={`Örn. Paket #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`}
+            />
+            <small style={{ color: "#64748b", fontSize: 11.5, marginTop: 4, display: "block" }}>
+              Örn. "Ahmet Bey", "Paket #14", "Çağrı Cihazı #4"
+            </small>
+          </label>
+          {quickError && <p className="ops-error" role="alert">{quickError}</p>}
+          <footer>
+            <button type="button" className="waiter-cancel-custom" disabled={quickBusy} onClick={() => setParkDialogOpen(false)}>
+              Vazgeç
+            </button>
+            <button type="submit" className="ops-primary" disabled={quickBusy}>
+              {quickBusy ? "Bekletiliyor…" : "⏸️ Askıya Al"}
+            </button>
+          </footer>
+        </form>
+      )}
+    </dialog>
+
+    {/* Açık Siparişi İptal Etme Dialogu */}
+    <dialog
+      ref={cancelDialogRef}
+      className="waiter-reservation-dialog"
+      aria-labelledby="cancel-order-title"
+      onCancel={() => setCancellingCheck(null)}
+      onClose={() => setCancellingCheck(null)}
+    >
+      {cancellingCheck && (
+        <form
+          className="waiter-custom-modal"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void cancelQuickCheck(cancellingCheck.id, cancellingCheck.version, cancelReason, cancelManagerPin);
+          }}
+        >
+          <header>
+            <div>
+              <span className="ops-eyebrow" style={{ color: "#dc2626" }}>SİPARİŞ İPTALİ</span>
+              <h2 id="cancel-order-title">Siparişi İptal Et</h2>
+            </div>
+            <button type="button" className="waiter-modal-close" disabled={cancellingBusy} onClick={() => setCancellingCheck(null)} aria-label="Kapat">×</button>
+          </header>
+          <p className="waiter-action-description">
+            <strong>{cancellingCheck.label}</strong> siparişi iptal edilecek ve kapatılacaktır. Bu işlem geri alınamaz.
+          </p>
+          <label className="waiter-note-field">
+            İptal Gerekçesi (Zorunlu)
+            <input
+              autoFocus
+              required
+              type="text"
+              maxLength={200}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Örn. Müşteri sıradan ayrıldı / almaktan vazgeçti"
+              disabled={cancellingBusy}
+            />
+          </label>
+          <label className="waiter-note-field">
+            Yönetici PIN Onayı <small>(Müdür / Patron PIN kodu, örn. 9999)</small>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              placeholder="••••"
+              value={cancelManagerPin}
+              onChange={(e) => setCancelManagerPin(e.target.value)}
+              disabled={cancellingBusy}
+            />
+          </label>
+          {quickError && <p className="ops-error" role="alert">{quickError}</p>}
+          <footer>
+            <button type="button" className="waiter-cancel-custom" disabled={cancellingBusy} onClick={() => setCancellingCheck(null)}>
+              Vazgeç
+            </button>
+            <button
+              type="submit"
+              className="ops-primary"
+              style={{ background: "#dc2626", borderColor: "#b91c1c" }}
+              disabled={cancellingBusy || !cancelReason.trim()}
+            >
+              {cancellingBusy ? "İptal Ediliyor…" : "🗑️ Siparişi İptal Et"}
+            </button>
+          </footer>
+        </form>
       )}
     </dialog>
   </main>;
