@@ -228,9 +228,9 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     content = <ServicePersonnelPage ctx={ctx} source={serviceSource} canWrite={canWritePersonnel} />;
   } else if (section === "branches" && item === "list") {
     content = <BranchesPage ctx={ctx} />;
-  } else if (section === "cash" && ["summary", "movements", "shifts", "opening-closing"].includes(item)) {
+  } else if (section === "cash" && ["summary", "registers", "movements", "shifts", "cash", "card", "opening-closing"].includes(item)) {
     content = cashSource === "http"
-      ? <CashManagementPage ctx={ctx} view={item as "summary" | "movements" | "shifts" | "opening-closing"} canWrite={canWriteCash} />
+      ? <CashManagementPage ctx={ctx} view={item as "summary" | "registers" | "movements" | "shifts" | "cash" | "card" | "opening-closing"} canWrite={canWriteCash} />
       : <GenericPage section={sections.find(entry => entry.id === "cash")!} slug={item} sources={sources} />;
   } else if (section === "finance" && ["expenses", "expense-categories"].includes(item)) {
     content = expenseSource === "http"
@@ -313,7 +313,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
         </div>
       )}
       {!generic && !(presentationSection === "overview" && presentationItem === "daily") &&
-        !suppressCatalogStageNotice && <div className="notice feature-stage-notice" role="status">
+        !suppressCatalogStageNotice && !(presentationSection === "cash" && ["summary", "registers", "cash", "card"].includes(presentationItem)) && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>
       </div>}

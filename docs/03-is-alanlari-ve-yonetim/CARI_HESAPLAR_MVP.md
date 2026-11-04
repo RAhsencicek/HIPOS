@@ -72,6 +72,14 @@ Tutar kuruş cinsinden tamsayıdır; sıfır/negatif tutar, TRY dışı para bir
 
 ## Bilinçli sınırlar ve sonraki dilim
 
+### Planlanan kasadan tedarikçi ödemesi
+
+Bu akış henüz uygulanmamıştır. Yönetici aktif bir tedarikçi ve açık vardiyası olan bir kasa seçerek nakit ödeme tutarı, açıklama ve isteğe bağlı belge referansı girer. Kasa seçicisinde açık vardiyanın hareketlerden hesaplanan beklenen nakdi gösterilir; bu değer fiziksel sayım olarak sunulmaz.
+
+Ödeme tek sunucu komutuyla kaydedilmelidir: aynı şube ve firma kapsamındaki seçili kasa vardiyasına nakit çıkışı, tedarikçi hesabına aynı tutarda `supplier_payment` ve her iki alana ait denetim kayıtları tek veritabanı transaction'ında yazılır. Bir taraf başarısızsa hiçbir kayıt kesinleşmez. Kasa ve cari yetkileri/capability durumları, aktif tedarikçi, açık vardiya ve yeterli beklenen nakit sunucuda doğrulanır. Eşzamanlı isteklerde bakiye ve vardiya denetimleri kilit altında yapılır. İstek kimliği tekrarında aynı sonuç döner; farklı içerikle aynı kimlik kullanımı reddedilir. İki hareket ortak işlem kimliğiyle izlenebilir olmalıdır.
+
+Mevcut bağımsız manuel cari ödeme ve kasa çıkışı formları bu bağlantıyı oluşturmaz. Bağlı ödemenin düzeltilmesi yalnız kasa tarafında ters kayıt bırakılarak yapılamaz; iki defteri birlikte düzelten gerekçeli karşı işlem ayrıca tasarlanıp test edilmelidir. Banka havalesi, resmi ödeme belgesi, fatura tahsisi ve otomatik gider kaydı bu nakit akışının kapsamında değildir.
+
 Bu dilimde fatura/sipariş belgesi, vade/yaşlandırma, tahsilatın tek tek faturaya dağıtımı, satın alma-mal kabul/stok bağlantısı, satış adisyonundan otomatik cari hareket, kasa defteri, banka mutabakatı, e-fatura/vergi ve çoklu para birimi yoktur. Dolayısıyla “vadesi geçmiş tutar” hesaplanmaz. Bunlar eklenecekse belge ve ödeme tahsisi ayrı kalıcı kavramlar olarak tasarlanmalıdır; salt hareket tarihinden vade çıkarılmaz.
 
 Uygulama sırası: additive PostgreSQL source doğrulama migration'ı ve eski capability tercihlerini idempotent birleştirme → ana capability gate/idempotent API → tekrar çalıştırılabilir kurgusal demo seed → rol filtresinden bağımsız kart/ekstre ve işlem formları → PostgreSQL ve tarayıcı kabul testleri.

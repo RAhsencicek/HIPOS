@@ -12,7 +12,7 @@ namespace Hipos.Api.Sales;
 public sealed record CreateSalesCheck(Guid RequestId, Guid FirstOrderId, IReadOnlyList<PosOrderItem> Items,
     string? CustomerId, string? TableId, string? WaiterId);
 public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long AmountMinor, string Method,
-    string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false);
+    string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
 public sealed record SplitCheckLine(long OrderLineId, int Quantity);
 public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
 public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
@@ -34,6 +34,30 @@ public static class SalesCheckEndpoints
         bool allowUnapprovedAdjustments)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/sales/checks");
+
+        var reportGroup = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/sales");
+        // Günlük tahsilat özeti yalnızca satış alanındaki başarılı ödeme kayıtlarından üretilir.
+        reportGroup.MapGet("/daily-collections", async (string firmId, string branchId, HttpContext context, SalesDbContext db) =>
+        {
+            var denied = Guard(context, firmId, branchId, salesReady, false);
+            if (denied is not null) return denied;
+            var localNow = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(3));
+            var start = new DateTimeOffset(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, TimeSpan.FromHours(3)).ToUniversalTime();
+            var end = start.AddDays(1);
+            var totals = await db.PaymentAttempts.AsNoTracking()
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId && row.Status == "succeeded" &&
+                    row.CreatedAt >= start && row.CreatedAt < end)
+                .GroupBy(row => row.Method)
+                .Select(paymentGroup => new { method = paymentGroup.Key,
+                    amountMinor = paymentGroup.Sum(row => row.AmountMinor), count = paymentGroup.Count() })
+                .ToListAsync(context.RequestAborted);
+            var cash = totals.FirstOrDefault(row => row.method == "cash");
+            var card = totals.FirstOrDefault(row => row.method == "card");
+            return Results.Ok(new { source = "postgres", simulated = true, date = localNow.ToString("yyyy-MM-dd"),
+                cashMinor = cash?.amountMinor ?? 0, cardMinor = card?.amountMinor ?? 0,
+                totalMinor = (cash?.amountMinor ?? 0) + (card?.amountMinor ?? 0),
+                count = (cash?.count ?? 0) + (card?.count ?? 0) });
+        });
 
         group.MapPost("", async (string firmId, string branchId, CreateSalesCheck command,
             HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate) =>
@@ -382,7 +406,7 @@ public static class SalesCheckEndpoints
             if (!orderExists) return Fail(context, "ORDER_NOT_FOUND", 404, "Sipariş bu adisyona bağlı değil.");
             var payment = await payments.StartAsync(firmId, branchId, command.OrderId,
                 new StartSimulatedPayment(command.AttemptId, command.AmountMinor, command.Method,
-                    command.SimulatedOutcome, command.ExpectedOrderVersion, command.PostToCash), DemoAccess.Resolve(context)!.Name,
+                    command.SimulatedOutcome, command.ExpectedOrderVersion, command.PostToCash, command.RegisterId), DemoAccess.Resolve(context)!.Name,
                 context.RequestAborted, requireCheckCapability: true);
             if (payment.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);

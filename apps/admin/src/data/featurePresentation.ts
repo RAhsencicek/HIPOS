@@ -1,4 +1,4 @@
-﻿import { featureStory } from "./featureStories";
+import { featureStory } from "./featureStories";
 
 export type FeatureStage = "working" | "demo" | "inactive" | "setup" | "future";
 
@@ -63,7 +63,7 @@ export function featurePresentation(section: string, item: string, sources: Sour
   if (key === "overview/daily")
     return { stage: "demo", label: "Önizleme", description };
   if (section === "cash" && sources.cashSource === "http" &&
-    ["summary", "movements", "shifts", "opening-closing"].includes(item))
+    ["summary", "registers", "movements", "shifts", "cash", "card", "opening-closing"].includes(item))
     return { stage: "working", label: "Çalışıyor", description };
   if (section === "inventory" && sources.inventorySource === "http" &&
     ["summary", "critical", "ingredients", "movements", "counts", "recipes"].includes(item))

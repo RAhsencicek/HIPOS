@@ -9,7 +9,7 @@ namespace Hipos.Api.Sales;
 
 // Yalnız Development: burada dış sağlayıcı çağrısı ve gerçek para hareketi yoktur.
 public sealed record StartSimulatedPayment(
-    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false);
+    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
 public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion);
 public sealed record PaymentAttemptInfo(
     string Id, string OrderId, long AmountMinor, string Currency, string Method,
@@ -60,9 +60,9 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
                 transaction.GetDbTransaction(), firmId, branchId, "cash.management", cancellationToken);
             if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
-            var shiftResult = await LockOpenCashShiftAsync(firmId, branchId, transaction.GetDbTransaction(), cancellationToken);
+            var shiftResult = await LockOpenCashShiftAsync(firmId, branchId, command.RegisterId, transaction.GetDbTransaction(), cancellationToken);
             if (shiftResult.Count == 0)
-                return PaymentCommandResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın.");
+                return PaymentCommandResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, command.RegisterId is null ? "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın." : "Seçili kasada açık vardiya yok. Tahsilat için önce kasa açılışını yapın.");
             if (shiftResult.Count > 1)
                 return PaymentCommandResult.Rejected("CASH_SHIFT_AMBIGUOUS", 409, "Birden fazla açık kasa vardiyası var. Tahsilattan önce yalnız kullanılacak kasanın vardiyasını açık bırakın.");
             cashShift = shiftResult[0];
@@ -123,7 +123,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         return new PaymentCommandResult(ToInfo(attempt), SalesOrders.ToDetail(order), null, true);
     }
 
-    private async Task<IReadOnlyList<CashShiftLink>> LockOpenCashShiftAsync(string firmId, string branchId,
+    private async Task<IReadOnlyList<CashShiftLink>> LockOpenCashShiftAsync(string firmId, string branchId, Guid? registerId,
         DbTransaction transaction, CancellationToken cancellationToken)
     {
         var connection = db.Database.GetDbConnection();
@@ -134,12 +134,16 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             FROM cash.shifts s
             INNER JOIN cash.registers r ON r.id = s.register_id AND r.firm_id = s.firm_id AND r.branch_id = s.branch_id
             WHERE s.firm_id = @firm_id AND s.branch_id = @branch_id AND s.status = 'open' AND r.is_active = TRUE
+              AND (@register_id::uuid IS NULL OR s.register_id = @register_id::uuid)
             ORDER BY s.opened_at, s.id
             FOR UPDATE OF s
             """;
         var firmParameter = command.CreateParameter(); firmParameter.ParameterName = "firm_id"; firmParameter.Value = firmId;
         var branchParameter = command.CreateParameter(); branchParameter.ParameterName = "branch_id"; branchParameter.Value = branchId;
         command.Parameters.Add(firmParameter); command.Parameters.Add(branchParameter);
+        var registerParameter = command.CreateParameter(); registerParameter.ParameterName = "register_id";
+        registerParameter.Value = registerId.HasValue ? registerId.Value : DBNull.Value;
+        command.Parameters.Add(registerParameter);
         var shifts = new List<CashShiftLink>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) shifts.Add(new CashShiftLink(reader.GetGuid(0), reader.GetGuid(1)));
@@ -165,7 +169,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             AddParameter(movement, "branch_id", attempt.BranchId); AddParameter(movement, "register_id", shift.RegisterId);
             AddParameter(movement, "shift_id", shift.Id); AddParameter(movement, "method", attempt.Method);
             AddParameter(movement, "amount", attempt.AmountMinor);
-            AddParameter(movement, "description", $"Garson tahsilatı · {(attempt.Method == "cash" ? "Nakit" : "Kart")} · Adisyon {attempt.CheckId.ToString()[..8]}");
+            AddParameter(movement, "description", $"Kasa tahsilatı · {(attempt.Method == "cash" ? "Nakit" : "Kart")} · Adisyon {attempt.CheckId.ToString()[..8]}");
             AddParameter(movement, "external_reference", $"{attempt.CheckId}:{attempt.OrderId}");
             AddParameter(movement, "event_id", attempt.Id.ToString()); AddParameter(movement, "actor", actor);
             AddParameter(movement, "created_at", now);

@@ -6,7 +6,10 @@ using Npgsql;
 
 namespace Hipos.Api.Service;
 
-public sealed record CreateServiceTable(int? Number, string? Name);
+public sealed record CreateServiceTable(int? Number, string? Name, string? Floor = null);
+public sealed record CreateServiceFloor(string Name);
+public sealed record RenameServiceFloor(string OldName, string NewName);
+public sealed record DeleteServiceFloor(string Name);
 public sealed record UpdateServiceTableState(int ExpectedVersion);
 public sealed record UpdateServiceTableFloor(int ExpectedVersion, string? Floor);
 public sealed record ReserveServiceTable(int ExpectedVersion, DateTimeOffset ReservedFor, string? GuestName);
@@ -89,9 +92,10 @@ public static class ServiceEndpoints
                     ? ToView(assignment, tableChecks.SelectMany(checkId => ordersByCheck.TryGetValue(checkId, out var checkOrders)
                         ? checkOrders : []).ToArray(), tableChecks.SelectMany(checkId => adjustmentsByCheck.TryGetValue(checkId, out var checkAdjustments)
                         ? checkAdjustments : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
-                    : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName, table.Floor);
+                    : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName, NormalizeFloorName(table.Floor));
             }).ToArray();
-            return Results.Ok(new { source = "postgres", tablesEnabled, waitersEnabled, items });
+            var floors = await EnsureBranchFloorsAsync(db, firmId, branchId, tables, context.RequestAborted);
+            return Results.Ok(new { source = "postgres", tablesEnabled, waitersEnabled, floors, items });
         });
 
         group.MapPost("/tables/{tableId}/request-bill", async (string firmId, string branchId, string tableId,
@@ -644,7 +648,8 @@ public static class ServiceEndpoints
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
             var name = command.Name?.Trim();
-            if (command.Number is < 1 or > 999 || name?.Length > 80)
+            var floor = NormalizeFloorName(command.Floor);
+            if (command.Number is < 1 or > 999 || name?.Length > 80 || floor?.Length > 80)
                 return Fail(context, "INVALID_TABLE", 400, "Masa numarası 1–999, adı en çok 80 karakter olmalı.");
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
@@ -662,6 +667,7 @@ public static class ServiceEndpoints
             if (existing is not null)
             {
                 existing.IsActive = true;
+                if (floor is not null) existing.Floor = floor;
                 existing.Version++;
                 existing.UpdatedAt = now;
                 AddAudit(db, firmId, branchId, existing.Id, "table_reactivated", DemoAccess.Resolve(context)!.Name, now);
@@ -671,7 +677,12 @@ public static class ServiceEndpoints
                     existing.Status, existing.ReservedFor, existing.Version, existing.ReservationGuestName, existing.Floor));
             }
             var row = new ServiceTableRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
-                Number = number, Name = name?.Length > 0 ? name : $"Masa {number:00}", UpdatedAt = now };
+                Number = number, Name = name?.Length > 0 ? name : $"Masa {number:00}", Floor = floor, UpdatedAt = now };
+            if (floor is not null && !await db.Floors.AnyAsync(f => f.FirmId == firmId && f.BranchId == branchId && f.Name == floor, context.RequestAborted))
+            {
+                var nextOrder = (await db.Floors.Where(f => f.FirmId == firmId && f.BranchId == branchId).MaxAsync(f => (int?)f.SortOrder, context.RequestAborted) ?? 0) + 1;
+                db.Floors.Add(new ServiceFloorRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId, Name = floor, SortOrder = nextOrder, CreatedAt = now });
+            }
             db.Tables.Add(row);
             AddAudit(db, firmId, branchId, row.Id, "table_created", DemoAccess.Resolve(context)!.Name, now);
             try { await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted); }
@@ -686,7 +697,8 @@ public static class ServiceEndpoints
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
-            if (command.ExpectedVersion < 1 || command.Floor is not (null or "lower" or "upper"))
+            var floor = NormalizeFloorName(command.Floor);
+            if (command.ExpectedVersion < 1 || floor?.Length > 80)
                 return Fail(context, "INVALID_TABLE_FLOOR", 400, "Kat seçimi veya masa sürümü geçersiz.");
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
@@ -696,14 +708,115 @@ public static class ServiceEndpoints
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (table is null || !table.IsActive) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
             if (table.Version != command.ExpectedVersion) return Fail(context, "VERSION_CONFLICT", 409, "Masa değişti; güncel bilgileri yenileyin.");
-            if (table.Floor != command.Floor)
+            if (table.Floor != floor)
             {
-                table.Floor = command.Floor; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+                table.Floor = floor; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
+                if (floor is not null && !await db.Floors.AnyAsync(f => f.FirmId == firmId && f.BranchId == branchId && f.Name == floor, context.RequestAborted))
+                {
+                    var nextOrder = (await db.Floors.Where(f => f.FirmId == firmId && f.BranchId == branchId).MaxAsync(f => (int?)f.SortOrder, context.RequestAborted) ?? 0) + 1;
+                    db.Floors.Add(new ServiceFloorRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId, Name = floor, SortOrder = nextOrder, CreatedAt = table.UpdatedAt });
+                }
                 AddAudit(db, firmId, branchId, table.Id, "table_floor_changed", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
                 await db.SaveChangesAsync(context.RequestAborted);
             }
             await transaction.CommitAsync(context.RequestAborted);
             return Results.Ok(new { id = table.Id, floor = table.Floor, version = table.Version });
+        });
+
+        group.MapPost("/floors", async (string firmId, string branchId, CreateServiceFloor command,
+            HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var name = NormalizeFloorName(command.Name);
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 80)
+                return Fail(context, "INVALID_FLOOR_NAME", 400, "Kat adı 1–80 karakter olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var exists = await db.Floors.AnyAsync(f => f.FirmId == firmId && f.BranchId == branchId &&
+                f.Name.ToLower() == name.ToLower(), context.RequestAborted);
+            if (exists) return Fail(context, "FLOOR_EXISTS", 409, "Bu isimde bir kat zaten var.");
+            var now = DateTimeOffset.UtcNow;
+            var nextOrder = (await db.Floors.Where(f => f.FirmId == firmId && f.BranchId == branchId)
+                .MaxAsync(f => (int?)f.SortOrder, context.RequestAborted) ?? 0) + 1;
+            var row = new ServiceFloorRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId,
+                Name = name, SortOrder = nextOrder, CreatedAt = now };
+            db.Floors.Add(row);
+            AddAudit(db, firmId, branchId, row.Id, "floor_created", DemoAccess.Resolve(context)!.Name, now);
+            await db.SaveChangesAsync(context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            var floors = await db.Floors.AsNoTracking().Where(f => f.FirmId == firmId && f.BranchId == branchId)
+                .OrderBy(f => f.SortOrder).ThenBy(f => f.CreatedAt).Select(f => f.Name).ToArrayAsync(context.RequestAborted);
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/floors", new { name = row.Name, floors });
+        });
+
+        group.MapPut("/floors", async (string firmId, string branchId, RenameServiceFloor command,
+            HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var oldName = NormalizeFloorName(command.OldName);
+            var newName = NormalizeFloorName(command.NewName);
+            if (string.IsNullOrWhiteSpace(oldName) || string.IsNullOrWhiteSpace(newName) || newName.Length > 80)
+                return Fail(context, "INVALID_FLOOR_NAME", 400, "Eski ve yeni kat adı 1–80 karakter olmalı.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var row = await db.Floors.SingleOrDefaultAsync(f => f.FirmId == firmId && f.BranchId == branchId && f.Name == oldName, context.RequestAborted);
+            if (row is null) return Fail(context, "FLOOR_NOT_FOUND", 404, "Düzenlenecek kat bulunamadı.");
+            if (!string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase) &&
+                await db.Floors.AnyAsync(f => f.FirmId == firmId && f.BranchId == branchId && f.Name.ToLower() == newName.ToLower(), context.RequestAborted))
+                return Fail(context, "FLOOR_EXISTS", 409, "Bu isimde başka bir kat zaten var.");
+            var now = DateTimeOffset.UtcNow;
+            row.Name = newName;
+            var affectedTables = await db.Tables.Where(t => t.FirmId == firmId && t.BranchId == branchId && t.Floor == oldName)
+                .ToListAsync(context.RequestAborted);
+            foreach (var table in affectedTables)
+            {
+                table.Floor = newName;
+                table.Version++;
+                table.UpdatedAt = now;
+            }
+            AddAudit(db, firmId, branchId, row.Id, "floor_renamed", DemoAccess.Resolve(context)!.Name, now);
+            await db.SaveChangesAsync(context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            var floors = await db.Floors.AsNoTracking().Where(f => f.FirmId == firmId && f.BranchId == branchId)
+                .OrderBy(f => f.SortOrder).ThenBy(f => f.CreatedAt).Select(f => f.Name).ToArrayAsync(context.RequestAborted);
+            return Results.Ok(new { name = newName, floors });
+        });
+
+        group.MapPost("/floors/delete", async (string firmId, string branchId, DeleteServiceFloor command,
+            HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+            var name = NormalizeFloorName(command.Name);
+            if (string.IsNullOrWhiteSpace(name))
+                return Fail(context, "INVALID_FLOOR_NAME", 400, "Silinecek kat adı belirtilmeli.");
+            await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
+            var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, "branches.tables", context.RequestAborted);
+            if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+            var row = await db.Floors.SingleOrDefaultAsync(f => f.FirmId == firmId && f.BranchId == branchId && f.Name == name, context.RequestAborted);
+            var now = DateTimeOffset.UtcNow;
+            if (row is not null) db.Floors.Remove(row);
+            var affectedTables = await db.Tables.Where(t => t.FirmId == firmId && t.BranchId == branchId && t.Floor == name)
+                .ToListAsync(context.RequestAborted);
+            foreach (var table in affectedTables)
+            {
+                table.Floor = null;
+                table.Version++;
+                table.UpdatedAt = now;
+            }
+            AddAudit(db, firmId, branchId, row?.Id ?? name, "floor_deleted", DemoAccess.Resolve(context)!.Name, now);
+            await db.SaveChangesAsync(context.RequestAborted);
+            await transaction.CommitAsync(context.RequestAborted);
+            var floors = await db.Floors.AsNoTracking().Where(f => f.FirmId == firmId && f.BranchId == branchId)
+                .OrderBy(f => f.SortOrder).ThenBy(f => f.CreatedAt).Select(f => f.Name).ToArrayAsync(context.RequestAborted);
+            return Results.Ok(new { removed = name, floors });
         });
 
         group.MapDelete("/tables/{tableId}", async (string firmId, string branchId, string tableId,
@@ -913,6 +1026,52 @@ public static class ServiceEndpoints
     }
 
     private static string? NormalizePhone(string? phone) => string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+
+    private static string? NormalizeFloorName(string? floor)
+    {
+        if (string.IsNullOrWhiteSpace(floor)) return null;
+        var trimmed = floor.Trim();
+        return trimmed switch
+        {
+            "lower" => "Alt kat",
+            "upper" => "Üst kat",
+            _ => trimmed,
+        };
+    }
+
+    private static async Task<string[]> EnsureBranchFloorsAsync(ServiceDbContext db, string firmId, string branchId,
+        IReadOnlyList<ServiceTableRow> tables, CancellationToken cancellationToken)
+    {
+        var existing = await db.Floors.Where(f => f.FirmId == firmId && f.BranchId == branchId)
+            .OrderBy(f => f.SortOrder).ThenBy(f => f.CreatedAt).ToListAsync(cancellationToken);
+        var names = existing.Select(f => f.Name).ToList();
+        var changed = false;
+        var now = DateTimeOffset.UtcNow;
+        var nextOrder = (existing.Count > 0 ? existing.Max(f => f.SortOrder) : 0) + 1;
+
+        if (existing.Count == 0 && !await db.Audit.AsNoTracking().AnyAsync(a => a.FirmId == firmId && a.BranchId == branchId && a.Action.StartsWith("floor_"), cancellationToken))
+        {
+            foreach (var defaultFloor in new[] { "Alt kat", "Üst kat" })
+            {
+                db.Floors.Add(new ServiceFloorRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId, Name = defaultFloor, SortOrder = nextOrder++, CreatedAt = now });
+                names.Add(defaultFloor);
+                changed = true;
+            }
+        }
+
+        foreach (var tableFloor in tables.Select(t => NormalizeFloorName(t.Floor)).Where(f => f is not null).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!names.Any(n => string.Equals(n, tableFloor, StringComparison.OrdinalIgnoreCase)))
+            {
+                db.Floors.Add(new ServiceFloorRow { Id = Guid.NewGuid().ToString(), FirmId = firmId, BranchId = branchId, Name = tableFloor!, SortOrder = nextOrder++, CreatedAt = now });
+                names.Add(tableFloor!);
+                changed = true;
+            }
+        }
+
+        if (changed) await db.SaveChangesAsync(cancellationToken);
+        return names.ToArray();
+    }
 
     private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write, bool allowOperator = false)
     {

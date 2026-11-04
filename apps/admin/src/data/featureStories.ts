@@ -62,6 +62,7 @@ const storyGroups: Record<string, Record<string, StoryDraft>> = {
   },
   cash: {
     summary: ["Kasanızın durumunu net görün", "Kasa vardiyasını ve elle kaydedilen nakit hareketlerini bir arada inceleyin. Gün içindeki para akışını kolayca takip edin.", ["Aktif vardiyayı görün", "Nakit giriş ve çıkışlarını takip edin", "Kasa özetine ulaşın"]],
+    registers: ["Şubenizin kasalarını ve sorumlularını yönetin", "Mevcut kasaları inceleyin, seçtiğiniz kasanın hareketlerini ve satışlarını görün, yeni kasa açın.", ["Mevcut kasaları inceleyin", "Kasa hareketlerini ve satışları görün", "Kasa sorumlularını yönetin"]],
     movements: ["Her nakit hareketi kayıt altında olsun", "Kasaya giren ve kasadan çıkan tutarları açıklamalarıyla kaydedin. Gün sonunda paranın hangi işlemlerden oluştuğunu kolayca inceleyin.", ["Nakit girişlerini kaydedin", "Çıkışları açıklamalarıyla takip edin", "Hareket geçmişini inceleyin"]],
     shifts: ["Kasa teslimi daha düzenli olsun", "Kasa vardiyalarını ve sorumlularını takip edin. Vardiya değişiminde başlangıç ve kapanış bilgilerini birlikte görün.", ["Vardiyaları listeleyin", "Açılış bilgilerini inceleyin", "Kapanış kayıtlarına ulaşın"]],
     "opening-closing": ["Güne net başlayın, günü net kapatın", "Açılış tutarını ve kapanıştaki fiziksel sayımı kaydedin. Kasadaki tutarı kayıtlarla karşılaştırarak günü daha anlaşılır bir şekilde tamamlayın.", ["Açılış tutarını belirleyin", "Kapanış sayımını kaydedin", "Beklenen ve sayılan tutarı karşılaştırın"]],

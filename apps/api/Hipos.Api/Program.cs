@@ -10,7 +10,11 @@ using Hipos.Api.Printing;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
 
@@ -114,7 +118,11 @@ if (storage == "postgres")
     var expenseDb = scope.ServiceProvider.GetRequiredService<ExpenseDbContext>();
     expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
-    if (serviceReady) await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
+    if (serviceReady)
+    {
+        await ServiceDbContextFactory.EnsureFloorSchemaAsync(serviceDb, CancellationToken.None);
+        await FeatureDbInitializer.PromoteServiceTablesAsync(db, CancellationToken.None);
+    }
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;
@@ -137,7 +145,7 @@ if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapPublicQrMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
-app.MapPrintingEndpoints();
+if (storage == "postgres") app.MapPrintingEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 
