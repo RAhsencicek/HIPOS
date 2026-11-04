@@ -168,7 +168,7 @@ if (storage == "postgres") app.MapCatalogScheduledPriceEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapPublicQrMenuEndpoints(catalogReady);
 if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
-if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment());
+if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment(), authReady);
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
 if (storage == "postgres") app.MapPrintingEndpoints();
 if (storage == "postgres") app.MapAuthEndpoints(authReady);

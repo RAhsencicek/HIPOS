@@ -44,17 +44,17 @@ Mevcut kalıcı MVP dilimleri katalog/menü, cari, stok-reçete-sayım, manuel k
 * **Şu An Ne Yapılmış? (Mevcut Durum):**
   - Tek bir kasa için manuel vardiya açma/kapatma ve elle nakit giriş/çıkış defteri PostgreSQL API'sine tam bağlıdır.
   - İdempotent `MAIN` kasa provisioning mekanizması ve hareket düzeltme (reversal) zinciri mevcuttur.
+  - Adisyon ödemeleri (parçalı nakit/kart ve masa hesap kapatmaları) aktif kasa vardiyasına `pos_sale` hareketi olarak otomatik yansıtılır ve nakit çekmece bakiyesi senkronize edilir.
+  - Kasiyer ve Garson ekranlarında adisyon indirimleri, ürün ikramları ve kalem iptallerinde müdür/yetkili PIN kodu (`auth.pin_codes` - role: `owner` veya `manager`) doğrulaması ve `sales.check_audit` / `sales.check_adjustments` izlenebilirliği tamamlanmıştır.
 * **Ne Eksik? (Henüz Yapılmamış Olanlar):**
-  - Satış ve adisyon kapamaları kasaya otomatik yansımamaktadır (çift defter sorunu).
-  - Parçalı ödeme (Nakit + Kart + Cari + Yemek Kartı) altyapısı yoktur.
   - Çoklu kasa (Ana Kasa, Bar vb.) ve kasiyer PIN ile kasa seçimi yoktur.
   - Kasiyer vardiya kapatma ekranında isteğe bağlı kupür girişi sayılan toplamı hesaplar; kupür kırılımı ayrıca saklanmaz. Şubede açık adisyon varsa vardiya kapanışı sunucu tarafından reddedilir. Gün sonu Z-Raporu ve hasılat teslim tutanağı (Safe Drop) yoktur.
   - Hızlı satışta açık masasız adisyonlar listelenip sürdürülebilir; sonuçlanmamış oluşturma isteği aynı terminalde saklanarak aynı kimlikle tekrar edilir. Liste şubedeki ilk 100 açık masasız adisyonla sınırlıdır ve yalnız hızlı satışa ait kayıtları ayırmaz.
   - Açılış notu vardiyada saklanır; hesap fişi tarayıcı üzerinden mali olmayan çıktı olarak yazdırılır. Tam simüle tahsilat sonrasında yazdırma penceresi açılır; gerçek ÖKC ve otomatik donanım baskısı yoktur.
 * **Modül backlog'u (teslim sırası için §5'e bakın):**
-  1. `sales.check_payments` tablosunun eklenmesi ve parçalı ödeme tiplerinin desteklenmesi.
-  2. Kasiyerlerin 4 haneli PIN ile istasyon/kasa seçerek oturum açması.
-  3. Adisyon kapatıldığında nakit tutarın otomatik `cash.movements`'a işlenmesi.
+  1. `sales.check_payments` tablosunun eklenmesi ve parçalı ödeme tiplerinin desteklenmesi. (Tamamlandı)
+  2. Adisyon kapatıldığında nakit tutarın otomatik `cash.movements`'a işlenmesi. (Tamamlandı)
+  3. Kasiyerlerin 4 haneli PIN ile istasyon/kasa seçerek oturum açması.
   4. Gün sonu açık masa kilit denetimi, kupür sayımı ve Z-Raporu dökümü.
 
 ---
@@ -265,3 +265,8 @@ Geliştirilen her yeni özellik şu 5 kalite kapısından geçmek zorundadır:
 ### 23 Ekim 2026 — Fiziksel masa grubu
 
 Garson ekranında kalabalık misafirler için ana masa ve boş ek masaları birlikte kullanımda tutma eklendi. Tüm üyeler ana masanın hesabını açar; mutfak birlikte kullanılan masa adlarını gösterir. Grup ayırma hesabı ana masada korur. Service şeması `table_groups` kaydı ve `tables.table_group_id` bağıyla sahipliği tutar; mevcut adisyon birleştirme davranışı korunur. Sınırlar, API ve yeni Service migration [Modül 2 sözleşmesinde](../00-devir-rehberi/MODUL_02_MASA_VE_ADISYON.md), elle kontroller [masa servisi test rehberinde](../04-test-ve-rehberler/MASA_SERVISI_TEST.md) kayıtlıdır. Gerçek tahsilat/otomatik masa kapatma bu dilime dahil değildir.
+
+### 04 Kasım 2026 — Adisyon Tahsilatı Kasa Senkronizasyonu & Müdür PIN Onayı
+
+1. **Adisyon Ödemesi ➔ Kasa Senkronizasyonu:** Hızlı satış ve masa tahsilatlarında alınan nakit ödemeler, şubenin açık kasa vardiyasına otomatik `pos_sale` hareketi olarak işlenir; nakit çekmece bakiyesi ve sistem bakiyesi anlık senkronize edilir. Kredi kartı ödemeleri çekmece nakdini şişirmez; ödeme dökümü ve harici referanslar denetim izine bağlanır.
+2. **Müdür PIN Onayı ve Audit İzlenebilirliği:** Kasiyer ve Garson ekranlarında yapılan adisyon indirimleri, ürün ikramları ve kalem iptallerinde müdür/patron 4 haneli PIN kodu doğrulaması (`auth.pin_codes`) devreye alındı. Geçersiz PIN'ler `401 INVALID_MANAGER_PIN` ile reddedilir. Onaylanan işlemler `sales.check_adjustments.approval_mode` ve `sales.check_audit` tablolarında onaylayan yetkili personelin adı ve rolüyle kayıt altına alınır.

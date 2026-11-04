@@ -1,9 +1,11 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using Hipos.Api.Auth;
 using Hipos.Api.Cari;
 using Hipos.Api.Features;
 using Hipos.Api.Service;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -17,7 +19,7 @@ public sealed record SplitCheckLine(long OrderLineId, int Quantity);
 public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
 public sealed record SplitSalesCheck(Guid RequestId, int ExpectedVersion, IReadOnlyList<SplitCheckLine> Items);
 public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, string Action, string? ValueType,
-    int? Value, long? OrderLineId, int Quantity, string Reason);
+    int? Value, long? OrderLineId, int Quantity, string Reason, string? ManagerPin = null);
 public sealed record CheckAdjustmentView(Guid RequestId, string Action, string? ValueType, int? Value,
     long? OrderLineId, int Quantity, long AmountMinor, string Reason, string Actor, string ApprovalMode, DateTimeOffset CreatedAt, Guid? OriginalCheckId = null);
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
@@ -31,7 +33,7 @@ public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId,
 public static class SalesCheckEndpoints
 {
     public static void MapSalesCheckEndpoints(this WebApplication app, bool salesReady, bool serviceReady,
-        bool allowUnapprovedAdjustments)
+        bool allowUnapprovedAdjustments, bool authReady = false)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/sales/checks");
 
@@ -244,13 +246,52 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("/{checkId:guid}/adjustments", async (string firmId, string branchId, Guid checkId,
-            CreateCheckAdjustment command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate) =>
+            CreateCheckAdjustment command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate,
+            [FromServices] AuthDbContext? authDb) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
-            if (!allowUnapprovedAdjustments)
-                return Fail(context, "MANAGER_APPROVAL_REQUIRED", 403,
-                    "İndirim, ikram veya iptal için yönetici onayı gerekli. Onaysız test yalnız Development ortamında kullanılabilir.");
+
+            string approvalMode = "development_bypass";
+            string? approvedBy = null;
+            if (!string.IsNullOrWhiteSpace(command.ManagerPin))
+            {
+                if (!authReady || authDb is null)
+                    return Fail(context, "AUTH_SERVICE_UNAVAILABLE", 503, "Kimlik doğrulama veritabanı hazır değil.");
+
+                var managerMemberships = await authDb.Memberships
+                    .Include(m => m.User)
+                    .Include(m => m.PinCode)
+                    .Where(m => m.FirmId == firmId && m.IsActive && (m.Role == "owner" || m.Role == "manager"))
+                    .ToListAsync(context.RequestAborted);
+
+                var matched = managerMemberships.FirstOrDefault(m =>
+                    m.PinCode != null &&
+                    m.PinCode.IsActive &&
+                    BCrypt.Net.BCrypt.Verify(command.ManagerPin, m.PinCode.PinHash));
+
+                if (matched is null || matched.User is null)
+                {
+                    return Fail(context, "INVALID_MANAGER_PIN", 401, "Girdiğiniz yönetici PIN kodu hatalı veya bu işlem için yetkisiz.");
+                }
+
+                approvedBy = matched.User.FullName;
+                approvalMode = $"manager_pin:{matched.User.FullName}";
+            }
+            else if (!allowUnapprovedAdjustments)
+            {
+                var actorAuth = DemoAccess.Resolve(context);
+                if (actorAuth is not null && actorAuth.CanManage)
+                {
+                    approvalMode = $"actor_role:{actorAuth.Name}";
+                }
+                else
+                {
+                    return Fail(context, "MANAGER_APPROVAL_REQUIRED", 403,
+                        "İndirim, ikram veya iptal için yönetici onayı gerekli. Onaysız test yalnız Development ortamında kullanılabilir.");
+                }
+            }
+
             var reason = command.Reason?.Trim() ?? "";
             if (command.RequestId == Guid.Empty || command.ExpectedVersion < 1 ||
                 command.Action is not ("discount" or "comp" or "void") ||
@@ -266,7 +307,7 @@ public static class SalesCheckEndpoints
                 return Fail(context, "INVALID_ADJUSTMENT", 400, "İndirim oranı/tutarı veya ürün miktarı geçersiz.");
 
             var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(command with
-            { Reason = reason }))));
+            { Reason = reason, ManagerPin = null }))));
             var prior = await db.CheckAdjustments.AsNoTracking().SingleOrDefaultAsync(row => row.RequestId == command.RequestId,
                 context.RequestAborted);
             if (prior is not null)
@@ -338,7 +379,7 @@ public static class SalesCheckEndpoints
             var row = new SalesCheckAdjustmentRow { RequestId = command.RequestId, CheckId = checkId, FirmId = firmId,
                 BranchId = branchId, OrderId = orderForLine?.Id, OrderLineId = line?.Id, Action = command.Action,
                 ValueType = command.ValueType, Value = command.Value, Quantity = command.Quantity, AmountMinor = amount,
-                Reason = reason, Actor = actor, ApprovalMode = "development_bypass", Fingerprint = fingerprint, CreatedAt = now };
+                Reason = reason, Actor = actor, ApprovalMode = approvalMode, Fingerprint = fingerprint, CreatedAt = now };
             db.CheckAdjustments.Add(row);
             if (command.Action == "void" && line is not null && orderForLine is not null)
             {
@@ -350,8 +391,9 @@ public static class SalesCheckEndpoints
                 orderForLine.Version++;
             }
             check.Version++;
+            var auditActor = approvedBy != null ? $"{actor} (Onaylayan: {approvedBy})" : actor;
             db.CheckAudit.Add(new SalesCheckAuditRow { CheckId = checkId, FirmId = firmId, BranchId = branchId,
-                Actor = actor, Action = $"{command.Action}_applied", Version = check.Version, OccurredAt = now });
+                Actor = auditActor, Action = $"{command.Action}_applied", Version = check.Version, OccurredAt = now });
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/adjustments/{row.RequestId}",

@@ -113,13 +113,14 @@ Sizin çalışma alanınız temel olarak şuralardır (doğrudan kod satırına 
   * Garson sipariş kalemlerini sağa sürükler veya tıklar (Örn: 2 Pizza A'da, 1 Makarna + 2 Kola B'de kalır).
   * Sistem aynı masa altında iki ayrı alt-adisyon oluşturur; kasa her birini bağımsız tahsil edebilir.
 
-### 🏷️ EKRAN 4: İndirim, İkram ve Kalem İptali (Development test API'si uygulandı)
+### 🏷️ EKRAN 4: İndirim, İkram ve Kalem İptali (Müdür PIN Onayı ve Audit İzlenebilirliği Bağlandı)
 * **Kalem İptali (Void):** Müşteri gelmeyen içeceği iptal etmek istediğinde:
-  * Garson kalem yanındaki `[ İptal ]` butonuna basar.
+  * Garson veya kasiyer kalem yanındaki `[ İptal ]` butonuna basar.
   * İptal gerekçesi seçilir: `"Müşteri vazgeçti"`, `"Yanlış sipariş"`, `"Kalite/soğuk şikayeti"`.
-  * Kayıt gerekçe, işlemi yapan kişi ve zamanla saklanır; tutar adisyon bakiyesinden düşer. Başarılı iptalde siparişin `kitchenItems` listesine `❌ İPTAL BİLDİRİMİ` satırı ve gerekçe eklenir. KDS'nin mevcut sipariş polling'i bu satırı gösterir; kalem adisyonun sipariş satırından silinmez ve mutfak ekranındaki durum akışı ayrı Modül 3 işidir.
-* **İkram / İskonto:** Garson ekranından yüzde veya sabit tutarlı adisyon indirimi ya da seçili ürüne miktar bazlı ikram kaydedilebilir.
-* **Onay sınırı:** Onaysız uygulama yalnızca `Development` ortamında `development_bypass` iziyle çalışır. Production ve diğer ortamlarda yönetici onayı bulunmadığından API `MANAGER_APPROVAL_REQUIRED` döndürür. Gerçek yönetici kimliği/PIN akışı henüz yoktur.
+  * İşlem için yetkili müdür/patron 4 haneli PIN kodu istenir (`auth.pin_codes` üzerinde `owner` veya `manager` rolüne sahip kullanıcılar).
+  * Kayıt gerekçe, işlemi yapan kişi, onaylayan yönetici (`sales.check_audit` ve `approval_mode: manager_pin:{Yönetici}`) ve zamanla saklanır; tutar adisyon bakiyesinden düşer. Başarılı iptalde siparişin `kitchenItems` listesine `❌ İPTAL BİLDİRİMİ` satırı ve gerekçe eklenir. KDS'nin mevcut sipariş polling'i bu satırı gösterir; kalem adisyonun sipariş satırından silinmez.
+* **İkram / İskonto:** Garson ve Kasa ekranlarından yüzde veya sabit tutarlı adisyon indirimi ya da seçili ürüne miktar bazlı ikram kaydedilebilir.
+* **Onay denetimi:** PIN girildiğinde `auth.pin_codes` üzerinden doğrulanır; hatalı veya yetkisiz PIN kodunda `401 INVALID_MANAGER_PIN` ile reddedilir. Geliştirme ortamında PIN girilmediğinde `development_bypass` ile kaydedilir; üretim ortamında ise yönetici onayı yoksa `403 MANAGER_APPROVAL_REQUIRED` döndürülür.
 * İndirim/ikram eklenmiş adisyon şu an bölünemez ve başka adisyonla birleştirilemez; bu koruma indirimlerin yanlış dağıtılmasını önler.
 
 ### 🟢 EKRAN 5: Adisyon Kapatma, Masa Boşaltma ve Draining (Ödeme Entegrasyonu Bekliyor)

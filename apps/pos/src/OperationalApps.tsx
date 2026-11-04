@@ -298,6 +298,7 @@ export function CashierApp() {
   const [actionValueType, setActionValueType] = useState<"percentage" | "fixed">("percentage");
   const [actionLine, setActionLine] = useState("");
   const [actionQuantity, setActionQuantity] = useState(1);
+  const [actionManagerPin, setActionManagerPin] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const actionDialog = useRef<HTMLDialogElement>(null);
@@ -648,7 +649,7 @@ export function CashierApp() {
   const transferOptions = tables.filter((table) => table.id !== selected?.id && !table.assignment && !table.group && statusOf(table) === "idle");
   const mergeOptions = tables.filter((table) => table.id !== selected?.id && table.assignment && !table.group);
   function showCashierAction(action: "transfer" | "merge" | "discount" | "comp" | "void") {
-    setCashierAction(action); setActionTarget(""); setActionSources([]); setActionReason(""); setActionValue(""); setActionLine(""); setActionQuantity(1); setActionError(""); setSplitNotice("");
+    setCashierAction(action); setActionTarget(""); setActionSources([]); setActionReason(""); setActionValue(""); setActionLine(""); setActionQuantity(1); setActionManagerPin(""); setActionError(""); setSplitNotice("");
   }
   async function submitCashierAction(event: React.FormEvent) {
     event.preventDefault();
@@ -680,16 +681,18 @@ export function CashierApp() {
         lineId = line.id; quantity = actionQuantity;
       }
       path = `${checksPath}/${encodeURIComponent(activeCheck.id)}/adjustments`;
-      body = { expectedVersion: activeCheck.version, action: cashierAction, valueType: cashierAction === "discount" ? actionValueType : null, value, orderLineId: lineId, quantity, reason: actionReason.trim() };
+      body = { expectedVersion: activeCheck.version, action: cashierAction, valueType: cashierAction === "discount" ? actionValueType : null, value, orderLineId: lineId, quantity, reason: actionReason.trim(), managerPin: actionManagerPin.trim() || undefined };
     }
     const key = JSON.stringify([path, body]);
     if (actionRequest.current?.key !== key) actionRequest.current = { key, id: createRequestId() };
     setActionBusy(true); setActionError("");
     try {
-      await request(path, "pos-single", { ...body, requestId: actionRequest.current.id });
+      const res = await request<{ adjustment?: CheckAdjustment }>(path, "pos-single", { ...body, requestId: actionRequest.current.id });
       actionRequest.current = null; setCashierAction(null);
       if (cashierAction === "transfer") { setSelectedId(actionTarget); setSelectedCheckId(""); }
-      setSplitNotice(cashierAction === "transfer" ? "Masa taşındı." : cashierAction === "merge" ? "Masalar birleştirildi." : "İşlem kaydedildi. Geliştirme ortamında yönetici onayı alınmadı.");
+      const actionName = cashierAction === "discount" ? "İndirim" : cashierAction === "comp" ? "İkram" : "Ürün iptali";
+      const approval = res?.adjustment?.approvalMode?.startsWith("manager_pin:") ? `Yönetici Onayı: ${res.adjustment.approvalMode.slice(12)}` : "Geliştirme onayı";
+      setSplitNotice(cashierAction === "transfer" ? "Masa taşındı." : cashierAction === "merge" ? "Masalar birleştirildi." : `${actionName} kaydedildi (${approval}).`);
       setCashRefresh((v) => v + 1);
       await reload();
       void loadUnfinishedChecks();
@@ -1407,7 +1410,7 @@ export function CashierApp() {
       {cashierAction && <form className="waiter-custom-modal" onSubmit={(event) => void submitCashierAction(event)}><header><div><span className="ops-eyebrow">{selected?.name}</span><h2 id="cashier-action-title">{cashierAction === "transfer" ? "Masayı taşı" : cashierAction === "merge" ? "Masaları birleştir" : cashierAction === "discount" ? "İndirim uygula" : cashierAction === "comp" ? "Ürün ikramı" : "Ürün iptali"}</h2></div><button type="button" className="waiter-modal-close" disabled={actionBusy} onClick={() => setCashierAction(null)} aria-label="Kapat">×</button></header>
       {cashierAction === "transfer" && <><p className="waiter-action-description">Masanın açık hesapları seçilen boş masaya taşınır.</p><label className="waiter-note-field">Boş hedef masa<select value={actionTarget} onChange={(event) => setActionTarget(event.target.value)} disabled={actionBusy}><option value="">Masa seçin</option>{transferOptions.map((table) => <option key={table.id} value={table.id}>{table.name}</option>)}</select></label></>}
       {cashierAction === "merge" && <><p className="waiter-action-description">Seçilen masaların hesapları bu masada birleştirilir. İndirim ve ikramlar korunur; ödeme girişimi olan adisyonlar birleştirilemez.</p><fieldset className="waiter-action-source-list"><legend>Birleştirilecek masalar</legend>{mergeOptions.map((table) => <label key={table.id}><input type="checkbox" disabled={actionBusy} checked={actionSources.includes(table.id)} onChange={(event) => setActionSources((current) => event.target.checked ? [...current, table.id] : current.filter((id) => id !== table.id))} /><span><strong>{table.name}</strong><small>{money(table.assignment!.totalMinor)}</small></span></label>)}{mergeOptions.length === 0 && <p>Birleştirilecek açık masa bulunmuyor.</p>}</fieldset></>}
-      {(cashierAction === "discount" || cashierAction === "comp" || cashierAction === "void") && <><p className="waiter-adjustment-dev-note">Geliştirme ortamında yönetici onayı alınmadan uygulanır. Gerçek yönetici onayı henüz bağlı değildir.</p>{activeCheck?.payments.length ? <p className="ops-error">Ödeme girişimi olan adisyona bu işlem uygulanamaz.</p> : null}{cashierAction === "discount" ? <><label className="waiter-note-field">İndirim türü<select value={actionValueType} onChange={(event) => setActionValueType(event.target.value as "percentage" | "fixed")} disabled={actionBusy}><option value="percentage">Yüzde</option><option value="fixed">Sabit tutar (TL)</option></select></label><label className="waiter-note-field">{actionValueType === "percentage" ? "İndirim oranı (%)" : "İndirim tutarı (TL)"}<input inputMode="decimal" value={actionValue} onChange={(event) => setActionValue(event.target.value)} disabled={actionBusy} /></label></> : <><label className="waiter-note-field">Ürün<select value={actionLine} onChange={(event) => { setActionLine(event.target.value); setActionQuantity(1); }} disabled={actionBusy}><option value="">Ürün seçin</option>{cashierActionLines.map((line) => <option key={line.id} value={line.id}>{line.quantity} × {line.productName}</option>)}</select></label><label className="waiter-note-field">Adet<input type="number" min="1" step="1" max={cashierActionLines.find((line) => String(line.id) === actionLine)?.quantity ?? 1} value={actionQuantity} onChange={(event) => setActionQuantity(Number(event.target.value))} disabled={actionBusy} /></label></>}<label className="waiter-note-field">Gerekçe {cashierAction === "void" && <small>(isteğe bağlı)</small>}<input required={cashierAction !== "void"} maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} disabled={actionBusy} /></label></>}
+      {(cashierAction === "discount" || cashierAction === "comp" || cashierAction === "void") && <><p className="waiter-adjustment-dev-note">İndirim, ikram ve iptal işlemleri için yetkili yönetici onayı gereklidir.</p>{activeCheck?.payments.length ? <p className="ops-error">Ödeme girişimi olan adisyona bu işlem uygulanamaz.</p> : null}{cashierAction === "discount" ? <><label className="waiter-note-field">İndirim türü<select value={actionValueType} onChange={(event) => setActionValueType(event.target.value as "percentage" | "fixed")} disabled={actionBusy}><option value="percentage">Yüzde</option><option value="fixed">Sabit tutar (TL)</option></select></label><label className="waiter-note-field">{actionValueType === "percentage" ? "İndirim oranı (%)" : "İndirim tutarı (TL)"}<input inputMode="decimal" value={actionValue} onChange={(event) => setActionValue(event.target.value)} disabled={actionBusy} /></label></> : <><label className="waiter-note-field">Ürün<select value={actionLine} onChange={(event) => { setActionLine(event.target.value); setActionQuantity(1); }} disabled={actionBusy}><option value="">Ürün seçin</option>{cashierActionLines.map((line) => <option key={line.id} value={line.id}>{line.quantity} × {line.productName}</option>)}</select></label><label className="waiter-note-field">Adet<input type="number" min="1" step="1" max={cashierActionLines.find((line) => String(line.id) === actionLine)?.quantity ?? 1} value={actionQuantity} onChange={(event) => setActionQuantity(Number(event.target.value))} disabled={actionBusy} /></label></>}<label className="waiter-note-field">Gerekçe {cashierAction === "void" && <small>(isteğe bağlı)</small>}<input required={cashierAction !== "void"} maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} disabled={actionBusy} /></label><label className="waiter-note-field">Yönetici PIN Onayı <small>(Müdür / Patron PIN kodu, örn. 9999)</small><input type="password" inputMode="numeric" maxLength={8} placeholder="••••" value={actionManagerPin} onChange={(event) => setActionManagerPin(event.target.value)} disabled={actionBusy} /></label></>}
       {actionError && <p className="ops-error" role="alert">{actionError}</p>}<footer><button type="button" className="waiter-cancel-custom" disabled={actionBusy} onClick={() => setCashierAction(null)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={actionBusy || Boolean((cashierAction === "discount" || cashierAction === "comp" || cashierAction === "void") && activeCheck?.payments.length)}>{actionBusy ? "Kaydediliyor…" : "İşlemi uygula"}</button></footer></form>}
     </dialog>
     <dialog ref={splitDialog} className="waiter-reservation-dialog" aria-labelledby="cashier-split-title" onCancel={(event) => { if (splitting) event.preventDefault(); else setSplitCheck(null); }} onClose={() => setSplitCheck(null)}>
@@ -1488,6 +1491,7 @@ export function WaiterApp() {
   const [discountReason, setDiscountReason] = useState("");
   const [discountReasonNote, setDiscountReasonNote] = useState("");
   const [lineAdjustments, setLineAdjustments] = useState<Record<string, { action: "comp" | "void"; reason: string; quantity: number }>>({});
+  const [adjustmentManagerPin, setAdjustmentManagerPin] = useState("");
   const operationRequest = useRef<{ key: string; id: string } | null>(null);
   const reloadSerial = useRef(0);
   const tablesRef = useRef<Table[]>([]);
@@ -2004,7 +2008,7 @@ export function WaiterApp() {
   async function openAdjustmentAction() {
     if (!selectedTable?.assignment || tableActionsBlocked) return;
     setOperationError(""); setTableActionNotice(""); setAdjustmentTab("discount");
-    setLineAdjustments({}); setTableAction("discount"); setOperationSaving(true);
+    setLineAdjustments({}); setAdjustmentManagerPin(""); setTableAction("discount"); setOperationSaving(true);
     try {
       const result = await request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(selectedTable.id)}`, "pos-single");
       const checks = result.items.filter((check) => check.status === "open");
@@ -2051,12 +2055,14 @@ export function WaiterApp() {
       operationRequest.current = { key, id: requestId };
       const result = await request<{ adjustment: CheckAdjustment; check: OpenCheck; repeated: boolean }>(
         `${checksPath}/${encodeURIComponent(check.id)}/adjustments`, "pos-single",
-        { requestId, expectedVersion: check.version, action, valueType, value, orderLineId, quantity, reason });
+        { requestId, expectedVersion: check.version, action, valueType, value, orderLineId, quantity, reason, managerPin: adjustmentManagerPin.trim() || undefined });
       operationRequest.current = null;
       setOpenChecks((current) => current.map((item) => item.id === result.check.id ? result.check : item));
       setTableAction(null); setRefreshTick((tick) => tick + 1);
       const actionLabel = action === "discount" ? "İndirim" : action === "comp" ? "İkram" : "Ürün iptali";
-      setTableActionNotice(`${actionLabel} (${money(result.adjustment.amountMinor)}) gerekçesiyle kaydedildi. Geliştirme ortamında yönetici onayı olmadan uygulandı.`);
+      const approval = result?.adjustment?.approvalMode?.startsWith("manager_pin:") ? `Yönetici Onayı: ${result.adjustment.approvalMode.slice(12)}` : "Geliştirme onayı";
+      setTableActionNotice(`${actionLabel} (${money(result.adjustment.amountMinor)}) gerekçesiyle kaydedildi (${approval}).`);
+      setAdjustmentManagerPin("");
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "operation");
       else setOperationError(cause instanceof Error ? cause.message : "İndirim/ikram kaydedilemedi.");
@@ -2527,7 +2533,19 @@ export function WaiterApp() {
               return <article key={key}><div><strong>{line.quantity} × {line.productName}</strong><small>{money(line.quantity * line.unitPriceMinor)}</small></div><div className="waiter-adjustment-line-buttons"><button className={adjustment?.action === "comp" ? "active" : ""} onClick={() => setLineAdjustments({ [key]: { action: "comp", reason: adjustment?.reason ?? "", quantity: adjustment?.quantity ?? 1 } })}>İkram</button><button className={adjustment?.action === "void" ? "active danger" : ""} onClick={() => setLineAdjustments({ [key]: { action: "void", reason: adjustment?.reason ?? "", quantity: adjustment?.quantity ?? 1 } })}>İptal</button>{adjustment && <button className="clear" onClick={() => setLineAdjustments({})}>Kaldır</button>}</div>{adjustment && <><label className="waiter-note-field">Adet<input className="waiter-discount-input" aria-label={`${line.productName} adet`} type="number" min="1" max={line.quantity} value={adjustment.quantity} onChange={(event) => setLineAdjustments({ [key]: { ...adjustment, quantity: Math.max(1, Math.min(line.quantity, Number(event.target.value) || 1)) } })} /></label><label className="waiter-note-field">Gerekçe<select className="waiter-action-select" aria-label={`${line.productName} işlem gerekçesi`} value={adjustment.reason} onChange={(event) => setLineAdjustments({ [key]: { ...adjustment, reason: event.target.value } })}><option value="">Gerekçe seçin</option><option value="Müşteri vazgeçti">Müşteri vazgeçti</option><option value="Yanlış sipariş">Yanlış sipariş</option><option value="Kalite / soğuk şikayeti">Kalite / soğuk şikayeti</option><option value="İşletme kararı">İşletme kararı</option></select></label></>}</article>;
             })}</div>
           </>}
-          <div className="waiter-adjustment-dev-note">Development testinde yönetici onayı aranmaz. İşlemi yapan kişi ve gerekçe kaydedilir; diğer ortamlarda yönetici onayı gerekir.</div>
+          <label className="waiter-note-field">Yönetici PIN Onayı <small>(Müdür / Patron PIN kodu, örn. 9999)</small>
+            <input
+              className="waiter-discount-input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              placeholder="••••"
+              value={adjustmentManagerPin}
+              onChange={(event) => setAdjustmentManagerPin(event.target.value)}
+              disabled={operationSaving}
+            />
+          </label>
+          <div className="waiter-adjustment-dev-note">İndirim, ikram ve iptal işlemleri için yetkili yönetici onayı gereklidir. Onaylayan yetkili denetim günlüğüne kaydedilir.</div>
           {adjustmentCheck?.payments.length ? <p className="ops-error">Ödeme girişimi olan adisyona indirim veya ikram uygulanamaz.</p> : null}
           <footer><button className="waiter-cancel-custom" disabled={operationSaving} onClick={() => setTableAction(null)}>Vazgeç</button><button className="ops-primary" disabled={operationSaving || !adjustmentCheck || adjustmentCheck.payments.length > 0 || (adjustmentTab === "discount" && (!discountReason || discountReason === "other" && !discountReasonNote.trim())) || (adjustmentTab === "line" && !Object.values(lineAdjustments).some((item) => item.reason && item.quantity > 0))} onClick={() => void submitAdjustment()}>{operationSaving ? "Kaydediliyor…" : "İşlemi uygula"}</button></footer>
         </>}
