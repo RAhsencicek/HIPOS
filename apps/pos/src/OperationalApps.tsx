@@ -378,9 +378,24 @@ export function CashierApp() {
   const [quickActiveCheck, setQuickActiveCheck] = useState<CashierCheck | null>(null);
   const [accountReceipt, setAccountReceipt] = useState<AccountReceipt | null>(null);
   const [lastCompletedReceipt, setLastCompletedReceipt] = useState<AccountReceipt | null>(null);
-  function printAccountReceipt(receipt: AccountReceipt) {
+  async function printThermalCashierBill(checkId: string, openCashDrawer: boolean = false, paymentMethod: string = "NAKIT") {
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `${checksPath}/${encodeURIComponent(checkId)}/print-bill?openCashDrawer=${openCashDrawer}&paymentMethod=${encodeURIComponent(paymentMethod)}`,
+        "pos-single",
+        {}
+      );
+      setSplitNotice(`🧾 Adisyon fişi basıldı (${res.transportUsed})`);
+      return true;
+    } catch (cause) {
+      console.warn("Termal adisyon fişi basılamadı:", cause);
+      return false;
+    }
+  }
+  function printAccountReceipt(receipt: AccountReceipt, openCashDrawer: boolean = false, paymentMethod: string = "NAKIT") {
     flushSync(() => setAccountReceipt({ ...receipt, printedAt: new Date().toISOString() }));
-    window.print();
+    void printThermalCashierBill(receipt.check.id, openCashDrawer, paymentMethod);
+    try { window.print(); } catch {}
   }
   const [unfinishedChecks, setUnfinishedChecks] = useState<CashierCheck[]>([]);
   const [unfinishedError, setUnfinishedError] = useState("");
@@ -762,7 +777,7 @@ export function CashierApp() {
       if (latestCheck.status === "closed" || latestCheck.remainingMinor <= 0) {
         const receipt = { check: latestCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() };
         setLastCompletedReceipt(receipt);
-        printAccountReceipt(receipt);
+        printAccountReceipt(receipt, method === "cash", method === "cash" ? "NAKIT" : "KREDI_KARTI");
       }
       if (isQuickPayment) {
         if (latestCheck.remainingMinor <= 0 || latestCheck.status === "closed") {
@@ -1007,7 +1022,7 @@ export function CashierApp() {
           )}
         </div>
         {lastCompletedReceipt && (
-          <button type="button" className="waiter-back cashier-receipt-btn" onClick={() => printAccountReceipt(lastCompletedReceipt)}>
+          <button type="button" className="waiter-back cashier-receipt-btn" onClick={() => printAccountReceipt(lastCompletedReceipt, false, "BILGI")}>
             🧾 Son hesap fişi
           </button>
         )}
@@ -1808,7 +1823,7 @@ export function CashierApp() {
           { key: "transfer", icon: "⇄", name: "Banka Havalesi / EFT", detail: "Banka hesabı bağlantısı bekleniyor" },
         ] as const).map((method) => <div className={`cashier-method-group ${paymentMethod === method.key ? "selected" : ""}`} key={method.key}><button type="button" className="cashier-method-button" disabled={!activeCheck} aria-pressed={paymentMethod === method.key} onClick={() => { setPaymentMethod(method.key); setPaymentSubMethod(""); if (method.key === "cari") { setCustomerSearch(""); setCustomerOpen(true); } }}><span className="cashier-method-icon">{method.icon}</span><span className="cashier-method-text"><strong>{method.name}</strong><small>{method.detail}</small></span><span className="cashier-method-arrow">›</span></button>{paymentMethod === method.key && (method.key === "card" || method.key === "meal") && <div className="cashier-submethods" aria-label={method.key === "card" ? "Banka POS seçimi" : "Yemek kartı seçimi"}>{(method.key === "card" ? ["Ziraat POS", "VakıfBank POS", "Garanti POS"] : ["Sodexo", "Multinet", "Ticket", "Setcard", "Metropol"]).map((name) => <button type="button" className={paymentSubMethod === name ? "selected" : ""} aria-pressed={paymentSubMethod === name} key={name} onClick={() => setPaymentSubMethod(name)}>{name}</button>)}</div>}</div>)}</div><div className="cashier-payment-history"><div className="cashier-panel-heading"><h2>SİMÜLE ÖDEME GEÇMİŞİ</h2><span>{activeCheck?.payments.length ?? 0} işlem</span></div>{activeCheck?.payments.length ? activeCheck.payments.map((payment) => <div className="cashier-payment-row" key={payment.id}><strong>{money(payment.amountMinor)} · {payment.method === "cash" ? "Nakit" : payment.method === "card" ? "Kart" : payment.method}</strong><small>{payment.createdAt ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(payment.createdAt)) : "Saat bilgisi yok"} · Simülasyon · {payment.status}</small><small>Kasiyer bilgisi bu yanıtta bulunmuyor.</small><button type="button" disabled title="Gerçek ödeme iptali henüz bağlı değil">İptal et</button></div>) : <p>Bu adisyonda simüle ödeme kaydı yok.</p>}</div></article>
         <article className="cashier-detail-panel cashier-keypad-panel"><div className="cashier-amount"><span>{paymentMethod === "cash" ? "ALINAN NAKİT · ÖNİZLEME" : "GİRİLEN TUTAR"}</span><strong aria-live="polite">{activeCheck ? money(amountMinor) : "—"}</strong><small>{activeCheck ? `Adisyonda kalan: ${money(activeCheck.remainingMinor)}` : "Tutar girmek için açık adisyon seçin"}</small></div>{paymentMethod === "cash" && activeCheck && <div className="cashier-change" aria-live="polite"><span>PARA ÜSTÜ <small>Önizleme · tahsilat kaydedilmez</small></span><strong>{money(Math.max(0, amountMinor - activeCheck.remainingMinor))}</strong></div>}<div className="cashier-quick-amounts" aria-label="Hızlı tutarlar">{[{ label: "TAM KALAN", minor: activeCheck?.remainingMinor ?? 0 }, { label: "100 ₺", minor: 10000 }, { label: "200 ₺", minor: 20000 }, { label: "500 ₺", minor: 50000 }, { label: "1.000 ₺", minor: 100000 }].map((item) => <button type="button" disabled={!activeCheck} key={item.label} onClick={() => setAmountInput(`${Math.floor(item.minor / 100)},${String(item.minor % 100).padStart(2, "0")}`)}>{item.label}</button>)}<button type="button" className="cashier-clear-amount" disabled={!activeCheck} onClick={() => enterAmountKey("C")}>Temizle</button></div><div className="cashier-keypad" aria-label="Tutar tuş takımı">{["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "⌫"].map((key) => <button type="button" disabled={!activeCheck} key={key} aria-label={key === "C" ? "Tutarı temizle" : key === "⌫" ? "Son karakteri sil" : key === "," ? "Kuruş için virgül" : key} onClick={() => enterAmountKey(key)}>{key}</button>)}</div><button className="cashier-complete" disabled={Boolean(payBlocker) || payBusy || Boolean(error)} onClick={() => { if (isZeroBalance) void closeZeroCheck(); else void submitPayment(); }}>{payBusy ? (isZeroBalance ? "Kapatılıyor…" : "Kaydediliyor…") : isZeroBalance ? "Adisyonu Kapat (0,00 ₺)" : "Tahsilatı tamamla"}</button>{payError && <p className="ops-error" role="alert">{payError}</p>}<p className="cashier-disabled-hint">{isZeroBalance ? "Ödenecek tutar bulunmuyor. Adisyonu kapatıp masayı boşaltmak için butona tıklayın." : (payBlocker || (paymentMethod === "card" && activeCheck && amountMinor > activeCheck.remainingMinor ? `Kart çekimi kalan tutar kadar yapılır: ${money(activeCheck.remainingMinor)}.` : `Tahsilat ${mainRegister?.name ?? "seçili kasa"} vardiyasına kaydedilir.`))}</p></article>
-      </div><div className="cashier-detail-footer"><span>Geliştirme ekranı · Gerçek tahsilat yapılmaz</span><button type="button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) printAccountReceipt({ check: activeCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() }); }}>Hesap fişi yazdır</button><button disabled={!activeCheck || activeCheck.totalMinor > 0 || payBusy || Boolean(error)} title={activeCheck && activeCheck.totalMinor > 0 ? "Önce tahsilatı tamamlayın" : undefined} onClick={() => void closeZeroCheck()}>{payBusy ? "Kaydediliyor…" : "Adisyonu kapat"}</button></div>
+      </div><div className="cashier-detail-footer"><span>Geliştirme ekranı · Gerçek tahsilat yapılmaz</span><button type="button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) printAccountReceipt({ check: activeCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() }, false, "BILGI"); }}>🧾 Hesap fişi yazdır</button><button disabled={!activeCheck || activeCheck.totalMinor > 0 || payBusy || Boolean(error)} title={activeCheck && activeCheck.totalMinor > 0 ? "Önce tahsilatı tamamlayın" : undefined} onClick={() => void closeZeroCheck()}>{payBusy ? "Kaydediliyor…" : "Adisyonu kapat"}</button></div>
     </section>}
     {accountReceipt && <section className="account-receipt print-target" aria-label="Yazdırılacak hesap fişi"><header><strong>HESAP FİŞİ</strong><span>MALİ DEĞERİ YOKTUR</span></header><p>{accountReceipt.location}<br />Adisyon: {accountReceipt.check.id}<br />Tarih: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(accountReceipt.printedAt))}</p><div className="account-receipt-items">{accountReceipt.check.orders.flatMap(order => order.items.map(line => <div className="account-receipt-line" key={`${order.id}:${line.id}`}><span><strong>{line.productName}</strong><small>{line.quantity} × {money(line.unitPriceMinor)}</small>{Boolean(line.options?.length || line.note) && <small>{[...(line.options ?? []).map(option => option.optionName), line.note].filter(Boolean).join(" · ")}</small>}</span><b>{money(line.lineTotalMinor)}</b></div>))}</div><div className="account-receipt-totals"><div><span>Ara toplam</span><b>{money(accountReceipt.check.grossTotalMinor)}</b></div>{accountReceipt.check.adjustmentMinor > 0 && <div><span>İndirim / düzeltme</span><b>−{money(accountReceipt.check.adjustmentMinor)}</b></div>}<div><span>Toplam</span><b>{money(accountReceipt.check.totalMinor)}</b></div>{accountReceipt.check.paidMinor > 0 && <div><span>Simüle ödeme</span><b>{money(accountReceipt.check.paidMinor)}</b></div>}<div><strong>Kalan tutar</strong><b>{money(accountReceipt.check.remainingMinor)}</b></div></div><p className="account-receipt-disclaimer">Bu belge mali fiş değildir. Test ödemeleri gerçek tahsilat değildir.</p></section>}
     <dialog ref={customerDialog} className="waiter-reservation-dialog" aria-labelledby="cashier-customer-title" onCancel={() => setCustomerOpen(false)} onClose={() => setCustomerOpen(false)}>
