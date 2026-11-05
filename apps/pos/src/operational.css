@@ -76,7 +76,7 @@ button, select { font: inherit; }
 .ops-shell .waiter-section-heading button { min-height: 40px; border: 1px solid #d5ccbd; border-radius: 9px; padding: 7px 13px; background: #faf7f0; color: #365941; font-size: 12px; font-weight: 700; }
 .waiter-table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
 .ops-shell .waiter-table-card { position: relative; display: flex; align-items: center; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; min-height: 110px; border: 1px solid #dcd6c9; border-radius: 12px; padding: 10px 8px; background: #fffcf6; color: #27332a; box-shadow: 0 2px 5px #4b3e2510; transition: border-color .15s, box-shadow .15s, transform .15s; }
-.cashier-table-overview { width: calc(100% - 32px); padding-bottom: 12px; }
+.cashier-table-overview { width: calc(100% - 32px); max-width: min(100% - 32px, 1600px) !important; padding-bottom: 12px; }
 .cashier-table-overview .waiter-table-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 7px; }
 .ops-shell.cashier-table-overview .waiter-table-card { min-height: 80px; padding: 6px; gap: 2px; }
 .ops-shell .waiter-table-card.empty { border-top: 3px solid #6b8f6f; }
@@ -1989,4 +1989,363 @@ button, select { font: inherit; }
   .waiter-shell .waiter-header-actions > * { max-width: 100%; }
   .waiter-product-modal-backdrop { padding: 12px; }
   .waiter-product-modal { width: min(100%, 560px); max-height: calc(100dvh - 24px); overflow-x: hidden; }
+}
+
+/* ========================================================
+   Clean, Touch-Friendly Cashier Header & Table Toolbar
+   ======================================================== */
+.cashier-header-clean {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0 !important;
+  padding: 8px 14px !important;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  margin-bottom: 10px !important;
+  flex-wrap: nowrap !important;
+}
+
+.cashier-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.cashier-badge-pill {
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-left: 6px;
+}
+
+.cashier-station-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 5px 11px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.cashier-station-badge .station-name {
+  font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+.station-change-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: all 0.15s ease;
+}
+
+.station-change-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+/* Orta Mod Seçici */
+.cashier-header-center {
+  display: flex;
+  justify-content: center;
+  flex: 1 1 auto;
+}
+
+.cashier-segmented-nav {
+  display: inline-flex;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  gap: 6px;
+}
+
+.cashier-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 18px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: #64748b;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cashier-seg-btn:hover:not(.active) {
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.cashier-seg-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
+}
+
+.cashier-seg-btn.quick.active {
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.28);
+}
+
+/* Sağ Kontroller */
+.cashier-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cashier-operator-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12.5px;
+}
+
+.cashier-operator-pill .operator-name {
+  color: #1d4ed8;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.operator-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.operator-lock-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.cashier-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cashier-header-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.cashier-header-btn.btn-x-report {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.cashier-header-btn.btn-x-report:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.cashier-header-btn.btn-close-shift {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.cashier-header-btn.btn-close-shift:hover:not(:disabled) {
+  background: #ffedd5;
+  border-color: #fdba74;
+}
+
+.cashier-header-btn.btn-open-shift {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.cashier-header-btn.btn-back {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.cashier-conn-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.cashier-conn-dot.online {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.cashier-conn-dot.online i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.cashier-conn-dot.checking {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.cashier-conn-dot.checking i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d97706;
+}
+
+.cashier-conn-dot.offline {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.cashier-conn-dot.offline i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+/* Masa Üstü Araç Çubuğu (Clean Table Sub-Bar) */
+.cashier-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0 12px;
+  padding: 10px 16px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cashier-table-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cashier-table-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.cashier-table-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.cashier-stat-pill {
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cashier-stat-pill.total {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.cashier-stat-pill.empty {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.cashier-stat-pill.occupied {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.cashier-stat-pill.bill-req {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.cashier-stat-pill.reserved {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+
+.cashier-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cashier-refresh-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
 }

@@ -212,6 +212,11 @@ export function CashierApp() {
   const [cashBusy, setCashBusy] = useState(false);
   const [cashActionError, setCashActionError] = useState("");
   const [cashNotice, setCashNotice] = useState("");
+  useEffect(() => {
+    if (!cashNotice) return;
+    const t = window.setTimeout(() => setCashNotice(""), 6000);
+    return () => window.clearTimeout(t);
+  }, [cashNotice]);
   const [cashRefresh, setCashRefresh] = useState(0); const [responsibleBusy, setResponsibleBusy] = useState(false);
   const [morningAmount, setMorningAmount] = useState("");
   const [morningNote, setMorningNote] = useState("");
@@ -258,6 +263,7 @@ export function CashierApp() {
     } catch (cause) { setCashError(cause instanceof Error ? cause.message : "Kasa sorumlusu güncellenemedi."); }
     finally { setResponsibleBusy(false); }
   }
+  void changeResponsible;
 
   function selectRegister(id: string) {
     setSelectedRegisterId(id);
@@ -1033,98 +1039,94 @@ export function CashierApp() {
   }
 
   return <main className={`ops-shell waiter-shell cashier-shell${selected || cashierMode === "quick" ? " cashier-detail-shell" : " cashier-table-overview"}`}>
-    <header className="ops-header">
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <a href="/cashier" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>KASA</span></a>
-        <nav className="cashier-mode-nav" aria-label="Kasa Görünümü">
-          <button type="button" className={`cashier-mode-tab ${cashierMode === "tables" ? "active" : ""}`} onClick={() => { setCashierMode("tables"); setSelectedId(""); }}>🍽️ Masalar & Salon</button>
-          <button type="button" className={`cashier-mode-tab ${cashierMode === "quick" ? "active" : ""}`} onClick={() => { setCashierMode("quick"); setSelectedId(""); }}>⚡ Hızlı Satış (Gel-Al)</button>
-        </nav>
-      </div>
-      <div className="waiter-header-actions">
-        <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
-          👤 Kasiyer: {cashierSession.user.fullName}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            localStorage.removeItem("hipos_cashier_token");
-            localStorage.removeItem("hipos_cashier_user");
-            setCashierSession(null);
-          }}
-          className="waiter-back"
-          style={{
-            padding: "0.35rem 0.75rem",
-            fontSize: "0.8rem",
-            background: "#334155",
-            borderColor: "#475569",
-            color: "#f8fafc",
-            fontWeight: 600,
-            cursor: "pointer",
-            marginRight: "8px",
-          }}
-          title="Kasiyeri değiştir veya ekranı kilitle"
-        >
-          🔒 Kasiyer Değiştir / Kilitle
-        </button>
-        <div className="cashier-terminal-card" aria-label="Kasa ve Sorumlu Bilgisi">
-          <div className="cashier-terminal-reg" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span className="cashier-terminal-tag">SABİT İSTASYON</span>
-            <strong style={{ fontSize: "0.9rem", color: "#f8fafc", whiteSpace: "nowrap" }}>
-              {mainRegister ? `${mainRegister.name} (${mainRegister.code})` : "İstasyon Seçilmedi"}
-            </strong>
-            <button
-              type="button"
-              title="Terminal istasyon kasasını değiştir (Yönetici Onayı Gerekir)"
-              style={{
-                background: "transparent",
-                border: "1px solid #475569",
-                color: "#94a3b8",
-                borderRadius: "4px",
-                padding: "2px 6px",
-                fontSize: "0.75rem",
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                setStationMode("change");
-                setStationManagerPin("");
-                setStationError("");
-                setStationModalOpen(true);
-              }}
-            >
-              ⚙️ Değiştir
-            </button>
-          </div>
-          {mainRegister && (
-            <>
-              <div className="cashier-terminal-divider" aria-hidden="true" />
-              <div className="cashier-terminal-user" title={`Kasa sorumlusu: ${mainRegister.responsible || "Atanmamış"}`}>
-                <span className="cashier-user-icon" aria-hidden="true">👤</span>
-                <span className="cashier-user-label">Sorumlu:</span>
-                <select
-                  className="cashier-terminal-select cashier-responsible-select"
-                  aria-label="Kasa sorumlusunu değiştir"
-                  value={mainRegister.responsible ?? ""}
-                  disabled={responsibleBusy || cashBusy || cashLoading || Boolean(cashDialog)}
-                  onChange={(event) => void changeResponsible(mainRegister.id, event.target.value)}
-                >
-                  {!mainRegister.responsible && <option value="" disabled>Atanmamış — seçin</option>}
-                  {mainRegister.responsible && !(cashOverview?.responsibles ?? []).some((item) => item.name === mainRegister.responsible) && <option value={mainRegister.responsible}>{mainRegister.responsible}</option>}
-                  {(cashOverview?.responsibles ?? []).map((item) => <option key={item.id} value={item.name}>{item.name}{item.roleTitle ? ` · ${item.roleTitle}` : ""}</option>)}
-                </select>
-              </div>
-            </>
-          )}
-        </div>
-        {lastCompletedReceipt && (
-          <button type="button" className="waiter-back cashier-receipt-btn" onClick={() => printAccountReceipt(lastCompletedReceipt, false, "BILGI")}>
-            🧾 Son hesap fişi
-          </button>
-        )}
-        {activeShift && mainRegister && (
+    <header className="ops-header cashier-header-clean">
+      {/* SOL: Logo + Sabit İstasyon Rozeti */}
+      <div className="cashier-header-left">
+        <a href="/cashier" className="ops-brand waiter-brand">
+          <img src="/hipos-logo.png" alt="HIPOS" />
+          <span className="cashier-badge-pill">KASA</span>
+        </a>
+
+        <div className="cashier-station-badge" title="Fiziki terminalin bağlı olduğu kasa">
+          <span className="station-icon">📍</span>
+          <span className="station-name">
+            {mainRegister ? `${mainRegister.name} (${mainRegister.code})` : "İstasyon Seçilmedi"}
+          </span>
           <button
             type="button"
-            className="waiter-back cashier-shift-close-btn"
+            className="station-change-btn"
+            title="Terminal istasyon kasasını değiştir (Yönetici Onayı Gerekir)"
+            onClick={() => {
+              setStationMode("change");
+              setStationManagerPin("");
+              setStationError("");
+              setStationModalOpen(true);
+            }}
+          >
+            ⚙️ Değiştir
+          </button>
+        </div>
+      </div>
+
+      {/* ORTA: Mod Geçişi (Büyük Dokunmatik Masalar & Hızlı Satış Sekmeleri) */}
+      <div className="cashier-header-center">
+        <nav className="cashier-segmented-nav" aria-label="Kasa Modu">
+          <button
+            type="button"
+            className={`cashier-seg-btn ${cashierMode === "tables" ? "active" : ""}`}
+            onClick={() => { setCashierMode("tables"); setSelectedId(""); }}
+          >
+            <span className="seg-icon">🍽️</span>
+            <span>Masalar & Salon</span>
+          </button>
+          <button
+            type="button"
+            className={`cashier-seg-btn quick ${cashierMode === "quick" ? "active" : ""}`}
+            onClick={() => { setCashierMode("quick"); setSelectedId(""); }}
+          >
+            <span className="seg-icon">⚡</span>
+            <span>Hızlı Satış (Gel-Al)</span>
+          </button>
+        </nav>
+      </div>
+
+      {/* SAĞ: Kasiyer Bilgisi, Kilitleme, Vardiya İşlemleri ve Bağlantı */}
+      <div className="cashier-header-right">
+        {/* Personel Rozeti & Kilitleme */}
+        <div className="cashier-operator-pill">
+          <span className="operator-name">👤 {cashierSession.user.fullName}</span>
+          <button
+            type="button"
+            className="operator-lock-btn"
+            title="Kasiyeri değiştir veya ekranı kilitle"
+            onClick={() => {
+              localStorage.removeItem("hipos_cashier_token");
+              localStorage.removeItem("hipos_cashier_user");
+              setCashierSession(null);
+            }}
+          >
+            🔒 Kilitle
+          </button>
+        </div>
+
+        {/* X-Raporu Butonu */}
+        {mainRegister && isShiftOpen && activeShift && (
+          <button
+            type="button"
+            className="cashier-header-btn btn-x-report"
+            disabled={cashBusy || cashLoading || zReportLoading}
+            onClick={() => void openZReport(activeShift.id)}
+            title="Gün içi ara kasa dökümünü (X-Raporu) görüntüler"
+          >
+            📊 X-Raporu
+          </button>
+        )}
+
+        {/* Vardiya Kapat / Aç Butonu */}
+        {activeShift && mainRegister ? (
+          <button
+            type="button"
+            className="cashier-header-btn btn-close-shift"
             disabled={cashBusy || cashLoading || Boolean(cashError)}
             onClick={() => {
               setCashAmount("");
@@ -1143,36 +1145,51 @@ export function CashierApp() {
                 expected: activeShift.expectedCashMinor ?? undefined,
               });
             }}
+            title="Vardiyayı kapat ve gün sonu Z-Raporu al"
           >
-            🔒 Vardiyayı kapat
+            🔒 Vardiyayı Kapat
           </button>
+        ) : (
+          mainRegister && !isShiftOpen && (
+            <button
+              type="button"
+              className="cashier-header-btn btn-open-shift"
+              onClick={() => {
+                setMorningError("");
+                setMorningConfirming(false);
+                setMorningDismissed(false);
+              }}
+              title="Sabah kasa açılışı yap ve vardiyayı başlat"
+            >
+              ☀️ Vardiya Aç
+            </button>
+          )
         )}
-        {mainRegister && isShiftOpen && activeShift && (
+
+        {/* Son hesap fişi (varsa) */}
+        {lastCompletedReceipt && (
           <button
             type="button"
-            className="ops-button-secondary"
-            style={{
-              padding: "0.25rem 0.6rem",
-              fontSize: "0.75rem",
-              borderRadius: "9999px",
-              backgroundColor: "rgba(59, 130, 246, 0.15)",
-              color: "#2563eb",
-              border: "1px solid rgba(59, 130, 246, 0.3)",
-              cursor: "pointer",
-              fontWeight: 700,
-            }}
-            disabled={cashBusy || cashLoading || zReportLoading}
-            onClick={() => void openZReport(activeShift.id)}
-            title="Gün içi ara kasa dökümünü (X-Raporu) görüntüler"
+            className="cashier-header-btn"
+            onClick={() => printAccountReceipt(lastCompletedReceipt, false, "BILGI")}
+            title="Son tamamlanan tahsilatın bilgi fişini tekrar yazdır"
           >
-            📊 X-Raporu
+            🧾 Son Fiş
           </button>
         )}
-        {selected && cashierMode === "tables" && <button className="waiter-back" onClick={() => setSelectedId("")}>← Masalara dön</button>}
+
+        {/* Detay ekranındayken Geri Dön */}
+        {selected && cashierMode === "tables" && (
+          <button type="button" className="cashier-header-btn btn-back" onClick={() => setSelectedId("")}>
+            ← Masalara Dön
+          </button>
+        )}
+
+        {/* Hızlı satış ödemesindeyken Menüye Dön */}
         {isQuickPayment && (
           <button
             type="button"
-            className="waiter-back"
+            className="cashier-header-btn btn-back"
             onClick={() => {
               setQuickActiveCheck(null);
               setQuickCart([]);
@@ -1183,7 +1200,15 @@ export function CashierApp() {
             ← Menüye Dön
           </button>
         )}
-        <span className={`waiter-connection ${error ? "unavailable" : loading ? "checking" : "connected"}`}><i />{error ? "Veri alınamıyor" : loading ? "Bağlanıyor" : "Bağlı"}</span>
+
+        {/* Bağlantı Durumu */}
+        <span
+          className={`cashier-conn-dot ${error ? "offline" : loading ? "checking" : "online"}`}
+          title={error ? "Sunucu bağlantısı yok" : loading ? "Bağlanıyor…" : "Sisteme bağlı"}
+        >
+          <i />
+          <span>{error ? "Çevrimdışı" : loading ? "Bağlanıyor" : "Bağlı"}</span>
+        </span>
       </div>
     </header>
     {!cashLoading && !isShiftOpen && morningDismissed && <section className="cashier-shift-closed-banner" aria-label="Vardiya kapalı">
@@ -1192,7 +1217,42 @@ export function CashierApp() {
     </section>}
     {cashError && <p className="ops-error" role="alert">Kasa bilgileri alınamadı. {cashOverview ? "Son bilgiler güncel olmayabilir." : ""}</p>}
     {!cashLoading && !cashError && !mainRegister && <p className="ops-error" role="alert">{cashOverview?.registers.length ? "Seçili kasa artık kullanılabilir değil. Lütfen bir kasa seçin." : "Aktif kasa bulunamadı."}</p>}
-    {cashNotice && <p role="status">{cashNotice}</p>}
+    {cashNotice && (
+      <div
+        role="status"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 14px",
+          margin: "0 0 10px",
+          background: "#f0fdf4",
+          border: "1px solid #bbf7d0",
+          borderRadius: "8px",
+          color: "#166534",
+          fontSize: "13px",
+          fontWeight: 600,
+        }}
+      >
+        <span>{cashNotice}</span>
+        <button
+          type="button"
+          onClick={() => setCashNotice("")}
+          aria-label="Kapat"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#166534",
+            cursor: "pointer",
+            fontSize: "16px",
+            lineHeight: 1,
+            padding: "0 4px",
+          }}
+        >
+          ×
+        </button>
+      </div>
+    )}
     {showMorningScreen && mainRegister && <div className="morning-shift-overlay" role="dialog" aria-modal="true" aria-labelledby="morning-shift-title">
         <div className="morning-shift-card">
           <div className="morning-shift-header">
@@ -1557,21 +1617,75 @@ export function CashierApp() {
     </dialog>
     {error && <p className="ops-error" role="alert">{error}{updated && " Gösterilen bilgiler son başarılı güncellemeye aittir."}</p>}
     {loading && <p className="ops-message">Masalar ve adisyonlar yükleniyor…</p>}
-    {!selected && cashierMode === "tables" && <>
-      <div className="waiter-section-heading"><h2>Masalar</h2><span>{tables.length} masa</span><div style={{ display: "flex", gap: 8 }}><button type="button" onClick={() => { if (!isShiftOpen) { setMorningDismissed(false); } else { setCashierMode("quick"); } }} style={{ background: "#2b7a4b", color: "#fff", borderColor: "#2b7a4b", borderRadius: 8, padding: "6px 12px", fontWeight: 700, cursor: "pointer" }}>⚡ Hızlı Satış Aç</button><button onClick={() => void reload()}>Yenile</button></div></div>
-      {!loading && !error && tables.length === 0 && <p className="ops-message">Gösterilecek aktif masa bulunamadı.</p>}
-      {buildFloorSections(tables, configuredFloors).map((floor) => {
-        const floorTables = tables.filter((table) => normalizeFloorName(table.floor) === floor.key);
-        if (!floorTables.length) return null;
-        return <section className="waiter-floor-section" key={floor.key} aria-label={floor.label}><div className="waiter-floor-heading"><h3>{floor.label}</h3><span>{floorTables.length} masa</span></div><div className="waiter-table-grid">{floorTables.map((table) => {
-        const status = statusOf(table);
-        const visual = status === "bill_requested" ? "bill-requested" : table.group ? "grouped" : status === "reserved" ? "reserved" : status === "occupied" ? "occupied" : "empty";
-        const label = status === "bill_requested" ? "Hesap istendi" : table.group ? "Grupta" : status === "reserved" ? "Rezerve" : status === "occupied" ? "Dolu" : "Boş";
-        const primaryId = table.group?.primaryTableId ?? table.id;
-        const tableChecks = checks[primaryId] ?? [];
-        return <button type="button" key={table.id} className={`waiter-table-card ${visual}`} onClick={() => setSelectedId(primaryId)}><svg className="waiter-table-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="3" /><path d="M9 3h6M9 21h6M2 10v4M22 10v4" /></svg><strong>{table.name}</strong><span className="waiter-table-status">{label}</span>{table.group && <small className="waiter-group-card-label">Ana masa: {table.group.tableNames[0]}</small>}{tableChecks.length > 0 && <><span className="waiter-table-owner">{tableChecks.length} açık adisyon{table.group ? " · ortak" : ""}</span><b>{money(tableChecks.reduce((sum, check) => sum + check.totalMinor, 0))}</b></>}</button>;
-      })}</div></section>;
-      })}</>}
+    {!selected && cashierMode === "tables" && (() => {
+      const emptyCount = tables.filter((t) => statusOf(t) === "idle").length;
+      const occupiedCount = tables.filter((t) => statusOf(t) === "occupied").length;
+      const billReqCount = tables.filter((t) => statusOf(t) === "bill_requested").length;
+      const floorSections = buildFloorSections(tables, configuredFloors).filter((f) => tables.some((t) => normalizeFloorName(t.floor) === f.key));
+      const hasMultipleFloors = floorSections.length > 1;
+
+      return (
+        <>
+          <div className="cashier-table-toolbar">
+            <div className="cashier-table-toolbar-left">
+              <h2 className="cashier-table-title">🍽️ Masalar</h2>
+              <div className="cashier-table-stats">
+                <span className="cashier-stat-pill total">Toplam: <strong>{tables.length}</strong></span>
+                <span className="cashier-stat-pill empty">🟢 Boş: <strong>{emptyCount}</strong></span>
+                <span className="cashier-stat-pill occupied">🔴 Dolu: <strong>{occupiedCount}</strong></span>
+                {billReqCount > 0 && (
+                  <span className="cashier-stat-pill bill-req">🟡 Hesap İstendi: <strong>{billReqCount}</strong></span>
+                )}
+              </div>
+            </div>
+            <button type="button" className="cashier-refresh-btn" onClick={() => void reload()} disabled={loading}>
+              🔄 Yenile
+            </button>
+          </div>
+          {!loading && !error && tables.length === 0 && <p className="ops-message">Gösterilecek aktif masa bulunamadı.</p>}
+          {floorSections.map((floor) => {
+            const floorTables = tables.filter((table) => normalizeFloorName(table.floor) === floor.key);
+            if (!floorTables.length) return null;
+            return (
+              <section className="waiter-floor-section" key={floor.key} aria-label={floor.label}>
+                {hasMultipleFloors && (
+                  <div className="waiter-floor-heading">
+                    <h3>{floor.label}</h3>
+                    <span>{floorTables.length} masa</span>
+                  </div>
+                )}
+                <div className="waiter-table-grid">
+                  {floorTables.map((table) => {
+                    const status = statusOf(table);
+                    const visual = status === "bill_requested" ? "bill-requested" : table.group ? "grouped" : status === "reserved" ? "reserved" : status === "occupied" ? "occupied" : "empty";
+                    const label = status === "bill_requested" ? "Hesap istendi" : table.group ? "Grupta" : status === "reserved" ? "Rezerve" : status === "occupied" ? "Dolu" : "Boş";
+                    const primaryId = table.group?.primaryTableId ?? table.id;
+                    const tableChecks = checks[primaryId] ?? [];
+                    return (
+                      <button type="button" key={table.id} className={`waiter-table-card ${visual}`} onClick={() => setSelectedId(primaryId)}>
+                        <svg className="waiter-table-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <rect x="5" y="6" width="14" height="12" rx="3" />
+                          <path d="M9 3h6M9 21h6M2 10v4M22 10v4" />
+                        </svg>
+                        <strong>{table.name}</strong>
+                        <span className="waiter-table-status">{label}</span>
+                        {table.group && <small className="waiter-group-card-label">Ana masa: {table.group.tableNames[0]}</small>}
+                        {tableChecks.length > 0 && (
+                          <>
+                            <span className="waiter-table-owner">{tableChecks.length} açık adisyon{table.group ? " · ortak" : ""}</span>
+                            <b>{money(tableChecks.reduce((sum, check) => sum + check.totalMinor, 0))}</b>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </>
+      );
+    })()}
     {cashierMode === "quick" && quickStep === "menu" && <section className="cashier-quick-section" aria-label="Hızlı Satış Menü Ekranı">
       <div className="cashier-quick-menu-header">
         <div className="cashier-quick-search-bar">
