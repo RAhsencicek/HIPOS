@@ -180,6 +180,29 @@ export function CashierApp() {
   const [configuredFloors, setConfiguredFloors] = useState<string[]>([]);
   const [cashOverview, setCashOverview] = useState<CashOverview | null>(null);
   const [selectedRegisterId, setSelectedRegisterId] = useState("");
+  const [stationModalOpen, setStationModalOpen] = useState(false);
+  const [stationMode, setStationMode] = useState<"initial" | "change">("initial");
+  const [stationManagerPin, setStationManagerPin] = useState("");
+  const [stationError, setStationError] = useState("");
+  const initialStationChecked = useRef(false);
+
+  useEffect(() => {
+    if (!cashierSession) return;
+    let timer: number;
+    const resetTimer = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setCashierSession(null);
+      }, 10 * 60 * 1000);
+    };
+    const events = ["mousedown", "mousemove", "keypress", "scroll", "touchstart"];
+    events.forEach((name) => window.addEventListener(name, resetTimer));
+    resetTimer();
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((name) => window.removeEventListener(name, resetTimer));
+    };
+  }, [cashierSession]);
   const [cashError, setCashError] = useState("");
   const [cashLoading, setCashLoading] = useState(true);
   const [cashDialog, setCashDialog] = useState<{ mode: "open" | "close"; registerId: string; shiftId?: string; version?: number; expected?: number } | null>(null);
@@ -244,6 +267,42 @@ export function CashierApp() {
     setMorningNote("");
     setMorningError("");
     setCashNotice("");
+  }
+
+  async function handleAssignStation(registerId: string) {
+    if (stationMode === "change") {
+      if (!stationManagerPin.trim()) {
+        setStationError("Kasa değiştirmek için lütfen yönetici PIN kodunuzu girin.");
+        return;
+      }
+      try {
+        const res = await fetch(`${apiBase}/api/v1/auth/pin-verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ firmId, branchId, pin: stationManagerPin, clientType: "pos" }),
+        });
+        if (!res.ok) {
+          setStationError("Girdiğiniz yönetici PIN kodu hatalı.");
+          return;
+        }
+        const data = await res.json() as { user: { role: string; fullName: string } };
+        if (!["owner", "manager"].includes(data.user.role)) {
+          setStationError("Bu işlem için yalnız Yönetici / Patron yetkisi geçerlidir.");
+          return;
+        }
+      } catch {
+        setStationError("Yetki doğrulaması başarısız oldu.");
+        return;
+      }
+    }
+
+    localStorage.setItem("hipos_pos_assigned_register_id", registerId);
+    selectRegister(registerId);
+    setStationModalOpen(false);
+    setStationManagerPin("");
+    setStationError("");
+    const reg = cashOverview?.registers.find((r) => r.id === registerId);
+    setCashNotice(`✅ Terminal başarıyla ${reg?.name ?? "Kasaya"} kilitlendi.`);
   }
 
   const todayFormatted = useMemo(() => {
@@ -650,7 +709,31 @@ export function CashierApp() {
       running = true;
       try {
         const overview = await request<CashOverview>(`/api/v1/firms/${firmId}/branches/${branchId}/cash/overview`, "pos-single");
-        if (active) { setCashOverview(overview); setSelectedRegisterId((current) => current || overview.registers[0]?.id || ""); setCashError(""); }
+        if (active) {
+          setCashOverview(overview);
+          if (!initialStationChecked.current && overview.registers.length > 0) {
+            initialStationChecked.current = true;
+            const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+            if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
+              setSelectedRegisterId(savedStation);
+            } else if (overview.registers.length === 1) {
+              localStorage.setItem("hipos_pos_assigned_register_id", overview.registers[0].id);
+              setSelectedRegisterId(overview.registers[0].id);
+            } else {
+              setStationMode("initial");
+              setStationModalOpen(true);
+              setSelectedRegisterId(overview.registers[0].id);
+            }
+          } else if (!selectedRegisterId && overview.registers.length > 0) {
+            const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+            if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
+              setSelectedRegisterId(savedStation);
+            } else {
+              setSelectedRegisterId(overview.registers[0].id);
+            }
+          }
+          setCashError("");
+        }
       } catch (cause) {
         if (active) setCashError(cause instanceof Error ? cause.message : "Kasa bilgileri alınamadı.");
       } finally { running = false; if (active) setCashLoading(false); }
@@ -938,7 +1021,7 @@ export function CashierApp() {
     return (
       <PinPadModal
         title="Kasa Dokunmatik Ekranı"
-        allowedRoles={["cashier", "owner"]}
+        allowedRoles={["cashier", "owner", "manager"]}
         subtitle="Kasayı açmak ve tahsilat yapmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_cashier_token", data.token);
@@ -960,7 +1043,7 @@ export function CashierApp() {
       </div>
       <div className="waiter-header-actions">
         <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
-          Kasiyer: {cashierSession.user.fullName}
+          👤 Kasiyer: {cashierSession.user.fullName}
         </span>
         <button
           type="button"
@@ -969,36 +1052,48 @@ export function CashierApp() {
             localStorage.removeItem("hipos_cashier_user");
             setCashierSession(null);
           }}
+          className="waiter-back"
           style={{
-            padding: "0.25rem 0.6rem",
-            fontSize: "0.75rem",
-            borderRadius: "9999px",
-            backgroundColor: "rgba(239, 68, 68, 0.15)",
-            color: "#ef4444",
-            border: "1px solid rgba(239, 68, 68, 0.3)",
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.8rem",
+            background: "#334155",
+            borderColor: "#475569",
+            color: "#f8fafc",
+            fontWeight: 600,
             cursor: "pointer",
-            marginRight: "8px"
+            marginRight: "8px",
           }}
+          title="Kasiyeri değiştir veya ekranı kilitle"
         >
-          Ekranı Kilitle
+          🔒 Kasiyer Değiştir / Kilitle
         </button>
         <div className="cashier-terminal-card" aria-label="Kasa ve Sorumlu Bilgisi">
-          <div className="cashier-terminal-reg">
-            <span className="cashier-terminal-tag">KASA</span>
-            <select
-              className="cashier-terminal-select"
-              aria-label="Kasa seçin"
-              value={mainRegister?.id ?? ""}
-              disabled={cashBusy || cashLoading || Boolean(cashDialog) || Boolean(cashError)}
-              onChange={(event) => selectRegister(event.target.value)}
+          <div className="cashier-terminal-reg" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span className="cashier-terminal-tag">SABİT İSTASYON</span>
+            <strong style={{ fontSize: "0.9rem", color: "#f8fafc", whiteSpace: "nowrap" }}>
+              {mainRegister ? `${mainRegister.name} (${mainRegister.code})` : "İstasyon Seçilmedi"}
+            </strong>
+            <button
+              type="button"
+              title="Terminal istasyon kasasını değiştir (Yönetici Onayı Gerekir)"
+              style={{
+                background: "transparent",
+                border: "1px solid #475569",
+                color: "#94a3b8",
+                borderRadius: "4px",
+                padding: "2px 6px",
+                fontSize: "0.75rem",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setStationMode("change");
+                setStationManagerPin("");
+                setStationError("");
+                setStationModalOpen(true);
+              }}
             >
-              {!mainRegister && <option value="">Kasa seçin</option>}
-              {cashOverview?.registers.map((register) => (
-                <option key={register.id} value={register.id}>
-                  {register.name} ({register.code})
-                </option>
-              ))}
-            </select>
+              ⚙️ Değiştir
+            </button>
           </div>
           {mainRegister && (
             <>
@@ -2108,6 +2203,114 @@ export function CashierApp() {
         </form>
       )}
     </dialog>
+    {/* Terminal İstasyon Sabitleme / Değiştirme Modalı */}
+    {stationModalOpen && (
+      <div className="morning-shift-overlay" role="dialog" aria-modal="true" aria-labelledby="station-assign-title">
+        <div className="morning-shift-card" style={{ maxWidth: 460 }}>
+          <div className="morning-shift-badge">
+            🏢 {stationMode === "initial" ? "CİHAZ KURULUMU" : "İSTASYON DEĞİŞTİRME"}
+          </div>
+          <h2 id="station-assign-title" style={{ fontSize: "1.3rem", margin: "8px 0" }}>
+            {stationMode === "initial" ? "Bu Terminal Hangi Kasaya Ait?" : "Kasa Terminalini Değiştir"}
+          </h2>
+          <p style={{ color: "#94a3b8", fontSize: "0.85rem", lineHeight: 1.4, marginBottom: 16 }}>
+            {stationMode === "initial"
+              ? "Bu cihaz (All-in-One POS terminali ve nakit çekmecesi) fiziki bir kasaya bağlanmalıdır. Yanlış kasa seçimi gün sonu Z-Raporu ve nakit sayımını etkiler."
+              : "Fiziki terminalin bağlı olduğu kasayı değiştirmektesiniz. Bu işlem yetkili yönetici onayı gerektirir."}
+          </p>
+
+          {stationMode === "change" && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: "0.85rem", color: "#cbd5e1", marginBottom: 6 }}>
+                🔑 Yönetici PIN Kodu:
+              </label>
+              <input
+                type="password"
+                maxLength={6}
+                inputMode="numeric"
+                autoFocus
+                placeholder="Yönetici PIN"
+                value={stationManagerPin}
+                onChange={(e) => {
+                  setStationManagerPin(e.target.value);
+                  setStationError("");
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #475569",
+                  background: "#1e293b",
+                  color: "#fff",
+                  fontSize: "1.1rem",
+                  letterSpacing: 4,
+                  textAlign: "center",
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+            <span style={{ fontSize: "0.8rem", color: "#94a3b8", fontWeight: 600 }}>BAĞLANACAK KASAYI SEÇİN:</span>
+            {(cashOverview?.registers ?? []).map((reg) => (
+              <button
+                key={reg.id}
+                type="button"
+                className="ops-primary"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  background: mainRegister?.id === reg.id ? "#1e293b" : "#0f172a",
+                  borderColor: mainRegister?.id === reg.id ? "#38bdf8" : "#334155",
+                  borderWidth: 2,
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+                onClick={() => void handleAssignStation(reg.id)}
+              >
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: "1rem", color: "#f8fafc" }}>
+                    {reg.name} ({reg.code})
+                  </div>
+                  <div style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
+                    {reg.responsible ? `Sorumlu: ${reg.responsible}` : "Sorumlu atanmamış"}
+                  </div>
+                </div>
+                {mainRegister?.id === reg.id && (
+                  <span style={{ fontSize: "0.75rem", background: "#0284c7", color: "#fff", padding: "2px 8px", borderRadius: 4 }}>
+                    Mevcut
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {stationError && (
+            <p className="ops-error" role="alert" style={{ marginBottom: 12 }}>
+              {stationError}
+            </p>
+          )}
+
+          <footer style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            {stationMode === "change" && (
+              <button
+                type="button"
+                className="waiter-cancel-custom"
+                onClick={() => {
+                  setStationModalOpen(false);
+                  setStationError("");
+                  setStationManagerPin("");
+                }}
+              >
+                Vazgeç
+              </button>
+            )}
+          </footer>
+        </div>
+      </div>
+    )}
   </main>;
 }
 
@@ -2117,6 +2320,24 @@ export function WaiterApp() {
         const token = localStorage.getItem("hipos_waiter_token");
         return saved && token ? { token, user: JSON.parse(saved) } : null;
     });
+
+  useEffect(() => {
+    if (!waiterSession) return;
+    let timer: number;
+    const resetTimer = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setWaiterSession(null);
+      }, 10 * 60 * 1000);
+    };
+    const events = ["mousedown", "mousemove", "keypress", "scroll", "touchstart"];
+    events.forEach((name) => window.addEventListener(name, resetTimer));
+    resetTimer();
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((name) => window.removeEventListener(name, resetTimer));
+    };
+  }, [waiterSession]);
   const [products, setProducts] = useState<Product[]>([]);
   const [menus, setMenus] = useState<RestaurantMenu[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string; isActive: boolean }>>([]);
@@ -2293,6 +2514,15 @@ export function WaiterApp() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [tableStatusSaving, saving, operationSaving, reload]);
+
+  useEffect(() => {
+    if (waiterSession?.user && waiters.length > 0 && !waiterId) {
+      const match = waiters.find((w) => w.name.trim().toLowerCase() === waiterSession.user.fullName.trim().toLowerCase());
+      if (match) {
+        setWaiterId(match.id);
+      }
+    }
+  }, [waiterSession, waiters, waiterId]);
 
   const requestedTable = tables.find((item) => item.id === tableId);
   const selectedTable = tables.find((item) => item.id === (requestedTable?.group?.primaryTableId ?? tableId));
@@ -2822,19 +3052,55 @@ export function WaiterApp() {
     return (
       <PinPadModal
         title="Garson Tablet Girişi"
-        allowedRoles={["waiter"]}
+        allowedRoles={["waiter", "owner", "manager"]}
         subtitle="Masalara sipariş girmek için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_waiter_token", data.token);
           localStorage.setItem("hipos_waiter_user", JSON.stringify(data.user));
           setWaiterSession(data);
+          const match = waiters.find((w) => w.name.trim().toLowerCase() === data.user.fullName.trim().toLowerCase());
+          if (match) setWaiterId(match.id);
         }}
       />
     );
   }
 
   return <main className="ops-shell waiter-shell">
-    <header className="ops-header"><a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a><div className="waiter-header-actions"><span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>Garson: {waiterSession.user.fullName}</span><button onClick={() => { localStorage.removeItem("hipos_waiter_token"); localStorage.removeItem("hipos_waiter_user"); setWaiterSession(null); }} style={{ padding: "0.25rem 0.6rem", fontSize: "0.75rem", borderRadius: "9999px", backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.3)", cursor: "pointer", marginRight: "8px" }}>Vardiyayı Kapat</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button><button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>{selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}<span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span></div></header>
+    <header className="ops-header">
+      <a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a>
+      <div className="waiter-header-actions">
+        <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
+          👤 Garson: {waiterSession.user.fullName}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            localStorage.removeItem("hipos_waiter_token");
+            localStorage.removeItem("hipos_waiter_user");
+            setWaiterSession(null);
+          }}
+          className="waiter-back"
+          style={{
+            padding: "0.35rem 0.75rem",
+            fontSize: "0.8rem",
+            background: "#334155",
+            borderColor: "#475569",
+            color: "#f8fafc",
+            fontWeight: 600,
+            cursor: "pointer",
+            marginRight: "8px",
+          }}
+          title="Garsonu değiştir veya ekranı kilitle"
+        >
+          🔒 Garson Değiştir / Kilitle
+        </button>
+        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button>
+        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>
+        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>
+        {selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}
+        <span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span>
+      </div>
+    </header>
     {!selectedTable && notice && <p className="ops-success" role="status" style={{ margin: "12px 16px", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}</p>}
     {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
       <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
@@ -3463,7 +3729,7 @@ export function KitchenApp() {
     return (
       <PinPadModal
         title="Mutfak KDS Girişi"
-        allowedRoles={["chef"]}
+        allowedRoles={["chef", "owner", "manager"]}
         subtitle="Mutfak ekranını açmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_kitchen_token", data.token);
