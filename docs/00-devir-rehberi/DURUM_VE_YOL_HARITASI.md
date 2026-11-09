@@ -252,6 +252,19 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
   - `sse_02_cashier_final.png`: Kasa tahsilatı tamamlayıp adisyon fişini yazdırdıktan sonraki durum.
   - `sse_02_waiter_instant_freed.png`: Kasa hesabı kapattığı an Garson ekranının anında BOŞ'a dönmesi.
 
+#### D. Zombi / Askıda Kalan Masa Temizliği ve Yönetici Paneli Görünümü (9 Kasım 2026):
+* **Zombi Masa Teşhisi:** Ekim ve 4 Kasım tarihlerindeki eski demo tohumlama (demo-seed) verilerinden kalan 14 masanın (`Masa 03..13`, `18`, `21`, `25`) adisyonları `sales.checks` tablosunda kapalı olmasına rağmen, `service.tables` üzerinde `occupied` ve `bill_requested` durumunda askıda kaldığı tespit edildi. Bu durum garson ekranında masaları "Dolu" gösterirken, tıklandığında "Açık adisyon yok" çelişkisine yol açıyordu.
+* **Veritabanı Temizliği:**
+  - `UPDATE service.tables SET status = 'idle', version = version + 1 WHERE status != 'idle';` (27 masa boşa düşürüldü).
+  - `UPDATE service.assignments SET closed_at = NOW(), closed_by = 'system-cleanup' WHERE closed_at IS NULL;` (Eski açık atamalar kapatıldı).
+  - Garson ve Kasa ekranlarında gerçek durum yansıdı: `26 Toplam masa | 26 Boş | 0 Dolu | 0 Hesap istendi`.
+* **Yönetici Masa Planı İyileştirmesi (`ServiceTablesPage.tsx` & `styles.css`):**
+  - Yönetici panelinde masaların gri/boş tel kafes gibi görünmesi giderildi; her karta canlı durum rozeti (`🟢 Boş`, `● Dolu`, `🧾 Hesap İstendi`, `📅 Rezerve`) eklendi.
+  - Başlık çubuğuna anlık durum sayaçları eklendi: `🟢 26 Boş · ⚡ Canlı LAN`.
+  - Masa detay paneline boş masalar için açıklayıcı bilgilendirme eklendi ("🟢 Masa Boş ve Servise Hazır").
+  - `PrintingEndpoints.cs` altındaki `/service/tables/{tableId}/settle` endpoint'ine `IRestaurantEventHub` enjekte edilerek garson ekranından doğrudan masa kapatıldığında da SSE olayları (`table.updated`, `check.closed`, `payment.settled`) fırlatıldı.
+  - Doğrulama kanıtları: `admin_tables_clean_verified.png` ve `waiter_tables_clean_verified.png`.
+
 ---
 
 ## 5. DOKÜMANTASYON GÜNCELLEME TAAHHÜDÜ
