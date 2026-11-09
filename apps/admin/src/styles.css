@@ -3500,10 +3500,63 @@ td.strong {
   background: #fafafa;
 }
 
+.restaurant-table.empty {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #1e293b;
+}
+
 .restaurant-table.occupied {
   background: #eeeaff;
   border-color: #ddd5ff;
   color: #654bdb;
+}
+
+.restaurant-table.bill-requested {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.restaurant-table.reserved {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.service-table-status-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  line-height: 1.2;
+}
+
+.service-table-status-pill.empty {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.service-table-status-pill.occupied {
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
+.service-table-status-pill.bill-requested {
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.service-table-status-pill.reserved {
+  background: #ffedd5;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
 }
 
 .service-layout {

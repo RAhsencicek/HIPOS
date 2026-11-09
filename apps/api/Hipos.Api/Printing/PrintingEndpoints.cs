@@ -1,4 +1,5 @@
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
 using Microsoft.AspNetCore.Mvc;
@@ -96,6 +97,7 @@ public static class PrintingEndpoints
             [FromServices] PaidCheckTableSettlement settlement,
             [FromServices] PrintingService printing,
             [FromServices] FeatureRuntimeCapabilities runtime,
+            [FromServices] IRestaurantEventHub eventHub,
             HttpContext context,
             CancellationToken ct) =>
         {
@@ -216,6 +218,10 @@ public static class PrintingEndpoints
 
             await settlement.ReleaseAfterPaymentAsync(tableId, firmId, branchId, actor, now, ct);
             await transaction.CommitAsync(ct);
+
+            eventHub.Publish("check.closed", firmId, branchId, new { checkId, tableId });
+            eventHub.Publish("payment.settled", firmId, branchId, new { checkId, tableId, method = paymentMethod });
+            eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = "vacant" });
 
             return Results.Ok(new
             {

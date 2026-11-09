@@ -8,7 +8,7 @@ type Line = { productId: string; productName: string; quantity: number; unitPric
 type Assignment = { id: string; orderId: string; waiterId: string | null; waiterName: string | null;
   openedAt: string; orderCreatedAt: string; orderStatus: string; paymentStatus: string;
   totalMinor: number; version: number; items: Line[] };
-type Table = { id: string; number: number; name: string; isActive: boolean; floor: string | null; version: number; group?: { tableNames: string[]; guestCount: number } | null; assignment?: Assignment | null };
+type Table = { id: string; number: number; name: string; isActive: boolean; floor: string | null; version: number; status?: string; group?: { tableNames: string[]; guestCount: number } | null; assignment?: Assignment | null };
 type Waiter = { id: string; name: string; isActive: boolean };
 type TableResponse = { source: "postgres"; tablesEnabled: boolean; waitersEnabled: boolean; floors?: string[]; items: Table[] };
 
@@ -136,7 +136,11 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
       : activeTables.filter((t) => normalizeFloor(t.floor) === selectedFloorFilter);
   const lastTable = activeTables.at(-1) ?? null;
   const canAddTable = !lastTable || lastTable.number < 999;
-  const occupied = activeTables.filter((table) => Boolean(table.assignment || table.group)).length;
+  const occupiedTables = activeTables.filter((table) => Boolean(table.assignment || table.group || table.status === "occupied"));
+  const billRequestedTables = activeTables.filter((table) => table.status === "bill_requested");
+  const reservedTables = activeTables.filter((table) => table.status === "reserved");
+  const emptyTables = activeTables.filter((table) => !table.assignment && !table.group && table.status !== "occupied" && table.status !== "bill_requested" && table.status !== "reserved");
+  const occupied = occupiedTables.length;
   const selectedWaiter = waiters.find((waiter) => waiter.id === selectedWaiterId) ?? null;
   const waiterTableCount = (waiterId: string) => activeTables.filter((table) => table.assignment?.waiterId === waiterId).length;
   const floorTableCount = (floorName: string) => activeTables.filter((table) => normalizeFloor(table.floor) === floorName).length;
@@ -381,19 +385,58 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
 
       <div className="branch-detail-grid service-layout">
         <section className="card table-plan-card">
-          <div className="card-heading"><div><span className="card-kicker">VERİTABANINA BAĞLI MASA PLANI</span><h2>{ctx.selectedBranch?.name}{selectedFloorFilter ? ` · ${selectedFloorFilter === "__unassigned__" ? "Katı seçilmemiş" : selectedFloorFilter}` : ""}</h2></div>
-            <span className="service-summary">{occupied}/{activeTables.length} masada açık bağ</span></div>
+          <div className="card-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <span className="card-kicker">VERİTABANINA BAĞLI MASA PLANI</span>
+              <h2>{ctx.selectedBranch?.name}{selectedFloorFilter ? ` · ${selectedFloorFilter === "__unassigned__" ? "Katı seçilmemiş" : selectedFloorFilter}` : ""}</h2>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+              <span className="service-table-status-pill empty" title="Servise hazır boş masalar">
+                🟢 {emptyTables.length} Boş
+              </span>
+              {occupiedTables.length > 0 && (
+                <span className="service-table-status-pill occupied" title="Açık adisyon bulunan dolu masalar">
+                  🟣 {occupiedTables.length} Dolu
+                </span>
+              )}
+              {billRequestedTables.length > 0 && (
+                <span className="service-table-status-pill bill-requested" title="Hesap istenen masalar">
+                  🟡 {billRequestedTables.length} Hesap İstendi
+                </span>
+              )}
+              {reservedTables.length > 0 && (
+                <span className="service-table-status-pill reserved" title="Rezerve masalar">
+                  🟠 {reservedTables.length} Rezerve
+                </span>
+              )}
+              <span className="service-summary" style={{ fontSize: "11px", color: "var(--muted)" }}>
+                {activeTables.length} Masa · ⚡ Canlı LAN
+              </span>
+            </div>
+          </div>
           {visibleTables.length ? <div className={`table-plan service-table-plan ${selectedWaiterId ? "has-waiter-filter" : ""}`}>
             {visibleTables.map((table) => {
               const tableFloor = normalizeFloor(table.floor);
+              const isBillRequested = table.status === "bill_requested";
+              const isReserved = table.status === "reserved";
+              const isOccupied = Boolean(table.assignment || table.group || table.status === "occupied");
+              const isEmpty = !isOccupied && !isBillRequested && !isReserved;
+              const visualClass = isBillRequested ? "bill-requested" : isReserved ? "reserved" : isOccupied ? "occupied" : "empty";
+
               return <button key={table.id} type="button"
-                className={`restaurant-table service-table ${table.assignment || table.group ? "occupied" : ""} ${selectedId === table.id ? "selected" : ""} ${selectedWaiterId && table.assignment?.waiterId === selectedWaiterId ? "waiter-match" : ""} ${selectedWaiterId && table.assignment?.waiterId !== selectedWaiterId ? "waiter-dimmed" : ""}`}
+                className={`restaurant-table service-table ${visualClass} ${selectedId === table.id ? "selected" : ""} ${selectedWaiterId && table.assignment?.waiterId === selectedWaiterId ? "waiter-match" : ""} ${selectedWaiterId && table.assignment?.waiterId !== selectedWaiterId ? "waiter-dimmed" : ""}`}
                 onClick={() => setSelectedId(table.id)} aria-pressed={selectedId === table.id}
-                aria-label={`${table.name}, ${tableFloor ?? "kat atanmamış"}, ${table.group ? "masa grubunda" : table.assignment ? "açık adisyon var" : "açık adisyon yok"}`}>
+                aria-label={`${table.name}, ${tableFloor ?? "kat atanmamış"}, ${isOccupied ? "dolu" : isBillRequested ? "hesap istendi" : isReserved ? "rezerve" : "boş"}`}>
                 <span className="service-table-number"><LayoutGrid size={14} />{String(table.number).padStart(2, "0")}</span>
+                
+                {isEmpty && <span className="service-table-status-pill empty">🟢 Boş</span>}
+                {isOccupied && <span className="service-table-status-pill occupied">● Dolu</span>}
+                {isBillRequested && <span className="service-table-status-pill bill-requested">🧾 Hesap İstendi</span>}
+                {isReserved && <span className="service-table-status-pill reserved">📅 Rezerve</span>}
+
                 {tableFloor && <span className="service-table-waiter" style={{ fontSize: 11, opacity: 0.85 }}>{tableFloor}</span>}
                 {table.group && <span className="service-table-waiter">{table.group.tableNames.join(" + ")} · {table.group.guestCount} kişi</span>}
-                {table.assignment && <><span className="service-table-waiter">{table.assignment.waiterName ?? "Garson atanmamış"}</span><span className="service-table-total">{money(table.assignment.totalMinor)}</span></>}
+                {table.assignment && <><span className="service-table-waiter">👤 {table.assignment.waiterName ?? "Garson atanmamış"}</span><span className="service-table-total">{money(table.assignment.totalMinor)}</span></>}
               </button>;
             })}
           </div> : <p>{activeTables.length ? "Seçili kat filtresinde masa bulunmuyor." : "Bu şubede aktif masa yok. “Masa ekle” ile ilk masayı oluşturabilirsiniz."}</p>}
@@ -415,7 +458,18 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
         <section className="card branch-side-card service-detail" aria-live="polite">
           <span className="card-kicker">MASA DETAYI</span>
           {!selected ? <><h2>Masa seçin</h2><p>Kat ataması, adisyon, sipariş zamanı, ürünler ve sorumlu garson için bir masaya tıklayın.</p></> : <>
-            <h2>{selected.name}</h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h2 style={{ margin: 0 }}>{selected.name}</h2>
+              {selected.assignment || selected.status === "occupied" ? (
+                <span className="service-table-status-pill occupied">● Dolu</span>
+              ) : selected.status === "bill_requested" ? (
+                <span className="service-table-status-pill bill-requested">🧾 Hesap İstendi</span>
+              ) : selected.status === "reserved" ? (
+                <span className="service-table-status-pill reserved">📅 Rezerve</span>
+              ) : (
+                <span className="service-table-status-pill empty">🟢 Boş</span>
+              )}
+            </div>
             <label className="service-floor-field">Kat / Bölge
               <select
                 value={normalizeFloor(selected.floor) ?? ""}
@@ -431,7 +485,14 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
             <p className="service-floor-hint">Bu seçim garson ve kasiyer ekranlarındaki kat gruplamasını belirler.</p>
             {selected.group && <p>Masa grubu: {selected.group.tableNames.join(" + ")} · {selected.group.guestCount} kişi. Ortak hesap ana masada tutulur.</p>}
             {!selected.isActive && <StatusPill tone="orange">Masa pasif</StatusPill>}
-            {!selected.assignment ? <p>Bu masada açık adisyon yok.</p> : <>
+            {!selected.assignment ? (
+              <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: 13, lineHeight: 1.5 }}>
+                <strong>🟢 Masa Boş ve Servise Hazır</strong>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#15803d" }}>
+                  Bu masada şu anda açık bir hesap veya sipariş bulunmuyor. Garson el terminalinden veya kasiyerden sipariş girildiğinde anlık olarak burada listelenecektir.
+                </p>
+              </div>
+            ) : <>
               {!data.tablesEnabled && <p className="service-historical">Masa servisi kapalı · geçmiş bağ</p>}
               <div className="side-stat"><span>Adisyon</span><strong title={selected.assignment.orderId}>{selected.assignment.orderId.slice(0, 8)}…{selected.assignment.orderId.slice(-4)}</strong></div>
               <div className="side-stat"><span>Sipariş zamanı</span><strong>{dateTime(selected.assignment.orderCreatedAt)}</strong></div>
