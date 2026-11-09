@@ -75,11 +75,15 @@ Bu modül; restoran operasyonunu yetkisiz kullanımlardan koruyan güvenlik ve k
   - **Servis Ekibi:** Ayşe Demir, Mehmet Garson, Mehmet Kaya, Zeynep Arslan
   - **Kasa Ekibi:** Ayşe Kasiyer, Ceren Uçar
   - **Destek Ekibi:** Ali Koç
-- Her kartta yeşil `🔑 PIN Aktif` rozeti ve `Kartı & PIN'i Düzenle` butonu yer alır.
-- Düzenleme tıklandığında sayfa akıcı biçimde formun başına kayar (`window.scrollTo`), PIN giriş alanı `Terminal PIN Sıfırla (4 hane)` başlığıyla açılır.
+- Her kartta yeşil **`🔑 PIN: {pin}`** rozeti (ör. `🔑 PIN: 1234`) ve `Kartı & PIN'i Düzenle` butonu yer alır. Yöneticiler her personelin mevcut PIN'ini doğrudan kartında görür.
+- Düzenleme tıklandığında sayfa akıcı biçimde formun başına kayar (`window.scrollTo`), PIN giriş alanı `Mevcut PIN: 1234` bilgisiyle açılır.
 - PIN değiştirilmediğinde boş bırakılabilir, mevcut PIN korunur.
 
-### C. Saha Testi ve Kanıtlar (9 Kasım 2026):
+### C. Çoklu Rol ve Terminal Yetkilendirmesi (`OperationalApps.tsx`):
+- Restoran pratiğinde kasiyerler ve yöneticiler yoğun saatlerde salona geçip masalardan sipariş alabildikleri için, `/waiter` tablet girişindeki rol kısıtlaması genişletildi (`allowedRoles: ["waiter", "cashier", "owner", "manager", "chef"]`).
+- `GET /waiters` uç noktası şubedeki tüm aktif personeli dönecek şekilde güncellendi; böylece masaya sipariş giren kasiyer veya garson otomatik olarak sipariş sahibi garson (`waiterId`) olarak seçilmektedir.
+
+### D. Saha Testi ve Kanıtlar (9 Kasım 2026):
 1. **PIN Doğrulama:** `Ayşe Demir` PIN'i `2221` ile `POST /pin-verify` çağrıldı; JWT üretildi (Başarılı).
 2. **PIN Sıfırlama:** Admin API üzerinden `Ayşe Demir` PIN'i `5555` yapıldı:
    - Eski PIN `2221` ile giriş denendi: `401 Unauthorized` (Başarılı).
@@ -87,3 +91,7 @@ Bu modül; restoran operasyonunu yetkisiz kullanımlardan koruyan güvenlik ve k
 3. **PIN Çakışma Koruması:** `Ayşe Demir`'e Mehmet Garson'un PIN'i olan `2222` atanmaya çalışıldı:
    - Backend `409 PIN_ALREADY_IN_USE` cevabı verdi ve *"Bu PIN kodu zaten 'Mehmet Garson' tarafından kullanılıyor"* uyarısı döndü (Başarılı).
 4. **Yeni Personel Ekleme:** `Caner Garson` (PIN: `7777`) oluşturuldu; anında hem Admin'de, hem `/waiters` listesinde, hem de `POST /pin-verify` sorgusunda doğrulandı (Başarılı).
+5. **Kasiyerin Garson Tabletine Girişi (Canlı Tarayıcı Testi):**
+   - Admin üzerinden Ayşe Kasiyer'in PIN'i `1234` yapıldı ve kartında `🔑 PIN: 1234` rozeti belirdi.
+   - Google Chrome ile `http://localhost:5176/waiter` açıldı, PIN pad'e `1234` girildi.
+   - Ayşe Kasiyer başarıyla oturum açtı, header'da *"Hoş geldin, Ayşe Kasiyer"* yazdı ve garson dropdown'unda otomatik seçilerek 26 masa siparişe hazır hale geldi.

@@ -49,6 +49,7 @@ public static class AuthDbInitializer
             Id = Guid.NewGuid(),
             MembershipId = ownerMembership.Id,
             PinHash = BCrypt.Net.BCrypt.HashPassword("9999"),
+            PinPlain = "9999",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -87,6 +88,7 @@ public static class AuthDbInitializer
             Id = Guid.NewGuid(),
             MembershipId = cashierMembership.Id,
             PinHash = BCrypt.Net.BCrypt.HashPassword("1111"),
+            PinPlain = "1111",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -125,6 +127,7 @@ public static class AuthDbInitializer
             Id = Guid.NewGuid(),
             MembershipId = waiterMembership.Id,
             PinHash = BCrypt.Net.BCrypt.HashPassword("2222"),
+            PinPlain = "2222",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -163,6 +166,7 @@ public static class AuthDbInitializer
             Id = Guid.NewGuid(),
             MembershipId = chefMembership.Id,
             PinHash = BCrypt.Net.BCrypt.HashPassword("3333"),
+            PinPlain = "3333",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -289,20 +293,25 @@ public static class AuthDbInitializer
                 allMemberships.Add(membership);
             }
 
+            var pin = defaultPins.TryGetValue(emp.Name.Trim(), out var p) ? p : "1234";
             if (membership.PinCode is null)
             {
-                var pin = defaultPins.TryGetValue(emp.Name.Trim(), out var p) ? p : "1234";
                 var pinCode = new PinCodeRow
                 {
                     Id = Guid.NewGuid(),
                     MembershipId = membership.Id,
                     PinHash = BCrypt.Net.BCrypt.HashPassword(pin),
+                    PinPlain = pin,
                     IsActive = true,
                     CreatedAt = now,
                     UpdatedAt = now
                 };
                 authDb.PinCodes.Add(pinCode);
                 membership.PinCode = pinCode;
+            }
+            else if (string.IsNullOrEmpty(membership.PinCode.PinPlain))
+            {
+                membership.PinCode.PinPlain = pin;
             }
         }
 

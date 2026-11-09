@@ -39,7 +39,7 @@ public sealed record ServiceTableView(string Id, int Number, string Name, bool I
     ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null, string? Floor = null);
 public sealed record ServiceWaiterView(string Id, string Name, bool IsActive);
 public sealed record ServiceEmployeeView(string Id, string Name, string Department, string JobTitle, string? Phone,
-    bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string? Role = null, bool HasPin = false, Guid? UserId = null);
+    bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string? Role = null, bool HasPin = false, Guid? UserId = null, string? Pin = null);
 
 public static class ServiceEndpoints
 {
@@ -515,7 +515,7 @@ public static class ServiceEndpoints
         {
             var denied = Guard(context, firmId, branchId, ready, false);
             if (denied is not null) return denied;
-            var rows = await db.Employees.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && row.Department == "service")
+            var rows = await db.Employees.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId && row.IsActive)
                 .OrderBy(row => row.Name).ToListAsync(context.RequestAborted);
             return Results.Ok(new { items = rows.Select(row => new ServiceWaiterView(row.Id, row.Name, row.IsActive)).ToArray() });
         });
@@ -594,8 +594,9 @@ public static class ServiceEndpoints
                 var role = matched?.Role ?? MapDepartmentToRole(emp.Department, emp.JobTitle);
                 var hasPin = matched?.PinCode is { IsActive: true };
                 var userId = matched?.UserId;
+                var pin = matched?.PinCode is { IsActive: true } ? matched.PinCode.PinPlain : null;
 
-                return ToView(emp, role, hasPin, userId);
+                return ToView(emp, role, hasPin, userId, pin);
             }).ToArray();
 
             return Results.Ok(new { source = "postgres", items = views });
@@ -715,6 +716,7 @@ public static class ServiceEndpoints
                         Id = Guid.NewGuid(),
                         MembershipId = membership.Id,
                         PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed),
+                        PinPlain = pinTrimmed,
                         IsActive = true,
                         CreatedAt = now,
                         UpdatedAt = now
@@ -724,6 +726,7 @@ public static class ServiceEndpoints
                 else
                 {
                     pinCode.PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed);
+                    pinCode.PinPlain = pinTrimmed;
                     pinCode.IsActive = true;
                     pinCode.UpdatedAt = now;
                 }
@@ -732,7 +735,7 @@ public static class ServiceEndpoints
             await authDb.SaveChangesAsync(context.RequestAborted);
 
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/employees/{id}",
-                ToView(employee, role, !string.IsNullOrWhiteSpace(pinTrimmed), userId));
+                ToView(employee, role, !string.IsNullOrWhiteSpace(pinTrimmed), userId, pinTrimmed));
         });
 
         group.MapPut("/employees/{employeeId}", async (string firmId, string branchId, string employeeId,
@@ -857,6 +860,7 @@ public static class ServiceEndpoints
                 if (membership.PinCode is not null)
                 {
                     membership.PinCode.PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed);
+                    membership.PinCode.PinPlain = pinTrimmed;
                     membership.PinCode.IsActive = true;
                     membership.PinCode.UpdatedAt = now;
                 }
@@ -867,6 +871,7 @@ public static class ServiceEndpoints
                         Id = Guid.NewGuid(),
                         MembershipId = membership.Id,
                         PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed),
+                        PinPlain = pinTrimmed,
                         IsActive = true,
                         CreatedAt = now,
                         UpdatedAt = now
@@ -885,7 +890,8 @@ public static class ServiceEndpoints
 
             await authDb.SaveChangesAsync(context.RequestAborted);
 
-            return Results.Ok(ToView(employee, membership.Role, hasPin, membership.UserId));
+            var currentPin = membership.PinCode is { IsActive: true } ? membership.PinCode.PinPlain : null;
+            return Results.Ok(ToView(employee, membership.Role, hasPin, membership.UserId, currentPin));
         });
 
         group.MapPost("/tables", async (string firmId, string branchId, CreateServiceTable command,
@@ -1259,9 +1265,9 @@ public static class ServiceEndpoints
         return result;
     }
 
-    private static ServiceEmployeeView ToView(ServiceWaiterRow employee, string? role = null, bool hasPin = false, Guid? userId = null) =>
+    private static ServiceEmployeeView ToView(ServiceWaiterRow employee, string? role = null, bool hasPin = false, Guid? userId = null, string? pin = null) =>
         new(employee.Id, employee.Name, employee.Department, employee.JobTitle, employee.Phone, employee.IsActive,
-            employee.Version, employee.CreatedAt, employee.UpdatedAt, role, hasPin, userId);
+            employee.Version, employee.CreatedAt, employee.UpdatedAt, role, hasPin, userId, pin);
 
     public static string MapDepartmentToRole(string department, string? jobTitle = null)
     {

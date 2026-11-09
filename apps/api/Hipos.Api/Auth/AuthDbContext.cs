@@ -59,6 +59,7 @@ public sealed class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbC
             entity.Property(row => row.Id).HasColumnName("id");
             entity.Property(row => row.MembershipId).HasColumnName("membership_id").IsRequired();
             entity.Property(row => row.PinHash).HasColumnName("pin_hash").HasMaxLength(255).IsRequired();
+            entity.Property(row => row.PinPlain).HasColumnName("pin_plain").HasMaxLength(10);
             entity.Property(row => row.IsActive).HasColumnName("is_active").IsRequired();
             entity.Property(row => row.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at").IsRequired();

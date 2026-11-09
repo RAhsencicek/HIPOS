@@ -1109,7 +1109,7 @@ export function CashierApp() {
     return (
       <PinPadModal
         title="Kasa Dokunmatik Ekranı"
-        allowedRoles={["cashier", "owner", "manager"]}
+        allowedRoles={["cashier", "owner", "manager", "waiter"]}
         subtitle="Kasayı açmak ve tahsilat yapmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_cashier_token", data.token);
@@ -3498,7 +3498,7 @@ export function WaiterApp() {
     return (
       <PinPadModal
         title="Garson Tablet Girişi"
-        allowedRoles={["waiter", "owner", "manager"]}
+        allowedRoles={["waiter", "cashier", "owner", "manager", "chef"]}
         subtitle="Masalara sipariş girmek için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_waiter_token", data.token);

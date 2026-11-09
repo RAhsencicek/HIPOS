@@ -18,6 +18,7 @@ type Employee = {
   updatedAt: string;
   role?: "owner" | "cashier" | "waiter" | "chef" | null;
   hasPin?: boolean;
+  pin?: string | null;
 };
 type Draft = {
   name: string;
@@ -182,17 +183,21 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
           <label>
             {editing && editing.hasPin ? "Terminal PIN Sıfırla (4 hane)" : "Terminal PIN Kodu (4 hane)"}
             <span className="personnel-optional">
-              {editing && editing.hasPin ? "boş bırakırsanız mevcut PIN korunur" : "POS / Garson kilit açma için"}
+              {editing && editing.pin
+                ? `Mevcut PIN: ${editing.pin} · değiştirmeyecekseniz boş bırakın`
+                : editing && editing.hasPin
+                ? "boş bırakırsanız mevcut PIN korunur"
+                : "POS / Garson kilit açma için"}
             </span>
             <input
-              type="password"
+              type="text"
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={6}
               value={draft.pin}
               onChange={(event) => setDraft({ ...draft, pin: event.target.value.replace(/\D/g, "") })}
               disabled={!canWrite || busy}
-              placeholder={editing && editing.hasPin ? "Yeni PIN girin (değişmeyecekse boş bırakın)" : "Örn. 4444"}
+              placeholder={editing && editing.pin ? `Yeni PIN girin (mevcut: ${editing.pin})` : editing && editing.hasPin ? "Yeni PIN girin" : "Örn. 4444"}
               autoComplete="off"
             />
           </label>
@@ -219,7 +224,9 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
               <div className="personnel-card-top">
                 <span className={`personnel-avatar avatar-${person.department}`}><UserRound size={18} /></span>
                 <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-                  {person.hasPin ? (
+                  {person.pin ? (
+                    <StatusPill tone="green">🔑 PIN: {person.pin}</StatusPill>
+                  ) : person.hasPin ? (
                     <StatusPill tone="green">🔑 PIN Aktif</StatusPill>
                   ) : (
                     <StatusPill tone="neutral">PIN Tanımsız</StatusPill>
