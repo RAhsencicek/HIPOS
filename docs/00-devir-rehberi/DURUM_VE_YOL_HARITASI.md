@@ -81,14 +81,16 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ FAZ 2: KİMLİK, YETKİ VE PERSONEL PIN YÖNETİMİ (Admin Auth UI)         │
-│ 1. Admin paneline "Personel & Yetkiler" yönetim sayfası ekleme         │
-│ 2. Personele 4 haneli PIN tanımlama ve rol (waiter/cashier/mgr) verme │
-│ 3. POST /api/v1/auth/staff-pin endpoint'i ile güvenli bcrypt kaydı    │
+│ FAZ 2: KİMLİK, YETKİ VE PERSONEL PIN YÖNETİMİ (✅ TAMAMLANDI - 9 KASIM) │
+│ 1. service.employees ve auth.users çift yönlü senkronizasyonu (BİTTİ)  │
+│ 2. Admin /admin/kitchen/personnel ekranında departman bazlı listeleme  │
+│ 3. Kartlarda 🔑 PIN Aktif rozeti ve yöneticiden PIN tanımlama/sıfırlama│
+│ 4. Şube içi PIN çakışma kontrolü (409 PIN_ALREADY_IN_USE) (BİTTİ)      │
+│ 5. Personelin kendi PIN'ini terminalden değiştirmesini kısıtlama (BİTTİ│
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ FAZ 3: YÖNETİCİ RAPORLARI VE GERÇEK CİRO ANALİTİĞİ                    │
+│ FAZ 3: YÖNETİCİ RAPORLARI VE GERÇEK CİRO ANALİTİĞİ (SIRADAKİ FAZ)      │
 │ 1. Backend'e GET /api/v1/reports/sales-analytics endpoint'i ekleme     │
 │ 2. ReportsPage.tsx'i gerçek satış ve ciro tablolarına bağlama          │
 │ 3. Arayüzlerdeki yanıltıcı "Test / Simüle" etiketlerini temizleme      │
@@ -137,21 +139,29 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
 
 ---
 
-### 🔷 FAZ 2 TEKNİK SÖZLEŞMESİ: Personel PIN ve Rol Yönetimi
+### 🔷 FAZ 2 TEKNİK SÖZLEŞMESİ: Personel PIN ve Rol Yönetimi (✅ TAMAMLANDI)
 
-#### A. API Endpoint'leri:
-* `GET /api/v1/firms/{firmId}/branches/{branchId}/auth/staff`:
-  Şubedeki personelleri, rollerini (`waiter`, `cashier`, `manager`, `chef`), aktiflik durumunu ve PIN tanımlı olup olmadığını döner (PIN hash'i asla dönülmez).
-* `POST /api/v1/firms/{firmId}/branches/{branchId}/auth/staff`:
-  Yeni personel kartı açar, rolünü belirler ve opsiyonel 4 haneli PIN atar.
-* `PUT /api/v1/firms/{firmId}/branches/{branchId}/auth/staff/{userId}/pin`:
+#### A. Mimari ve API Endpoint'leri:
+* `GET /api/v1/firms/{firmId}/branches/{branchId}/service/employees`:
+  Şubedeki personelleri departmanlarına göre listeler. Her personel için `role`, `hasPin: bool`, `userId: Guid` bilgilerini `auth` şemasından birleştirerek döner.
+* `POST /api/v1/firms/{firmId}/branches/{branchId}/service/employees`:
+  Yeni personel kartı açar, rolünü belirler ve opsiyonel 4 haneli PIN atar (`auth.users`, `auth.memberships`, `auth.pin_codes` çift yönlü senkronizasyonu).
+* `PUT /api/v1/firms/{firmId}/branches/{branchId}/service/employees/{employeeId}`:
   Yöneticinin seçili personele 4 haneli yeni PIN atamasını sağlar (BCrypt ile hash'lenerek `auth.pin_codes` tablosuna yazılır).
+* **PIN Çakışma Denetimi:** Şube içinde iki personele aynı PIN verilmeye çalışıldığında backend `409 PIN_ALREADY_IN_USE` kodu ve açıklayıcı Türkçe uyarı döner.
+* **Güvenlik Kuralı:** Personel terminal üzerinden kendi PIN'ini değiştiremez; PIN tıpkı T.C. kimliği / sicil no gibi yönetici tarafından belirlenir ve sıfırlanır.
 
-#### B. Arayüz (`apps/admin`):
-* Menüde `Mutfak ve Servis > Personel` yerine veya `Ayarlar > Personel ve Yetkiler` sekmesi altında:
-  - Personel listesi (Ad-Soyad, Rol rozeti, Telefon, PIN Durumu).
-  - `[+ Yeni Personel Ekle]` butonu.
-  - Her satırda `[ 🔑 PIN Değiştir / Belirle ]` hızlı işlem butonu.
+#### B. Arayüz (`apps/admin/src/features/branches/ServicePersonnelPage.tsx`):
+* Menüde `Mutfak ve Servis > Personel` sekmesi altında:
+  - Departman grupları: Şube Yönetimi, Şefler, Mutfak Ekibi, Servis Ekibi, Kasa Ekibi, Destek Ekibi.
+  - Kartlarda yeşil `🔑 PIN Aktif` rozeti, telefon ve görev bilgisi.
+  - `[+ Yeni Personel Ekle]` formu: İsim, Departman, Unvan, Telefon ve 4 haneli PIN belirleme.
+  - `[ 🔑 Kartı & PIN'i Düzenle ]` butonu: Akıcı yukarı kaydırma (`window.scrollTo`), PIN sıfırlama alanı ("boş bırakırsanız mevcut PIN korunur").
+
+#### C. Canlı Tarayıcı Doğrulaması (9 Kasım 2026):
+* Ayşe Demir'in PIN'i `2221`'den `5555`'e güncellendi; eski PIN reddedildi (`401`), yeni PIN ile JWT üretildi (`200 OK`).
+* Caner Garson adında yeni personel eklendi; `/waiters` ve `/quick-staff` listelerine düştü, PIN `7777` ile login doğrulandı.
+* Çakışan PIN denemesi yapıldı (`2222`); sistem *"Bu PIN kodu zaten 'Mehmet Garson' tarafından kullanılıyor"* hatası verdi.
 
 ---
 

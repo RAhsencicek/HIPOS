@@ -1,8 +1,10 @@
+using Hipos.Api.Auth;
 using Hipos.Api.Features;
 using Hipos.Api.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using BCrypt.Net;
 
 namespace Hipos.Api.Service;
 
@@ -14,8 +16,8 @@ public sealed record UpdateServiceTableState(int ExpectedVersion);
 public sealed record UpdateServiceTableFloor(int ExpectedVersion, string? Floor);
 public sealed record ReserveServiceTable(int ExpectedVersion, DateTimeOffset ReservedFor, string? GuestName);
 public sealed record CreateServiceWaiter(string Name);
-public sealed record CreateServiceEmployee(Guid RequestId, string Name, string Department, string JobTitle, string? Phone);
-public sealed record UpdateServiceEmployee(int ExpectedVersion, string Name, string Department, string JobTitle, string? Phone, bool IsActive);
+public sealed record CreateServiceEmployee(Guid RequestId, string Name, string Department, string JobTitle, string? Phone, string? Role = null, string? Pin = null);
+public sealed record UpdateServiceEmployee(int ExpectedVersion, string Name, string Department, string JobTitle, string? Phone, bool IsActive, string? Role = null, string? Pin = null);
 public sealed record AssignServiceOrder(Guid RequestId, string TableId, Guid OrderId, string? WaiterId);
 public sealed record CloseServiceAssignment(int ExpectedVersion);
 public sealed record CreateServiceTableGroup(Guid RequestId, string PrimaryTableId, string[] MemberTableIds, int GuestCount);
@@ -37,7 +39,7 @@ public sealed record ServiceTableView(string Id, int Number, string Name, bool I
     ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null, string? Floor = null);
 public sealed record ServiceWaiterView(string Id, string Name, bool IsActive);
 public sealed record ServiceEmployeeView(string Id, string Name, string Department, string JobTitle, string? Phone,
-    bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    bool IsActive, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string? Role = null, bool HasPin = false, Guid? UserId = null);
 
 public static class ServiceEndpoints
 {
@@ -568,28 +570,68 @@ public static class ServiceEndpoints
                 : Results.Ok(new { order = result.Order, table = table.Name, waiter = waiter.Name });
         });
 
-        group.MapGet("/employees", async (string firmId, string branchId, HttpContext context, ServiceDbContext db) =>
+        group.MapGet("/employees", async (string firmId, string branchId, HttpContext context, ServiceDbContext db, AuthDbContext authDb) =>
         {
             var denied = Guard(context, firmId, branchId, ready, false);
             if (denied is not null) return denied;
             var rows = await db.Employees.AsNoTracking().Where(row => row.FirmId == firmId && row.BranchId == branchId)
                 .OrderBy(row => row.Department).ThenBy(row => row.JobTitle).ThenBy(row => row.Name)
                 .ToListAsync(context.RequestAborted);
-            return Results.Ok(new { source = "postgres", items = rows.Select(ToView).ToArray() });
+
+            var memberships = await authDb.Memberships.AsNoTracking()
+                .Include(m => m.User)
+                .Include(m => m.PinCode)
+                .Where(m => m.FirmId == firmId && m.BranchId == branchId)
+                .ToListAsync(context.RequestAborted);
+
+            var views = rows.Select(emp =>
+            {
+                var matched = memberships.FirstOrDefault(m =>
+                    (m.User != null && m.User.Id.ToString() == emp.Id) ||
+                    (m.User != null && m.User.Email.Equals($"staff-{emp.Id}@hipos.local", StringComparison.OrdinalIgnoreCase)) ||
+                    (m.User != null && m.User.FullName.Trim().Equals(emp.Name.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+                var role = matched?.Role ?? MapDepartmentToRole(emp.Department, emp.JobTitle);
+                var hasPin = matched?.PinCode is { IsActive: true };
+                var userId = matched?.UserId;
+
+                return ToView(emp, role, hasPin, userId);
+            }).ToArray();
+
+            return Results.Ok(new { source = "postgres", items = views });
         });
 
         group.MapPost("/employees", async (string firmId, string branchId, CreateServiceEmployee command,
-            HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+            HttpContext context, ServiceDbContext db, AuthDbContext authDb, FeatureNewWorkGate gate) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
             var validation = ValidateEmployee(command.Name, command.Department, command.JobTitle, command.Phone);
             if (command.RequestId == Guid.Empty || validation is not null)
                 return Fail(context, "INVALID_EMPLOYEE", 400, validation ?? "Tekrar deneme için geçerli requestId gereklidir.");
+
+            var pinTrimmed = command.Pin?.Trim();
+            if (!string.IsNullOrWhiteSpace(pinTrimmed))
+            {
+                if (pinTrimmed.Length is < 4 or > 6 || !pinTrimmed.All(char.IsDigit))
+                    return Fail(context, "INVALID_PIN", 400, "PIN kodu 4 ila 6 haneli rakamlardan oluşmalıdır.");
+
+                var existingPins = await authDb.Memberships
+                    .Include(m => m.User)
+                    .Include(m => m.PinCode)
+                    .Where(m => m.FirmId == firmId && m.BranchId == branchId && m.IsActive && m.PinCode != null && m.PinCode.IsActive)
+                    .ToListAsync(context.RequestAborted);
+
+                var collision = existingPins.FirstOrDefault(m => BCrypt.Net.BCrypt.Verify(pinTrimmed, m.PinCode!.PinHash));
+                if (collision is not null)
+                    return Fail(context, "PIN_ALREADY_IN_USE", 409, $"Bu PIN kodu zaten '{collision.User?.FullName ?? "başka bir personel"}' tarafından kullanılıyor. Farklı bir PIN belirleyin.");
+            }
+
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
                 firmId, branchId, "staff.records", context.RequestAborted);
             if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
             var id = command.RequestId.ToString();
             var existing = await db.Employees.AsNoTracking().SingleOrDefaultAsync(row => row.Id == id, context.RequestAborted);
             if (existing is not null)
@@ -600,30 +642,133 @@ public static class ServiceEndpoints
                 await transaction.CommitAsync(context.RequestAborted);
                 return Results.Ok(ToView(existing));
             }
+
             var now = DateTimeOffset.UtcNow;
             var employee = new ServiceWaiterRow { Id = id, FirmId = firmId, BranchId = branchId, Name = command.Name.Trim(),
                 Department = command.Department, JobTitle = command.JobTitle.Trim(), Phone = NormalizePhone(command.Phone),
                 IsActive = true, Version = 1, CreatedAt = now, UpdatedAt = now };
             db.Employees.Add(employee);
             AddAudit(db, firmId, branchId, id, "employee_created", DemoAccess.Resolve(context)!.Name, now);
-            try { await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted); }
+
+            try
+            {
+                await db.SaveChangesAsync(context.RequestAborted);
+                await transaction.CommitAsync(context.RequestAborted);
+            }
             catch (DbUpdateException error) when (Unique(error))
-            { return Fail(context, "EMPLOYEE_REQUEST_CONFLICT", 409, "Bu requestId daha önce kullanılmış."); }
-            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/employees/{id}", ToView(employee));
+            {
+                return Fail(context, "EMPLOYEE_REQUEST_CONFLICT", 409, "Bu requestId daha önce kullanılmış.");
+            }
+
+            // Auth synchronization
+            var role = !string.IsNullOrWhiteSpace(command.Role) && (command.Role is "owner" or "cashier" or "waiter" or "chef")
+                ? command.Role
+                : MapDepartmentToRole(command.Department, command.JobTitle);
+
+            var userId = command.RequestId;
+            var email = $"staff-{id}@hipos.local";
+            var user = await authDb.Users.FirstOrDefaultAsync(u => u.Email == email || u.Id == userId, context.RequestAborted);
+            if (user is null)
+            {
+                user = new UserRow
+                {
+                    Id = userId,
+                    Email = email,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("HiposStaff123!"),
+                    FullName = command.Name.Trim(),
+                    Phone = NormalizePhone(command.Phone),
+                    IsActive = true,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                authDb.Users.Add(user);
+            }
+
+            var membership = await authDb.Memberships.FirstOrDefaultAsync(m => m.UserId == user.Id && m.FirmId == firmId && m.BranchId == branchId, context.RequestAborted);
+            if (membership is null)
+            {
+                membership = new MembershipRow
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    FirmId = firmId,
+                    BranchId = branchId,
+                    Role = role,
+                    IsActive = true,
+                    CreatedAt = now
+                };
+                authDb.Memberships.Add(membership);
+            }
+            else
+            {
+                membership.Role = role;
+                membership.IsActive = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(pinTrimmed))
+            {
+                var pinCode = await authDb.PinCodes.FirstOrDefaultAsync(p => p.MembershipId == membership.Id, context.RequestAborted);
+                if (pinCode is null)
+                {
+                    pinCode = new PinCodeRow
+                    {
+                        Id = Guid.NewGuid(),
+                        MembershipId = membership.Id,
+                        PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed),
+                        IsActive = true,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    };
+                    authDb.PinCodes.Add(pinCode);
+                }
+                else
+                {
+                    pinCode.PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed);
+                    pinCode.IsActive = true;
+                    pinCode.UpdatedAt = now;
+                }
+            }
+
+            await authDb.SaveChangesAsync(context.RequestAborted);
+
+            return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/employees/{id}",
+                ToView(employee, role, !string.IsNullOrWhiteSpace(pinTrimmed), userId));
         });
 
         group.MapPut("/employees/{employeeId}", async (string firmId, string branchId, string employeeId,
-            UpdateServiceEmployee command, HttpContext context, ServiceDbContext db, FeatureNewWorkGate gate) =>
+            UpdateServiceEmployee command, HttpContext context, ServiceDbContext db, AuthDbContext authDb, FeatureNewWorkGate gate) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
             var validation = ValidateEmployee(command.Name, command.Department, command.JobTitle, command.Phone);
             if (command.ExpectedVersion < 1 || validation is not null)
                 return Fail(context, "INVALID_EMPLOYEE", 400, validation ?? "expectedVersion pozitif olmalı.");
+
+            var pinTrimmed = command.Pin?.Trim();
+            if (!string.IsNullOrWhiteSpace(pinTrimmed))
+            {
+                if (pinTrimmed.Length is < 4 or > 6 || !pinTrimmed.All(char.IsDigit))
+                    return Fail(context, "INVALID_PIN", 400, "PIN kodu 4 ila 6 haneli rakamlardan oluşmalıdır.");
+
+                var existingPins = await authDb.Memberships
+                    .Include(m => m.User)
+                    .Include(m => m.PinCode)
+                    .Where(m => m.FirmId == firmId && m.BranchId == branchId && m.IsActive && m.PinCode != null && m.PinCode.IsActive)
+                    .ToListAsync(context.RequestAborted);
+
+                var collision = existingPins.FirstOrDefault(m =>
+                    (m.User == null || (m.User.Id.ToString() != employeeId && !m.User.FullName.Trim().Equals(command.Name.Trim(), StringComparison.OrdinalIgnoreCase))) &&
+                    BCrypt.Net.BCrypt.Verify(pinTrimmed, m.PinCode!.PinHash));
+
+                if (collision is not null)
+                    return Fail(context, "PIN_ALREADY_IN_USE", 409, $"Bu PIN kodu zaten '{collision.User?.FullName ?? "başka bir personel"}' tarafından kullanılıyor. Farklı bir PIN belirleyin.");
+            }
+
             await using var transaction = await db.Database.BeginTransactionAsync(context.RequestAborted);
             var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction(),
                 firmId, branchId, "staff.records", context.RequestAborted);
             if (blocked is not null) return Fail(context, blocked.Code, blocked.Status, blocked.Message);
+
             var employee = await db.Employees.FromSqlInterpolated($"SELECT * FROM service.employees WHERE id = {employeeId} AND firm_id = {firmId} AND branch_id = {branchId} FOR UPDATE")
                 .SingleOrDefaultAsync(context.RequestAborted);
             if (employee is null) return Fail(context, "EMPLOYEE_NOT_FOUND", 404, "Bu şubede personel kaydı bulunamadı.");
@@ -631,15 +776,116 @@ public static class ServiceEndpoints
             if (employee.IsActive && (!command.IsActive || command.Department != "service") &&
                 await db.Assignments.AnyAsync(row => row.FirmId == firmId && row.BranchId == branchId && row.WaiterId == employee.Id && row.ClosedAt == null, context.RequestAborted))
                 return Fail(context, "EMPLOYEE_HAS_OPEN_ASSIGNMENT", 409, "Açık masa-adisyon ataması olan servis personeli pasife alınamaz veya başka bölüme taşınamaz.");
+
             var previousActive = employee.IsActive;
-            employee.Name = command.Name.Trim(); employee.Department = command.Department;
-            employee.JobTitle = command.JobTitle.Trim(); employee.Phone = NormalizePhone(command.Phone);
-            employee.IsActive = command.IsActive; employee.Version++; employee.UpdatedAt = DateTimeOffset.UtcNow;
+            employee.Name = command.Name.Trim();
+            employee.Department = command.Department;
+            employee.JobTitle = command.JobTitle.Trim();
+            employee.Phone = NormalizePhone(command.Phone);
+            employee.IsActive = command.IsActive;
+            employee.Version++;
+            employee.UpdatedAt = DateTimeOffset.UtcNow;
             var action = previousActive == employee.IsActive ? "employee_updated" : employee.IsActive ? "employee_reactivated" : "employee_deactivated";
             AddAudit(db, firmId, branchId, employee.Id, action, DemoAccess.Resolve(context)!.Name, employee.UpdatedAt);
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
-            return Results.Ok(ToView(employee));
+
+            // Auth synchronization
+            var memberships = await authDb.Memberships
+                .Include(m => m.User)
+                .Include(m => m.PinCode)
+                .Where(m => m.FirmId == firmId && m.BranchId == branchId)
+                .ToListAsync(context.RequestAborted);
+
+            var matched = memberships.FirstOrDefault(m =>
+                (m.User != null && m.User.Id.ToString() == employee.Id) ||
+                (m.User != null && m.User.Email.Equals($"staff-{employee.Id}@hipos.local", StringComparison.OrdinalIgnoreCase)) ||
+                (m.User != null && m.User.FullName.Trim().Equals(command.Name.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                (m.User != null && m.User.FullName.Trim().Equals(employee.Name.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+            var targetRole = !string.IsNullOrWhiteSpace(command.Role) && (command.Role is "owner" or "cashier" or "waiter" or "chef")
+                ? command.Role
+                : MapDepartmentToRole(command.Department, command.JobTitle);
+
+
+            var now = DateTimeOffset.UtcNow;
+            MembershipRow membership;
+            if (matched is not null)
+            {
+                membership = matched;
+                if (membership.User is not null)
+                {
+                    membership.User.FullName = command.Name.Trim();
+                    membership.User.Phone = NormalizePhone(command.Phone);
+                    membership.User.IsActive = command.IsActive;
+                    membership.User.UpdatedAt = now;
+                }
+                membership.Role = targetRole;
+                membership.IsActive = command.IsActive;
+            }
+            else
+            {
+                var newUserId = Guid.TryParse(employee.Id, out var parsedGuid) ? parsedGuid : Guid.NewGuid();
+                var user = new UserRow
+                {
+                    Id = newUserId,
+                    Email = $"staff-{employee.Id}@hipos.local",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("HiposStaff123!"),
+                    FullName = command.Name.Trim(),
+                    Phone = NormalizePhone(command.Phone),
+                    IsActive = command.IsActive,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                authDb.Users.Add(user);
+                membership = new MembershipRow
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    FirmId = firmId,
+                    BranchId = branchId,
+                    Role = targetRole,
+                    IsActive = command.IsActive,
+                    CreatedAt = now
+                };
+                authDb.Memberships.Add(membership);
+            }
+
+            var hasPin = membership.PinCode is { IsActive: true };
+            if (!string.IsNullOrWhiteSpace(pinTrimmed))
+            {
+                if (membership.PinCode is not null)
+                {
+                    membership.PinCode.PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed);
+                    membership.PinCode.IsActive = true;
+                    membership.PinCode.UpdatedAt = now;
+                }
+                else
+                {
+                    membership.PinCode = new PinCodeRow
+                    {
+                        Id = Guid.NewGuid(),
+                        MembershipId = membership.Id,
+                        PinHash = BCrypt.Net.BCrypt.HashPassword(pinTrimmed),
+                        IsActive = true,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    };
+                    authDb.PinCodes.Add(membership.PinCode);
+                }
+                hasPin = true;
+                AddAudit(db, firmId, branchId, employee.Id, "employee_pin_reset", DemoAccess.Resolve(context)!.Name, now);
+                await db.SaveChangesAsync(context.RequestAborted);
+            }
+            else if (!command.IsActive && membership.PinCode is not null)
+            {
+                membership.PinCode.IsActive = false;
+                hasPin = false;
+            }
+
+            await authDb.SaveChangesAsync(context.RequestAborted);
+
+            return Results.Ok(ToView(employee, membership.Role, hasPin, membership.UserId));
         });
 
         group.MapPost("/tables", async (string firmId, string branchId, CreateServiceTable command,
@@ -1013,8 +1259,22 @@ public static class ServiceEndpoints
         return result;
     }
 
-    private static ServiceEmployeeView ToView(ServiceWaiterRow employee) => new(employee.Id, employee.Name, employee.Department,
-        employee.JobTitle, employee.Phone, employee.IsActive, employee.Version, employee.CreatedAt, employee.UpdatedAt);
+    private static ServiceEmployeeView ToView(ServiceWaiterRow employee, string? role = null, bool hasPin = false, Guid? userId = null) =>
+        new(employee.Id, employee.Name, employee.Department, employee.JobTitle, employee.Phone, employee.IsActive,
+            employee.Version, employee.CreatedAt, employee.UpdatedAt, role, hasPin, userId);
+
+    public static string MapDepartmentToRole(string department, string? jobTitle = null)
+    {
+        var dept = department?.Trim().ToLowerInvariant();
+        return dept switch
+        {
+            "management" => "owner",
+            "cashier" => "cashier",
+            "kitchen" => "chef",
+            "service" => "waiter",
+            _ => "waiter"
+        };
+    }
 
     private static string? ValidateEmployee(string name, string department, string jobTitle, string? phone)
     {

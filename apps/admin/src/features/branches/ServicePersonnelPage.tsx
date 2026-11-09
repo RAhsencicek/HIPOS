@@ -6,9 +6,27 @@ import type { ViewContext } from "../../app/context";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Department = "management" | "kitchen" | "service" | "cashier" | "support";
-type Employee = { id: string; name: string; department: Department; jobTitle: string; phone: string | null;
-  isActive: boolean; version: number; createdAt: string; updatedAt: string };
-type Draft = { name: string; department: Department; jobTitle: string; phone: string; isActive: boolean };
+type Employee = {
+  id: string;
+  name: string;
+  department: Department;
+  jobTitle: string;
+  phone: string | null;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  role?: "owner" | "cashier" | "waiter" | "chef" | null;
+  hasPin?: boolean;
+};
+type Draft = {
+  name: string;
+  department: Department;
+  jobTitle: string;
+  phone: string;
+  isActive: boolean;
+  pin: string;
+};
 const departments: Array<{ id: Department; title: string; note: string }> = [
   { id: "management", title: "Şube Yönetimi", note: "Şube müdürü ve yönetim kadrosu" },
   { id: "kitchen", title: "Şefler", note: "Mutfak sorumluluğu ve şef rolleri", chefs: true } as { id: Department; title: string; note: string; chefs: boolean },
@@ -17,7 +35,14 @@ const departments: Array<{ id: Department; title: string; note: string }> = [
   { id: "cashier", title: "Kasa Ekibi", note: "Kasiyer ve kasa sorumlusu" },
   { id: "support", title: "Destek Ekibi", note: "Temizlik, depo ve diğer destek görevleri" },
 ];
-const blankDraft = (): Draft => ({ name: "", department: "service", jobTitle: "Garson", phone: "", isActive: true });
+const blankDraft = (): Draft => ({
+  name: "",
+  department: "service",
+  jobTitle: "Garson",
+  phone: "",
+  isActive: true,
+  pin: "",
+});
 
 async function personnelApi<T>(path: string, actor: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
   let response: Response;
@@ -76,8 +101,16 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
 
   function beginEdit(person: Employee) {
     setEditing(person);
-    setDraft({ name: person.name, department: person.department, jobTitle: person.jobTitle, phone: person.phone ?? "", isActive: person.isActive });
+    setDraft({
+      name: person.name,
+      department: person.department,
+      jobTitle: person.jobTitle,
+      phone: person.phone ?? "",
+      isActive: person.isActive,
+      pin: "",
+    });
     setNotice(""); setError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function submit(event: FormEvent) {
@@ -85,16 +118,35 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
     if (!scope || busy || !canWrite) return;
     setBusy(true); setError(""); setNotice("");
     try {
+      const payload = {
+        name: draft.name.trim(),
+        department: draft.department,
+        jobTitle: draft.jobTitle.trim(),
+        phone: draft.phone.trim() || null,
+        pin: draft.pin.trim() || null,
+        isActive: draft.isActive,
+      };
+
       if (editing) {
         await personnelApi(`${scope}/employees/${encodeURIComponent(editing.id)}`, actor, "PUT", {
-          expectedVersion: editing.version, ...draft, phone: draft.phone.trim() || null,
+          expectedVersion: editing.version,
+          ...payload,
         });
-        setNotice(`${draft.name.trim()} personel kartı güncellendi.`);
+        setNotice(
+          draft.pin.trim()
+            ? `${draft.name.trim()} personel kartı ve yeni terminal PIN kodu başarıyla güncellendi.`
+            : `${draft.name.trim()} personel kartı güncellendi.`
+        );
       } else {
         await personnelApi(`${scope}/employees`, actor, "POST", {
-          requestId: crypto.randomUUID(), ...draft, phone: draft.phone.trim() || null,
+          requestId: crypto.randomUUID(),
+          ...payload,
         });
-        setNotice(`${draft.name.trim()} personel kartı kaydedildi.`);
+        setNotice(
+          draft.pin.trim()
+            ? `${draft.name.trim()} yeni personel ve 4 haneli PIN kodu başarıyla kaydedildi.`
+            : `${draft.name.trim()} personel kartı kaydedildi.`
+        );
       }
       setEditing(null); setDraft(blankDraft()); await reload();
     } catch (reason) { setError((reason as Error).message); }
@@ -105,7 +157,7 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
     <PageHeading eyebrow="MUTFAK VE SERVİS · EKİP" title="Personel"
       description="Ekibinizi bölüm ve görevlerine göre düzenleyin. Aradığınız çalışan bilgisine kolayca ulaşın."
       action={<StatusPill tone={source === "http" ? "green" : "purple"}>{source === "http" ? "Ekip kayıtları" : "Örnek gösterim"}</StatusPill>} />
-    {source === "http" ? <DemoNotice>Personel kartlarını seçili şube için yönetin. Bu kartlar çalışana giriş yetkisi vermez; çalışma saati veya bordro kaydı oluşturmaz.</DemoNotice>
+    {source === "http" ? <DemoNotice>Personel kartlarını ve terminal erişim PIN kodlarını bu ekrandan yönetin. Yöneticiler buradan personelin 4 haneli PIN kodunu belirleyebilir veya sıfırlayabilir.</DemoNotice>
       : <div className="notice" role="status">Personel kayıtlarını yönetmek için servis bağlantısının kurulması gerekiyor.</div>}
     {!scope && <div className="card generic-empty">Personel işlemleri için önce bir şube seçin.</div>}
     {error && <div className="notice" role="alert">{error}</div>}
@@ -113,7 +165,7 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
     {scope && source === "http" && <div className="personnel-layout">
       <section className="card content-card padded personnel-form-card">
         <div className="service-waiters-heading"><div><span className="card-kicker">PERSONEL KARTI</span><h2>{editing ? "Kartı düzenle" : "Yeni çalışan"}</h2>
-          <p>Bir çalışanı doğru bölüme ve görev adına kaydedin.</p></div></div>
+          <p>Bir çalışanı doğru bölüme kaydedin ve 4 haneli terminal PIN'ini belirleyin.</p></div></div>
         {!canWrite && <div className="notice" role="status">Personel kayıt modülü salt okunur. Yeni kayıt ve düzenleme için modülü etkinleştirin.</div>}
         <form className="personnel-form" onSubmit={(event) => void submit(event)}>
           <label>Ad soyad<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} minLength={2} maxLength={160} required disabled={!canWrite || busy} /></label>
@@ -126,6 +178,25 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
           </select></label>
           <label>Görev / unvan<input value={draft.jobTitle} onChange={(event) => setDraft({ ...draft, jobTitle: event.target.value })} minLength={2} maxLength={80} required disabled={!canWrite || busy} placeholder="Örn. Baş aşçı, Garson, Kasiyer" /></label>
           <label>Telefon <span className="personnel-optional">isteğe bağlı</span><input type="tel" value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} maxLength={40} disabled={!canWrite || busy} placeholder="05xx xxx xx xx" /></label>
+          
+          <label>
+            {editing && editing.hasPin ? "Terminal PIN Sıfırla (4 hane)" : "Terminal PIN Kodu (4 hane)"}
+            <span className="personnel-optional">
+              {editing && editing.hasPin ? "boş bırakırsanız mevcut PIN korunur" : "POS / Garson kilit açma için"}
+            </span>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={draft.pin}
+              onChange={(event) => setDraft({ ...draft, pin: event.target.value.replace(/\D/g, "") })}
+              disabled={!canWrite || busy}
+              placeholder={editing && editing.hasPin ? "Yeni PIN girin (değişmeyecekse boş bırakın)" : "Örn. 4444"}
+              autoComplete="off"
+            />
+          </label>
+
           {editing && <label className="personnel-active-toggle"><input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} disabled={!canWrite || busy} />Aktif çalışan</label>}
           <div className="personnel-form-actions"><button className="primary-button" type="submit" disabled={!canWrite || busy}>{busy ? "Kaydediliyor…" : editing ? "Değişiklikleri kaydet" : "Personel kaydet"}</button>
             {editing && <button className="soft-button" type="button" onClick={() => { setEditing(null); setDraft(blankDraft()); setError(""); }}>Vazgeç</button>}</div>
@@ -145,9 +216,23 @@ export function ServicePersonnelPage({ ctx, source, canWrite }: { ctx: ViewConte
           return <section className={`card personnel-group personnel-group-${group.id} ${"chefs" in group && group.chefs ? "personnel-chef-group" : ""}`} key={`${group.id}-${index}`}>
             <header><div><span className="card-kicker">{String(groupPeople.length).padStart(2, "0")} KİŞİ</span><h3>{group.title}</h3><p>{group.note}</p></div><StatusPill tone="blue">{groupPeople.length}</StatusPill></header>
             {groupPeople.length ? <div className="personnel-grid">{groupPeople.map((person) => <article className={`personnel-card ${!person.isActive ? "inactive" : ""}`} key={person.id}>
-              <div className="personnel-card-top"><span className={`personnel-avatar avatar-${person.department}`}><UserRound size={18} /></span><StatusPill tone={person.isActive ? "green" : "neutral"}>{person.isActive ? "Aktif" : "Pasif"}</StatusPill></div>
-              <h4>{person.name}</h4><strong>{person.jobTitle}</strong>{person.phone && <a href={`tel:${person.phone}`} className="personnel-phone">{person.phone}</a>}
-              <button className="soft-button personnel-edit-button" type="button" onClick={() => beginEdit(person)} disabled={!canWrite}>Kartı düzenle</button>
+              <div className="personnel-card-top">
+                <span className={`personnel-avatar avatar-${person.department}`}><UserRound size={18} /></span>
+                <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                  {person.hasPin ? (
+                    <StatusPill tone="green">🔑 PIN Aktif</StatusPill>
+                  ) : (
+                    <StatusPill tone="neutral">PIN Tanımsız</StatusPill>
+                  )}
+                  <StatusPill tone={person.isActive ? "blue" : "neutral"}>{person.isActive ? "Aktif" : "Pasif"}</StatusPill>
+                </div>
+              </div>
+              <h4>{person.name}</h4>
+              <strong>{person.jobTitle}</strong>
+              {person.phone && <a href={`tel:${person.phone}`} className="personnel-phone">{person.phone}</a>}
+              <button className="soft-button personnel-edit-button" type="button" onClick={() => beginEdit(person)} disabled={!canWrite}>
+                {person.hasPin ? "Kartı & PIN'i Düzenle" : "PIN Tanımla & Düzenle"}
+              </button>
             </article>)}</div> : <p className="personnel-group-empty">Bu bölümde henüz personel kartı yok.</p>}
           </section>;
         })}

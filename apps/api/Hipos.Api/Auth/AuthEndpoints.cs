@@ -9,14 +9,14 @@ public static class AuthEndpoints
     {
         var group = app.MapGroup("/api/v1/auth");
 
-        // 1. PATRON E-POSTA + ŞİFRE GİRİŞİ (Yönetim Paneli)
+        // 1. PATRON E-POSTA + ÅÄ°FRE GÄ°RÄ°ÅÄ° (YÃ¶netim Paneli)
         group.MapPost("/login", async (LoginRequest request, AuthDbContext db, AuthTokenService tokenService, CancellationToken ct) =>
         {
             if (!authReady)
-                return Results.Problem("Auth veritabanı henüz hazır değil.", statusCode: 503);
+                return Results.Problem("Auth veritabanÄ± henÃ¼z hazÄ±r deÄŸil.", statusCode: 503);
 
             if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
-                return Results.BadRequest(new { error = "INVALID_CREDENTIALS", message = "E-posta ve şifre zorunludur." });
+                return Results.BadRequest(new { error = "INVALID_CREDENTIALS", message = "E-posta ve ÅŸifre zorunludur." });
 
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
             var user = await db.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail && u.IsActive, ct);
@@ -24,7 +24,7 @@ public static class AuthEndpoints
             if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
                 return Results.Unauthorized();
 
-            // Kullanıcının yetkili olduğu üyelik (Owner rolü)
+            // KullanÄ±cÄ±nÄ±n yetkili olduÄŸu Ã¼yelik (Owner rolÃ¼)
             var membership = await db.Memberships
                 .FirstOrDefaultAsync(m => m.UserId == user.Id && m.IsActive, ct);
 
@@ -39,23 +39,23 @@ public static class AuthEndpoints
             return Results.Ok(new LoginResponse(token, userDto, expiresAt));
         });
 
-        // 2. DOKUNMATİK 4 HANELİ PIN İLE GİRİŞ / KİLİT AÇMA (Kasiyer, Garson, Aşçı, Patron)
+        // 2. DOKUNMATÄ°K 4 HANELÄ° PIN Ä°LE GÄ°RÄ°Å / KÄ°LÄ°T AÃ‡MA (Kasiyer, Garson, AÅŸÃ§Ä±, Patron)
         group.MapPost("/pin-verify", async (PinVerifyRequest request, AuthDbContext db, AuthTokenService tokenService, CancellationToken ct) =>
         {
             if (!authReady)
-                return Results.Problem("Auth veritabanı henüz hazır değil.", statusCode: 503);
+                return Results.Problem("Auth veritabanÄ± henÃ¼z hazÄ±r deÄŸil.", statusCode: 503);
 
             if (string.IsNullOrWhiteSpace(request.Pin) || request.Pin.Length < 4)
                 return Results.BadRequest(new { error = "INVALID_PIN", message = "En az 4 haneli PIN girilmelidir." });
 
-            // Şubedeki aktif personeller ve PIN'leri
+            // Åubedeki aktif personeller ve PIN'leri
             var memberships = await db.Memberships
                 .Include(m => m.User)
                 .Include(m => m.PinCode)
                 .Where(m => m.FirmId == request.FirmId && m.BranchId == request.BranchId && m.IsActive)
                 .ToListAsync(ct);
 
-            // Eğer belirli bir kullanıcı seçilmişse yalnız onu kontrol et, seçilmemişse girilen PIN ile eşleşen personeli bul
+            // EÄŸer belirli bir kullanÄ±cÄ± seÃ§ilmiÅŸse yalnÄ±z onu kontrol et, seÃ§ilmemiÅŸse girilen PIN ile eÅŸleÅŸen personeli bul
             MembershipRow? matchedMembership = null;
             if (request.UserId.HasValue)
             {
@@ -79,8 +79,8 @@ public static class AuthEndpoints
             var user = matchedMembership.User;
             var role = matchedMembership.Role;
 
-            // 12 saatlik istasyon JWT token'ı
-            // (Garson ve Aşçı için kesintisiz; Patron ve Kasiyer için frontend 10-15 dk hareketsizlikte tekrar PIN isteyecek)
+            // 12 saatlik istasyon JWT token'Ä±
+            // (Garson ve AÅŸÃ§Ä± iÃ§in kesintisiz; Patron ve Kasiyer iÃ§in frontend 10-15 dk hareketsizlikte tekrar PIN isteyecek)
             var (token, expiresAt) = tokenService.GenerateToken(
                 user.Id, user.Email, user.FullName, role, request.FirmId, request.BranchId, TimeSpan.FromHours(12));
 
@@ -88,11 +88,11 @@ public static class AuthEndpoints
             return Results.Ok(new PinVerifyResponse(token, userDto, expiresAt));
         });
 
-        // 3. PATRON PIN ONAYI (İkram / İndirim / İptal onaylarında tek seferlik kullanım)
+        // 3. PATRON PIN ONAYI (Ä°kram / Ä°ndirim / Ä°ptal onaylarÄ±nda tek seferlik kullanÄ±m)
         group.MapPost("/owner-override", async (OwnerOverrideRequest request, AuthDbContext db, CancellationToken ct) =>
         {
             if (!authReady)
-                return Results.Problem("Auth veritabanı henüz hazır değil.", statusCode: 503);
+                return Results.Problem("Auth veritabanÄ± henÃ¼z hazÄ±r deÄŸil.", statusCode: 503);
 
             if (string.IsNullOrWhiteSpace(request.Pin))
                 return Results.BadRequest(new { error = "PIN_REQUIRED", message = "Patron PIN kodu zorunludur." });
@@ -118,11 +118,11 @@ public static class AuthEndpoints
             ));
         });
 
-        // 4. ŞUBEDEKİ AKTİF PERSONELLERİ LİSTELEME (POS kilit ekranında buton olarak personeli seçip PIN girmek için)
+        // 4. ÅUBEDEKÄ° AKTÄ°F PERSONELLERÄ° LÄ°STELEME (POS kilit ekranÄ±nda buton olarak personeli seÃ§ip PIN girmek iÃ§in)
         group.MapGet("/quick-staff", async (string firmId, string branchId, AuthDbContext db, CancellationToken ct) =>
         {
             if (!authReady)
-                return Results.Problem("Auth veritabanı henüz hazır değil.", statusCode: 503);
+                return Results.Problem("Auth veritabanÄ± henÃ¼z hazÄ±r deÄŸil.", statusCode: 503);
 
             var staffList = await db.Memberships
                 .Include(m => m.User)
