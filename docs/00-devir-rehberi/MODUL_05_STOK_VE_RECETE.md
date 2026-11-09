@@ -1,22 +1,13 @@
 # Modül 5 Devir Şartnamesi — Stok, Depo & Reçeteli Üretim (A'dan Z'ye)
 
-> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.0
-> **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi, Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
-> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Tek Teslimli Satın Alma Siparişi, Tedarikçi İadesi, Hammadde ve Reçeteli Ürün Zayisi (Çalışıyor) · Otomatik Satış Tüketimi (Hedef)
-> **PostgreSQL Şeması:** `inventory`
+> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.5 (9 Kasım 2026)
+> **Kapsam:** Hammadde Kartları, Reçeteli Otomatik Stok Tüketimi (Depletion), Mal Kabul İrsaliyesi, Sayım Taslağı ve Fire Takibi
+> **Modül Durumu:** Kalıcı MVP (Çalışıyor) · Mal Kabul, Satın Alma, Fire (Çalışıyor) · **Satıştan Otomatik Tüketim (FAZ 1 - Uygulanacak)**
+> **PostgreSQL Şeması:** `inventory` (`inventory.warehouses`, `inventory.ingredients`, `inventory.recipes`, `inventory.recipe_lines`, `inventory.movements`, `inventory.counts`)
 > **Yönetim Paneli:** Var (`InventoryHttpPage.tsx`)
-> **API:** Var (`InventoryDbContext.cs`)
-> **Test:** Var (`STOK_REÇETE_SAYIM_MANUEL_TEST.md`, `postgres.test.mjs`)
-> **Üretime Hazır mı?:** Hayır (Otomatik reçeteli stok düşümü, gerçek kullanıcı/PIN yetkisi ve çevrimdışı eşitleme eksiktir)
+> **API:** Var (`InventoryDbContext.cs`, `InventoryEndpoints.cs`)
+> **Test:** Var (`docs/04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md`)
 > **Ana Devir Rehberi:** [DEVIR_REHBERI.md](DEVIR_REHBERI.md) · **Yol Haritası:** [DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
-
-> **Dokümantasyon Hiyerarşisi:**
-> * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
-> * **Güncel teslim ve yol haritası için:** [docs/00-devir-rehberi/DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
-> * **Devir ve onboarding için:** [docs/00-devir-rehberi/DEVIR_REHBERI.md](DEVIR_REHBERI.md)
-> * **Tarihsel kararlar için:** [docs/05-gecmis-ve-arsiv/](../05-gecmis-ve-arsiv/)
->
-> **Sıra Notu:** Bu şartnamedeki modül içi adımlar ve hedefler modül backlog'unu ayrıntılandırır. Repo genelindeki güncel teslim sırası yalnız [Durum ve Yol Haritası](DURUM_VE_YOL_HARITASI.md) belgesindedir; bu backlog gelecekteki kapsamı daraltmaz.
 
 ---
 
@@ -24,148 +15,89 @@
 
 | Alan / Özellik | Durum | Açıklama |
 | :--- | :--- | :--- |
-| **Reçete sürümü** | **Çalışıyor** | Ürün bazlı hammadde gramajları ve sürümleme kalıcıdır |
-| **Stok hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış ve bakiye hesabı çalışır |
-| **Sayım ve düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır |
-| **Satıştan otomatik tüketim** | **Yok** | Adisyon kapanışında reçete patlatıp stok düşme henüz bağlanmadı |
-| **Satın alma / mal kabul** | **Çalışıyor** | Fiyatsız sipariş taslağı/onayı tek teslimle mal kabule bağlanır; mal kabul stok+cari etkisi, eksik teslim düzeltmesi ve tedarikçiye iade kalıcıdır |
-| **Fire kaydı** | **Çalışıyor** | Hammadde firesi ve aktif reçete sürümünü snapshot alan ürün zayisi atomik `waste_loss` hareketleri oluşturur |
-| **Maliyet hesabı** | **Ertelendi** | Fiyatlandırma ve stok maliyeti ayrı modülde tasarlanacaktır |
+| **Reçete Tanımlama** | **Çalışıyor** | Ürün bazlı hammadde gramajları ve sürümleme PostgreSQL'de kalıcıdır. |
+| **Stok Hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış, mal kabul ve fire kayıtları çalışır. |
+| **Sayım ve Düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır. |
+| **Satıştan Otomatik Tüketim** | 🔴 **Eksik (FAZ 1)** | Adisyon kapatıldığında reçetedeki hammadde miktarlarını stoktan düşen köprü henüz kodlanmamıştır. |
+| **Mal Kabul / Satın Alma** | **Çalışıyor** | Satın alma siparişi, mal kabul irsaliyesi, kasadan nakit tediye veya cariye borç yazma çalışır. |
+| **Fire Kayıtları** | **Çalışıyor** | Hammadde zayisi ve reçeteli ürün bozulması `waste_loss` hareketi oluşturur. |
 
 ---
 
 ## 🎯 1. Modülün Amacı Nedir?
 
-Bu modül; hammadde, reçete, stok hareketi, sayım, fiyatsız satın alma siparişi, mal kabul, tedarikçiye iade ve hammadde/reçeteli ürün zayisi akışlarını kapsar. Satıştan otomatik tüketim (`recipe_consumption`), satın alma talebi ve ayrı fiyatlandırma/maliyet alanı henüz tamamlanmamıştır.
-
-Kısacası: **Restoranın hammadde maliyetini, depo güvenliğini ve stok kaçaklarını önleyen envanter motorudur.**
+Bu modül; restoranın hammadde maliyetini, depo güvenliğini ve stok kaçaklarını önleyen envanter motorudur. 
+En kritik görevi: **Kasada veya masada bir yemek satıldığında, mutfaktaki ilgili malzemeleri (un, et, peynir, sos vb.) gramı gramına sistem stoğundan otomatik düşmektir.**
 
 ---
 
 ## 📂 2. Hangi Dosyalar ve Kod Bloklarıyla Çalışacaksın?
 
-Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına gitmek için linklere tıklayabilirsiniz):
-
 1. **Ön Yüz (Frontend):**
-   * [InventoryHttpPage.tsx:L1-L60](../../apps/admin/src/features/inventory/InventoryHttpPage.tsx#L1-L60) — Depo stokları, kritik eşik uyarıları, sayım taslakları ve reçete ekranları.
-   * [DemoBusinessPages.tsx:L1-L60](../../apps/admin/src/features/demo/DemoBusinessPages.tsx#L1-L60) — Reçete ve stok demo görünümleri.
+   * [InventoryHttpPage.tsx](../../apps/admin/src/features/inventory/InventoryHttpPage.tsx) — Depo stokları, kritik eşik uyarıları, sayım taslakları ve reçete ekranları.
+   * [ReceivingPage.tsx](../../apps/admin/src/features/inventory/ReceivingPage.tsx) — Mal kabul ve satın alma irsaliyesi.
+   * [WastePage.tsx](../../apps/admin/src/features/inventory/WastePage.tsx) — Fire ve zayi kayıtları.
 2. **Backend (.NET API):**
-   * [InventoryDbContext.cs:L6-L50](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs#L6-L50) — Depolar (`InventoryWarehouseRow`), hammaddeler (`InventoryIngredientRow`), reçeteler (`InventoryRecipeRow`), hareketler (`InventoryMovementRow`) ve sayımlar (`InventoryCountDraftRow`).
-3. **Mevcut Testler:**
-   * [docs/04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md](../04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md) — PostgreSQL entegrasyon ve kabul testleri.
+   * [InventoryDbContext.cs](../../apps/api/Hipos.Api/Inventory/InventoryDbContext.cs) — Depolar, hammaddeler, reçeteler, stok hareketleri ve sayımlar.
+   * [InventoryEndpoints.cs](../../apps/api/Hipos.Api/Inventory/InventoryEndpoints.cs) — Stok listeleme, reçete kaydetme ve depo işlemleri.
+   * [PaymentSimulator.cs](../../apps/api/Hipos.Api/Sales/PaymentSimulator.cs) ve [SalesCheckEndpoints.cs](../../apps/api/Hipos.Api/Sales/SalesCheckEndpoints.cs) — Satış kapandığında reçete düşümünün tetikleneceği yer.
 
 ---
 
-## ✅ 3. Şu An Neler Zaten Hazır? (Neyi Baştan Yazmayacaksın?)
+## 🚀 3. FAZ 1: Satıştan Otomatik Reçeteli Stok Düşümü (Depletion) Sözleşmesi
 
-* PostgreSQL `inventory` şemasında 9 hammadde, 4 reçete ve Kadıköy Ana Depo hazırdır.
-* Sayım taslağı oluşturma, fiziksel sayım miktarı girme, sistemle karşılaştırma ve **yönetici onayıyla tek bir düzeltme hareketi üretme** mekanizması çalışmaktadır.
-* Sayım açıkken hareket kilidi koyma ve negatif stok koruması mevcuttur.
+### A. Tetiklenme Zamanı (Trigger)
+Adisyonun bakiyesi sıfırlandığında ve adisyon `status = 'closed'` durumuna geçtiği anda (hem masa tahsilatında hem hızlı satışta) aynı veritabanı oturumunda tetiklenir.
 
----
+### B. Algoritma (Psödo-kod):
+```csharp
+// Adisyon kapandığında:
+public static async Task DepleteInventoryForCheckAsync(
+    DbConnection connection, 
+    Guid checkId, 
+    string firmId, 
+    string branchId, 
+    DbTransaction transaction, 
+    CancellationToken ct)
+{
+    // 1. Kapanan adisyondaki tüm sipariş kalemlerini al
+    var items = await GetCheckOrderItemsAsync(connection, checkId, transaction, ct);
+    
+    // 2. Her bir ürün için aktif reçeteyi çek
+    foreach (var item in items)
+    {
+        var recipeLines = await GetRecipeLinesForProductAsync(connection, item.ProductId, firmId, branchId, transaction, ct);
+        if (!recipeLines.Any()) continue; // Reçetesiz ürünse (örn. kutu içecek) atla
 
-## 🖥️ 4. Ekran Ekran Detaylı Davranış ve Özellikler
+        // 3. Reçetedeki her bir hammadde için düşüm hesapla
+        foreach (var line in recipeLines)
+        {
+            decimal totalDepletion = item.Quantity * line.Quantity; // Örn: 2 adet sandviç * 120g tavuk = 240g
+            
+            // 4. inventory.movements tablosuna 'pos_sale' kaydı at
+            await InsertInventoryMovementAsync(connection, new InventoryMovement {
+                Id = Guid.NewGuid().ToString(),
+                FirmId = firmId,
+                BranchId = branchId,
+                WarehouseId = "warehouse-kadikoy-main",
+                IngredientId = line.IngredientId,
+                Delta = -totalDepletion,
+                Unit = line.Unit,
+                Kind = "pos_sale",
+                Description = $"Satış düşümü · Adisyon {checkId.ToString()[..8]} · {item.Quantity}x {item.ProductName}",
+                Actor = "system:sales-depletion",
+                CreatedAt = DateTimeOffset.UtcNow
+            }, transaction, ct);
 
-### 📦 EKRAN 1: Depo ve Kritik Stok İzleme Panosu (Mevcut Çalışan Ekran — `InventoryHttpPage.tsx`)
-* Depodaki mevcut hammaddeler: Adı, Birimi (kg, litre, adet), Sistem Miktarı, Kritik Eşik.
-* **Kritik Eşik Alarmları:**
-  * Eğer Mozzarella 2 kg'ın altına düşmüşse kırmızı uyarı rozeti: `⚠️ Kritik Stok: Mozzarella (1.400 g kaldı)`.
-* Satın alma talebi henüz yoktur. Fiyat içermeyen satın alma siparişi taslak/onay akışı çalışır; onaylı sipariş aynı hammadde ve miktarlarla tek seferde mal kabule bağlanır. Kısmi teslim desteklenmez.
-
-### 🍕 EKRAN 2: Reçeteli Otomatik Stok Düşümü (Satış Olayı Entegrasyonu) (Hedef Arka Plan Servisi — Geliştirilecek)
-* Sistemde tanımlı Margherita Pizza Reçetesi:
-  * 150 g Pizza Unu
-  * 100 g Mozzarella Peyniri
-  * 80 g Domates Sosu
-  * 5 g Zeytinyağı
-* **Otomatik Tüketim Akışı:** Kasa modülü (`Modül 1`) masanın adisyonunu tahsil edip `closed` yaptığı milisaniyede:
-  * Arka planda `recipe_consumption` servisi tetiklenir.
-  * Depodan ilgili gramajlar düşülerek `inventory.movements` tablosuna otomatik tüketim hareketi yazılır.
-
-### 🚚 EKRAN 3: Mal Kabul ve Alış İrsaliyesi Ekranı (Çalışıyor — `ReceivingPage.tsx`)
-* Belge taslak kaydedilir; taslak stok veya cari bakiyeyi değiştirmez.
-* Fiyatsız satın alma siparişi `Taslak → Onaylandı → Teslim alındı` durumlarını taşır. Sipariş seçildiğinde tedarikçi/depo kilitlenir, kalem ve miktarlar forma otomatik dolar. Sağ üstteki `[+ Yeni Satın Alma Siparişi]` modalı ile hızlı sipariş oluşturulup hemen onaylanabilir.
-* `[ Onayla ]` tıklandığında **Onay ve Ödeme Modalı** açılır:
-  * **Borç Olarak Yaz (on_account):** Tutar tedarikçinin cari hesabına borç (`supplier_debt`) yazılır.
-  * **Hemen Ödensin (immediate_cash):** Şubedeki açık kasalar ve çekmecedeki nakit bakiyeleri listelenir. Tekil veya birden fazla kasadan parçalı nakit çıkışı (`cash.movements` `manual_out`) yapılır ve aynı atomik işlemde tedarikçi borcu (`cari.movements` `supplier_payment`) kapatılır. Kısmi ödemede kalan tutar cari borç kalır.
-* Açık depo sayımı mal kabul onayını engeller (`COUNT_IN_PROGRESS`); tekrar onay çift kayıt üretmez.
-* Tedarikçiye iade, özgün mal kabul satırına bağlı stok ve cari ters hareketi oluşturur.
-* Eksik teslim düzeltmesi (`purchase_correction`): Onaylı belge detayında hammadde satırı, eksik miktar ve açıklama girilerek stoktan ve cari borçtan aynı anda düşen düzeltme fişi kaydedilebilir.
-* Mobil uyum: Mal kabul satırları ve geçmiş belgeler tabloları dar ekranlarda taşmayan, tam genişlikli girdi ve hizalı değerler sunan responsive kart düzenindedir.
-* Toptancıdan kamyonla 10 çuval un (500 kg) geldiğinde:
-  * Yönetici veya depo sorumlusu faturayı / irsaliyeyi açar.
-  * Tedarikçi seçilir: `ABC Gıda Toptan A.Ş.`.
-  * Giren Hammadde: `500 kg Pizza Unu` · Birim Fiyat: `22,50 TL/kg`.
-  * `[ Mal Kabulü Onayla ]` tıklandığında: Depo stoğu anında 500 kg artar ve tercihe göre cari borç veya kasadan nakit tediye işlenir.
-
-### 🗑️ EKRAN 4: Gerekçeli Fire / Zayi Kayıt Ekranı (Çalışıyor)
-* Mutfakta yere dökülen süt, bozulan et veya yanan pizza için:
-  * Hammadde: `Dana Kıyma (1.5 kg)`.
-  * Fire Türü: `Bozulma / Son Kullanma Tarihi Geçti`.
-  * Açıklama: `"Dolap arızası sebebiyle bozuldu"`.
-  * Kayıt mevcut yönetici aktörüyle stoktan düşülür ve denetim izi oluşturur.
-  * Fire/zayi ekranı fiyat veya maliyet bilgisi istemez; fiyatlandırma ve maliyet raporu ayrı modüle ertelenmiştir.
-  * Reçeteli ürün zayisi kayıt anındaki en güncel reçete sürümünü ve bileşen miktarlarını snapshot alır. Porsiyon sayısı ile çarpılan bütün hammaddeler tek işlemde düşer; biri yetersizse hiçbir hareket oluşmaz.
-  * Gerçek şef PIN onayı auth modülünü bekler.
-
-### 📋 EKRAN 5: Depo Fiziksel Sayım ve Onay Ekranı (Mevcut Çalışan Ekran — `InventoryHttpPage.tsx` sayım görünümü)
-* Sayım Taslağı Açma -> Fiziksel miktarları sayıp girme -> Fark Analizi (`Sayılan - Sistem`) -> Yönetici onayıyla tek hareketle stoku eşitleme.
-
----
-
-## 🚀 5. Senden Ne Bekleniyor? (Adım Adım Yol Haritası)
-
-```mermaid
-graph TD
-    A[1. Adım: Satıştan Otomatik Reçete Tüketim Motoru] --> B[2. Adım: Satın Alma Talebi ve Siparişi]
-    B --> C[3. Adım: Gerçek Rol ve Şef PIN Onayı]
-    C --> D[4. Adım: Ayrı Fiyatlandırma ve Maliyet Modülü]
+            // 5. inventory.ingredients tablosundaki on_hand bakiyesini güncelle
+            await DecrementIngredientOnHandAsync(connection, line.IngredientId, totalDepletion, transaction, ct);
+        }
+    }
+}
 ```
 
-1. **1. Adım: `recipe_consumption` Tüketim Motoru:**
-   * Adisyon kapandığında reçeteleri patlatıp stok hareket defterine otomatik çıkış yazan servis.
-2. **2. Adım: Mal Kabul İrsaliyesi Ekranı:**
-   * Toptancıdan gelen malları depoya ekleyen ve Cari borç kaydı oluşturan entegre ekran.
-3. **3. Adım: Fire / Zayi Takibi:**
-   * Gerekçeli fire kayıt tablosu ve arayüzü.
-
----
-
-## 💾 6. Veritabanı ve Şema Modelleri
-
-```sql
--- Satıştan Otomatik Stok Tüketim Hareketi
--- inventory.movements tablosuna check_id bağı
-ALTER TABLE inventory.movements
-    ADD COLUMN IF NOT EXISTS check_id UUID NULL,
-    ADD COLUMN IF NOT EXISTS reason_type VARCHAR(30) NOT NULL DEFAULT 'manual'; -- 'manual', 'recipe_consumption', 'waste_loss', 'receiving'
-
--- Fire / Zayi Kayıtları
-CREATE TABLE inventory.waste_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    branch_id UUID NOT NULL,
-    ingredient_id VARCHAR(50) NOT NULL REFERENCES inventory.ingredients(id),
-    quantity DECIMAL(12, 3) NOT NULL,
-    unit VARCHAR(20) NOT NULL,
-    reason VARCHAR(100) NOT NULL,         -- 'Bozulma', 'Dökülme/Kırılma', 'Yanma'
-    cost_minor BIGINT NOT NULL,
-    reported_by VARCHAR(100) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
-);
-```
-
----
-
-## ✅ 7. Kabul Kriterleri (Devir Doğrulama Testi)
-
-1. Bir Margherita Pizza satılıp adisyon kapatıldığında, depodaki Mozzarella stoğu anında 100 g azalmalı ve hareket türü `recipe_consumption` olmalıdır.
-2. Mal kabul ekranından 50 kg un girildiğinde stok 50 kg artmalı ve tedarikçinin cari hesabına borç yansımalıdır.
-3. `npm test` ve `npm run test:api` testleri hatasız geçmelidir.
-
----
-
-## 📖 8. Ayrıntılı Referans Belgeleri
-
-* 📘 **Reçeteli Stok ve Satın Alma:** 👉 [RECETELI_STOK_VE_SATINALMA.md](../03-is-alanlari-ve-yonetim/RECETELI_STOK_VE_SATINALMA.md)
-* 📘 **Envanter ve Stok Sözleşmesi:** 👉 [ENVANTER_STOK_SATINALMA_SOZLESMESI.md](../03-is-alanlari-ve-yonetim/ENVANTER_STOK_SATINALMA_SOZLESMESI.md)
-* 🧪 **Stok Test Kılavuzu:** 👉 [STOK_REÇETE_SAYIM_MANUEL_TEST.md](../04-test-ve-rehberler/STOK_REÇETE_SAYIM_MANUEL_TEST.md)
+### C. Doğrulama Kriteri (Definition of Done)
+1. Garson veya Kasa ekranından 2 adet "Tavuklu Sandviç" satışı yapıldığında:
+   - `inventory.movements` tablosuna `kind: "pos_sale"` olan 2 hareket yazılmalıdır (1 adet ekmek * 2 = -2 adet, 120g tavuk * 2 = -240g).
+   - `inventory.ingredients` tablosunda `bread` bakiyesi 38'den 36'ya, `chicken` bakiyesi 7600'den 7360'a düşmelidir.
+   - Admin Paneli `/admin/inventory/ingredients` ekranında stok anında güncel görünmelidir.
