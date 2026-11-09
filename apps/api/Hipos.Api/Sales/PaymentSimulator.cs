@@ -297,8 +297,138 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             Action = "payment_completed_check_closed", Version = check.Version, OccurredAt = now,
         });
         await db.SaveChangesAsync(cancellationToken);
+        if (runtime.InventoryReady)
+        {
+            await DepleteInventoryForCheckAsync(db.Database.GetDbConnection(),
+                db.Database.CurrentTransaction?.GetDbTransaction(),
+                check.Id, firmId, branchId, actor, now, cancellationToken);
+        }
         if (check.TableId is null) return;
         await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, cancellationToken);
+    }
+
+    public static async Task DepleteInventoryForCheckAsync(
+        DbConnection connection,
+        DbTransaction? transaction,
+        Guid checkId,
+        string firmId,
+        string branchId,
+        string actor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // 1. Şubenin aktif ana deposunu bul
+        string? warehouseId = null;
+        await using (var cmdWarehouse = connection.CreateCommand())
+        {
+            if (transaction != null) cmdWarehouse.Transaction = transaction;
+            cmdWarehouse.CommandText = "SELECT id FROM inventory.warehouses WHERE firm_id = @firm_id AND branch_id = @branch_id AND is_active = true ORDER BY created_at ASC LIMIT 1";
+            AddParameter(cmdWarehouse, "firm_id", firmId);
+            AddParameter(cmdWarehouse, "branch_id", branchId);
+            var result = await cmdWarehouse.ExecuteScalarAsync(cancellationToken);
+            if (result != null && result != DBNull.Value) warehouseId = result.ToString();
+        }
+
+        if (string.IsNullOrEmpty(warehouseId)) return;
+
+        // 2. Kapanan adisyondaki tüm sipariş kalemlerini çek
+        var orderItems = new List<(Guid ProductId, string ProductName, int Quantity)>();
+        await using (var cmdItems = connection.CreateCommand())
+        {
+            if (transaction != null) cmdItems.Transaction = transaction;
+            cmdItems.CommandText = """
+                SELECT l.product_id, l.product_name, SUM(l.quantity) AS qty
+                FROM sales.order_lines l
+                INNER JOIN sales.orders o ON o.id = l.order_id
+                WHERE o.check_id = @check_id AND o.firm_id = @firm_id AND o.branch_id = @branch_id
+                GROUP BY l.product_id, l.product_name
+                """;
+            AddParameter(cmdItems, "check_id", checkId);
+            AddParameter(cmdItems, "firm_id", firmId);
+            AddParameter(cmdItems, "branch_id", branchId);
+            await using var reader = await cmdItems.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                orderItems.Add((reader.GetGuid(0), reader.GetString(1), Convert.ToInt32(reader.GetValue(2))));
+            }
+        }
+
+        if (orderItems.Count == 0) return;
+
+        // 3. Her bir ürünün reçetesini bul ve hammadde düşüm hareketlerini yaz
+        foreach (var item in orderItems)
+        {
+            var recipeLines = new List<(string IngredientId, decimal Quantity, string Unit)>();
+            await using (var cmdRecipe = connection.CreateCommand())
+            {
+                if (transaction != null) cmdRecipe.Transaction = transaction;
+                cmdRecipe.CommandText = """
+                    SELECT rl.ingredient_id, rl.quantity, rl.unit
+                    FROM inventory.recipe_lines rl
+                    INNER JOIN inventory.recipes r ON r.id = rl.recipe_id
+                    WHERE r.product_id = @product_id AND r.firm_id = @firm_id AND r.branch_id = @branch_id
+                    """;
+                AddParameter(cmdRecipe, "product_id", item.ProductId);
+                AddParameter(cmdRecipe, "firm_id", firmId);
+                AddParameter(cmdRecipe, "branch_id", branchId);
+                await using var reader = await cmdRecipe.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    recipeLines.Add((reader.GetString(0), reader.GetDecimal(1), reader.GetString(2)));
+                }
+            }
+
+            if (recipeLines.Count == 0) continue; // Reçetesiz ürün
+
+            foreach (var line in recipeLines)
+            {
+                var totalDelta = -(item.Quantity * line.Quantity);
+                var movementId = Guid.NewGuid().ToString();
+                var description = $"Satış tüketimi · Adisyon {checkId.ToString()[..8]} · {item.Quantity}x {item.ProductName}";
+
+                await using (var cmdMove = connection.CreateCommand())
+                {
+                    if (transaction != null) cmdMove.Transaction = transaction;
+                    cmdMove.CommandText = """
+                        INSERT INTO inventory.movements
+                            (id, firm_id, branch_id, warehouse_id, ingredient_id, delta, unit, kind, description, actor, created_at)
+                        VALUES
+                            (@id, @firm_id, @branch_id, @warehouse_id, @ingredient_id, @delta, @unit, 'pos_sale', @description, @actor, @created_at)
+                        """;
+                    AddParameter(cmdMove, "id", movementId);
+                    AddParameter(cmdMove, "firm_id", firmId);
+                    AddParameter(cmdMove, "branch_id", branchId);
+                    AddParameter(cmdMove, "warehouse_id", warehouseId);
+                    AddParameter(cmdMove, "ingredient_id", line.IngredientId);
+                    AddParameter(cmdMove, "delta", totalDelta);
+                    AddParameter(cmdMove, "unit", line.Unit);
+                    AddParameter(cmdMove, "description", description);
+                    AddParameter(cmdMove, "actor", actor);
+                    AddParameter(cmdMove, "created_at", now);
+                    await cmdMove.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var cmdAudit = connection.CreateCommand())
+                {
+                    if (transaction != null) cmdAudit.Transaction = transaction;
+                    cmdAudit.CommandText = """
+                        INSERT INTO inventory.audit
+                            (firm_id, branch_id, warehouse_id, entity_id, action, request_id, actor, detail, occurred_at)
+                        VALUES
+                            (@firm_id, @branch_id, @warehouse_id, @entity_id, 'recipe_depletion', @request_id, @actor, @detail, @occurred_at)
+                        """;
+                    AddParameter(cmdAudit, "firm_id", firmId);
+                    AddParameter(cmdAudit, "branch_id", branchId);
+                    AddParameter(cmdAudit, "warehouse_id", warehouseId);
+                    AddParameter(cmdAudit, "entity_id", line.IngredientId);
+                    AddParameter(cmdAudit, "request_id", movementId);
+                    AddParameter(cmdAudit, "actor", actor);
+                    AddParameter(cmdAudit, "detail", $"checkId={checkId};product={item.ProductName};qty={item.Quantity};ingredient={line.IngredientId};delta={totalDelta};unit={line.Unit}");
+                    AddParameter(cmdAudit, "occurred_at", now);
+                    await cmdAudit.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+        }
     }
 
     public async Task<IReadOnlyList<PaymentAttemptInfo>> ListAsync(

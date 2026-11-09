@@ -511,6 +511,9 @@ public static class SalesCheckEndpoints
                 Action = "zero_balance_check_closed", Version = check.Version, OccurredAt = now,
             });
             await db.SaveChangesAsync(context.RequestAborted);
+            await PaymentSimulator.DepleteInventoryForCheckAsync(db.Database.GetDbConnection(),
+                db.Database.CurrentTransaction?.GetDbTransaction(),
+                check.Id, firmId, branchId, actor, now, context.RequestAborted);
             if (check.TableId is not null)
                 await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);

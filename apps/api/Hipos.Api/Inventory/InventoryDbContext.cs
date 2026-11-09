@@ -388,7 +388,7 @@ public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> opti
             entity.ToTable("movements", table =>
             {
                 table.HasCheckConstraint("ck_inventory_movement_nonzero", "delta <> 0");
-                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return', 'waste_loss')");
+                table.HasCheckConstraint("ck_inventory_movement_kind", "kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return', 'waste_loss', 'recipe_consumption', 'pos_sale')");
             });
             entity.HasKey(row => row.Id);
             entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(80);

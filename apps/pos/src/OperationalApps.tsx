@@ -80,7 +80,7 @@ function PosProductImage({ image, productId, name }: { image: string; productId:
 async function request<T>(path: string, actor: string, body?: unknown, method?: "PUT" | "POST" | "DELETE"): Promise<T> {
   let response: Response;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  const timeout = window.setTimeout(() => controller.abort(), 25_000);
   const token = localStorage.getItem("hipos_pos_token") || localStorage.getItem("hipos_cashier_token") || localStorage.getItem("hipos_waiter_token") || localStorage.getItem("hipos_kitchen_token");
   try {
     response = await fetch(`${apiBase}${path}`, {
@@ -95,7 +95,7 @@ async function request<T>(path: string, actor: string, body?: unknown, method?: 
     });
   } catch {
     if (controller.signal.aborted)
-      throw new Error("Sunucu 15 saniyede yanıt vermedi. Sipariş kaydedilmiş olabilir; yeniden deneyin, aynı sipariş kimliği kullanılacak.");
+      throw new Error("Sunucu zamanında yanıt vermedi. Sipariş kaydedilmiş olabilir; yeniden deneyin, aynı sipariş kimliği kullanılacak.");
     throw new Error("Yerel HIPOS sunucusuna ulaşılamadı. Cihazların aynı Wi-Fi ağına bağlı olduğunu kontrol edin.");
   } finally { window.clearTimeout(timeout); }
   if (!response.ok) {
@@ -225,7 +225,6 @@ export function CashierApp() {
   const [morningDismissed, setMorningDismissed] = useState(false);
   const [retainedFloatInput, setRetainedFloatInput] = useState("");
   const [activeZReport, setActiveZReport] = useState<ZReport | null>(null);
-  const [zReportLoading, setZReportLoading] = useState(false);
   const zReportDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = zReportDialogRef.current;
@@ -234,7 +233,6 @@ export function CashierApp() {
   }, [activeZReport]);
 
   async function openZReport(shiftId: string) {
-    setZReportLoading(true);
     try {
       const res = await request<{ report: ZReport }>(
         `/api/v1/firms/${firmId}/branches/${branchId}/cash/shifts/${encodeURIComponent(shiftId)}/z-report`,
@@ -243,8 +241,6 @@ export function CashierApp() {
       setActiveZReport(res.report);
     } catch (cause) {
       setCashNotice(cause instanceof Error ? cause.message : "Z-Raporu alınamadı.");
-    } finally {
-      setZReportLoading(false);
     }
   }
 
@@ -441,6 +437,8 @@ export function CashierApp() {
   const [quickOptionProduct, setQuickOptionProduct] = useState<Product | null>(null);
   const [quickOptionSelection, setQuickOptionSelection] = useState<OptionSelection | null>(null);
   const [quickActiveCheck, setQuickActiveCheck] = useState<CashierCheck | null>(null);
+  const [orderSentToast, setOrderSentToast] = useState<{ id: string; label: string; count: number; totalMinor: number } | null>(null);
+  const toastTimer = useRef<number | null>(null);
   const [accountReceipt, setAccountReceipt] = useState<AccountReceipt | null>(null);
   const [lastCompletedReceipt, setLastCompletedReceipt] = useState<AccountReceipt | null>(null);
   async function printThermalCashierBill(checkId: string, openCashDrawer: boolean = false, paymentMethod: string = "NAKIT") {
@@ -470,7 +468,6 @@ export function CashierApp() {
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedQuickCat, setSelectedQuickCat] = useState("all");
-  const [quickSearch, setQuickSearch] = useState("");
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState("");
   const [quickNotice, setQuickNotice] = useState("");
@@ -518,21 +515,40 @@ export function CashierApp() {
       .catch(cause => { if (live) { setCatalogProducts([]); setCatalogError(cause instanceof Error ? cause.message : "Ürünler yüklenemedi."); } });
     return () => { live = false; };
   }, [catalogRevision]);
-  useEffect(() => { const timer = window.setInterval(() => { if (document.visibilityState === "visible") setCatalogRevision(value => value + 1); }, 5000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => { const timer = window.setInterval(() => { if (document.visibilityState === "visible") setCatalogRevision(value => value + 1); }, 60_000); return () => window.clearInterval(timer); }, []);
 
   const quickTotalMinor = quickCart.reduce((sum, item) => sum + item.quantity * (item.product.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)), 0);
   const quickCartCount = quickCart.reduce((sum, item) => sum + item.quantity, 0);
 
   async function loadUnfinishedChecks() {
-    try { const result = await request<{ items: CashierCheck[] }>(`${checksPath}?unassignedOpen=true`, "pos-single"); setUnfinishedChecks(result.items.filter(check => check.status === "open" && check.tableId == null)); setUnfinishedError(""); }
-    catch (cause) { setUnfinishedError(cause instanceof Error ? cause.message : "Açık satışlar yüklenemedi."); }
+    try {
+      const result = await request<{ items: CashierCheck[] }>(`${checksPath}?unassignedOpen=true`, "pos-single");
+      setUnfinishedChecks(result.items.filter(check => check.status === "open" && check.tableId == null));
+      setUnfinishedError("");
+    } catch (cause) {
+      setUnfinishedError(cause instanceof Error ? cause.message : "Açık satışlar yüklenemedi.");
+    }
   }
-  useEffect(() => { if (cashierMode === "quick" && quickStep === "menu") void loadUnfinishedChecks(); }, [cashierMode, quickStep]);
+  useEffect(() => {
+    if (cashierMode === "quick") void loadUnfinishedChecks();
+  }, [cashierMode]);
   async function resumeQuickCheck(checkId: string) {
     setQuickBusy(true); setQuickError("");
-    try { const check = await request<CashierCheck>(`${checksPath}/${encodeURIComponent(checkId)}`, "pos-single"); if (check.status !== "open" || check.tableId != null) { await loadUnfinishedChecks(); setQuickError("Bu satış artık açık değil."); return; } setQuickActiveCheck(check); setQuickStep("payment"); }
-    catch (cause) { setQuickError(cause instanceof Error ? cause.message : "Satış yüklenemedi."); }
-    finally { setQuickBusy(false); }
+    try {
+      const check = await request<CashierCheck>(`${checksPath}/${encodeURIComponent(checkId)}`, "pos-single");
+      if (check.status !== "open" || check.tableId != null) {
+        await loadUnfinishedChecks();
+        setQuickError("Bu satış artık açık değil.");
+        return;
+      }
+      setQuickActiveCheck(check);
+      setAmountInput(`${Math.floor(check.remainingMinor / 100)},${String(check.remainingMinor % 100).padStart(2, "0")}`);
+      setPaymentMethod("cash");
+    } catch (cause) {
+      setQuickError(cause instanceof Error ? cause.message : "Satış yüklenemedi.");
+    } finally {
+      setQuickBusy(false);
+    }
   }
 
   function addToQuickCart(product: Product, options: SelectedOption[]) {
@@ -658,10 +674,28 @@ export function CashierApp() {
       const createdCheck = await request<CashierCheck>(checksPath, "pos-single", payload);
       localStorage.removeItem(quickRequestKey); setPendingQuick(null);
 
-      if (createdCheck.status !== "open") { setQuickCart([]); setQuickNotice("Önceki satış tamamlanmış. Yeni satış başlatabilirsiniz."); return; }
+      if (createdCheck.status !== "open") {
+        setQuickCart([]);
+        setQuickNotice("Önceki satış tamamlanmış. Yeni satış başlatabilirsiniz.");
+        return;
+      }
 
+      // 2 Saniyelik Yerel Mutfak Onay Bildirimi
+      const shortId = createdCheck.id.slice(0, 6).toUpperCase();
+      const itemCount = items.reduce((sum, it) => sum + it.quantity, 0);
+      setOrderSentToast({ id: createdCheck.id, label: shortId, count: itemCount, totalMinor: createdCheck.totalMinor });
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(() => {
+        setOrderSentToast(null);
+      }, 2000);
+
+      // Sepeti temizle: Tezgâh hemen yeni sipariş almaya hazır olur
+      setQuickCart([]);
+      // Oluşturulan adisyonu sağ bölüme aktif et
       setQuickActiveCheck(createdCheck);
-      setQuickStep("payment");
+      setAmountInput(`${Math.floor(createdCheck.remainingMinor / 100)},${String(createdCheck.remainingMinor % 100).padStart(2, "0")}`);
+      setPaymentMethod("cash");
+      void loadUnfinishedChecks();
     } catch (cause) {
       setQuickError(`${cause instanceof Error ? cause.message : "Adisyon oluşturulamadı."} İşlem sonucunu kesinleştirmek için aynı isteği tekrar deneyin.`);
     } finally {
@@ -684,70 +718,113 @@ export function CashierApp() {
   const [error, setError] = useState("");
   const [updated, setUpdated] = useState<Date | null>(null);
   const serial = useRef(0);
+  const tableErrorCount = useRef(0);
+  const cashErrorCount = useRef(0);
 
   const reload = useCallback(async () => {
     const current = ++serial.current;
     try {
-      const result = await request<{ items: Table[]; floors?: string[] }>(`${servicePath}/tables`, "pos-single");
-      const active = result.items.filter((table) => table.isActive);
-      const primaryIds = [...new Set(active.filter((table) => table.assignment || table.group || table.status === "occupied" || table.status === "bill_requested").map((table) => table.group?.primaryTableId ?? table.id))];
-      const responses = await Promise.all(primaryIds.map(async (id) => {
-        const response = await request<{ items: CashierCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(id)}`, "pos-single");
-        return [id, response.items.filter((check) => check.status === "open")] as const;
-      }));
+      const [tableResult, checksResult] = await Promise.all([
+        request<{ items: Table[]; floors?: string[] }>(`${servicePath}/tables`, "pos-single"),
+        request<{ items: CashierCheck[] }>(checksPath, "pos-single"),
+      ]);
+      const active = tableResult.items.filter((table) => table.isActive);
+      const openChecks = checksResult.items.filter((check) => check.status === "open");
+      const checksMap: Record<string, CashierCheck[]> = {};
+      for (const check of openChecks) {
+        if (check.tableId) {
+          if (!checksMap[check.tableId]) checksMap[check.tableId] = [];
+          checksMap[check.tableId].push(check);
+        }
+      }
       if (current !== serial.current) return;
-      setTables(active); setConfiguredFloors(result.floors ?? []); setChecks(Object.fromEntries(responses)); setUpdated(new Date()); setError("");
+      tableErrorCount.current = 0;
+      setTables(active);
+      setConfiguredFloors(tableResult.floors ?? []);
+      setChecks(checksMap);
+      setUpdated(new Date());
+      setError("");
     } catch (cause) {
-      if (current === serial.current) setError(cause instanceof Error ? cause.message : "Masa ve adisyon bilgileri alınamadı.");
+      if (current === serial.current) {
+        tableErrorCount.current++;
+        // Geçici Wi-Fi paket düşmelerinde panik yapma; 3 ardışık başarısızlıktan sonra göster
+        if (tableErrorCount.current >= 3) {
+          setError(cause instanceof Error ? cause.message : "Masa ve adisyon bilgileri alınamadı.");
+        }
+      }
     } finally { if (current === serial.current) setLoading(false); }
   }, []);
-  useEffect(() => {
-    void reload();
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void reload(); }, 5000);
-    return () => { window.clearInterval(timer); serial.current++; };
-  }, [reload]);
 
-  useEffect(() => {
-    let active = true;
-    let running = false;
-    async function loadCash() {
-      if (running) return;
-      running = true;
-      try {
-        const overview = await request<CashOverview>(`/api/v1/firms/${firmId}/branches/${branchId}/cash/overview`, "pos-single");
-        if (active) {
-          setCashOverview(overview);
-          if (!initialStationChecked.current && overview.registers.length > 0) {
-            initialStationChecked.current = true;
-            const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
-            if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
-              setSelectedRegisterId(savedStation);
-            } else if (overview.registers.length === 1) {
-              localStorage.setItem("hipos_pos_assigned_register_id", overview.registers[0].id);
-              setSelectedRegisterId(overview.registers[0].id);
-            } else {
-              setStationMode("initial");
-              setStationModalOpen(true);
-              setSelectedRegisterId(overview.registers[0].id);
-            }
-          } else if (!selectedRegisterId && overview.registers.length > 0) {
-            const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
-            if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
-              setSelectedRegisterId(savedStation);
-            } else {
-              setSelectedRegisterId(overview.registers[0].id);
-            }
-          }
-          setCashError("");
+  const loadCash = useCallback(async () => {
+    try {
+      const overview = await request<CashOverview>(`/api/v1/firms/${firmId}/branches/${branchId}/cash/overview`, "pos-single");
+      cashErrorCount.current = 0;
+      setCashOverview(overview);
+      if (!initialStationChecked.current && overview.registers.length > 0) {
+        initialStationChecked.current = true;
+        const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+        if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
+          setSelectedRegisterId(savedStation);
+        } else if (overview.registers.length === 1) {
+          localStorage.setItem("hipos_pos_assigned_register_id", overview.registers[0].id);
+          setSelectedRegisterId(overview.registers[0].id);
+        } else {
+          setStationMode("initial");
+          setStationModalOpen(true);
+          setSelectedRegisterId(overview.registers[0].id);
         }
-      } catch (cause) {
-        if (active) setCashError(cause instanceof Error ? cause.message : "Kasa bilgileri alınamadı.");
-      } finally { running = false; if (active) setCashLoading(false); }
+      } else if (!selectedRegisterId && overview.registers.length > 0) {
+        const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+        if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
+          setSelectedRegisterId(savedStation);
+        } else {
+          setSelectedRegisterId(overview.registers[0].id);
+        }
+      }
+      setCashError("");
+    } catch (cause) {
+      cashErrorCount.current++;
+      // Geçici Wi-Fi paket düşmelerinde panik yapma; 3 ardışık başarısızlıktan sonra göster
+      if (cashErrorCount.current >= 3) {
+        setCashError(cause instanceof Error ? cause.message : "Kasa bilgileri alınamadı.");
+      }
+    } finally {
+      setCashLoading(false);
     }
-    void loadCash();
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadCash(); }, 5000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [cashRefresh]);
+  }, [selectedRegisterId]);
+
+  // Otomatik canlı senkronizasyon (F5 gerektirmeyen, kendini onaran döngü)
+  useEffect(() => {
+    const triggerSync = () => {
+      void reload();
+      void loadCash();
+      if (cashierMode === "quick" && quickStep === "menu") {
+        void loadUnfinishedChecks();
+      }
+    };
+
+    // İlk açılışta anında çek
+    triggerSync();
+
+    // Sürekli canlı kalma (4 saniyede bir)
+    const intervalTimer = window.setInterval(triggerSync, 4000);
+
+    // Ekran uyandığında, sekmeye dönüldüğünde veya Wi-Fi geri geldiğinde ANINDA yenile
+    const handleWakeOrFocus = () => {
+      triggerSync();
+    };
+
+    document.addEventListener("visibilitychange", handleWakeOrFocus);
+    window.addEventListener("focus", handleWakeOrFocus);
+    window.addEventListener("online", handleWakeOrFocus);
+
+    return () => {
+      window.clearInterval(intervalTimer);
+      document.removeEventListener("visibilitychange", handleWakeOrFocus);
+      window.removeEventListener("focus", handleWakeOrFocus);
+      window.removeEventListener("online", handleWakeOrFocus);
+    };
+  }, [reload, loadCash, cashierMode, quickStep, cashRefresh]);
 
   async function submitCashShift(event: React.FormEvent) {
     event.preventDefault();
@@ -795,7 +872,7 @@ export function CashierApp() {
     const primary = tables.find((item) => item.id === (table.group?.primaryTableId ?? table.id)) ?? table;
     return primary.status === "bill_requested" ? "bill_requested" : table.status === "reserved" ? "reserved" : table.assignment || table.group || table.status === "occupied" ? "occupied" : "idle";
   };
-  const isQuickPayment = cashierMode === "quick" && quickStep === "payment";
+  const isQuickPayment = cashierMode === "quick";
   const primarySelectedId = selected?.group?.primaryTableId ?? selectedId;
   const selectedChecks = isQuickPayment ? (quickActiveCheck ? [quickActiveCheck] : []) : (checks[primarySelectedId] ?? []);
   const activeCheck = isQuickPayment ? quickActiveCheck : (selectedChecks.find((check) => check.id === selectedCheckId) ?? selectedChecks[0]);
@@ -803,7 +880,7 @@ export function CashierApp() {
   const tableRemaining = selectedChecks.reduce((sum, check) => sum + check.remainingMinor, 0);
   const paymentLabel = (status: CashierCheck["paymentStatus"]) => ({ unpaid: "Açık", partially_paid: "Kısmi ödeme (test)", paid: "Ödendi (test)", pending: "Ödeme bekliyor (test)", unknown: "Ödeme belirsiz (test)" }[status] ?? "Durum bilinmiyor");
   useEffect(() => {
-    if (isQuickPayment && activeCheck) {
+    if (activeCheck) {
       setAmountInput(`${Math.floor(activeCheck.remainingMinor / 100)},${String(activeCheck.remainingMinor % 100).padStart(2, "0")}`);
       setPaymentMethod("cash");
       setPaymentSubMethod("");
@@ -816,7 +893,7 @@ export function CashierApp() {
       setCustomerSelected(null);
       setPayError("");
     }
-  }, [activeCheck?.id, isQuickPayment]);
+  }, [activeCheck?.id]);
   const amountParts = amountInput.split(",");
   const amountMinor = Number(amountParts[0] || "0") * 100 + Number((amountParts[1] ?? "").padEnd(2, "0"));
   function enterAmountKey(key: string) {
@@ -863,28 +940,36 @@ export function CashierApp() {
         latestCheck = res.check;
       }
       payRequest.current = null; setAmountInput("0"); setPaymentMethod(null); setPaymentSubMethod("");
-      if (latestCheck.status === "closed" || latestCheck.remainingMinor <= 0) {
+      const isPaidComplete = latestCheck.status === "closed" || latestCheck.remainingMinor <= 0;
+      if (isPaidComplete) {
         const receipt = { check: latestCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() };
         setLastCompletedReceipt(receipt);
-        printAccountReceipt(receipt, method === "cash", method === "cash" ? "NAKIT" : "KREDI_KARTI");
+        printAccountReceipt(receipt, method === "cash", method === "cash" ? "NAKIT" : (paymentSubMethod || "KREDI_KARTI"));
+      } else {
+        // Parçalı ara ödeme fişi termal yazıcıya anında gönderilir!
+        void printThermalCashierBill(
+          latestCheck.id,
+          method === "cash",
+          method === "cash" ? "NAKIT" : (paymentSubMethod ? `KART - ${paymentSubMethod}` : "KREDI_KARTI")
+        );
       }
       if (isQuickPayment) {
-        if (latestCheck.remainingMinor <= 0 || latestCheck.status === "closed") {
+        if (isPaidComplete) {
           setQuickSuccess({
             changeMinor: method === "cash" && amountMinor > activeCheck.remainingMinor ? amountMinor - activeCheck.remainingMinor : 0,
             paidMinor: latestCheck.totalMinor,
             totalMinor: latestCheck.totalMinor,
-            method: method === "cash" ? "Nakit" : "Kredi Kartı",
+            method: method === "cash" ? "Nakit" : (paymentSubMethod || "Kredi Kartı"),
             payments: latestCheck.payments,
           });
           setQuickActiveCheck(null);
           setQuickCart([]);
-          setQuickStep("menu");
           setSplitNotice(`Satış tamamlandı: ${money(latestCheck.totalMinor)} ${mainRegister?.name ?? "kasa"} kasasına kaydedildi.`);
         } else {
           setQuickActiveCheck(latestCheck);
           setAmountInput(`${Math.floor(latestCheck.remainingMinor / 100)},${String(latestCheck.remainingMinor % 100).padStart(2, "0")}`);
-          setSplitNotice(`Kısmi tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${method === "cash" ? "Nakit" : "Kart"}). Kalan tutar: ${money(latestCheck.remainingMinor)}.`);
+          setPaymentMethod("cash");
+          setSplitNotice(`Kısmi tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${method === "cash" ? "Nakit" : paymentSubMethod || "Kart"}). Kalan tutar: ${money(latestCheck.remainingMinor)}.`);
         }
       } else {
         setSplitNotice(`Tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${method === "cash" ? "Nakit" : "Kart"}) · ${mainRegister?.name ?? "Kasa"}.`);
@@ -1017,10 +1102,7 @@ export function CashierApp() {
     } finally { setSplitting(false); }
   }
   const filteredQuickProducts = catalogProducts.filter((product) => {
-    const matchesCat = selectedQuickCat === "all" || product.category.id === selectedQuickCat;
-    const query = quickSearch.trim().toLocaleLowerCase("tr-TR");
-    const matchesSearch = !query || product.name.toLocaleLowerCase("tr-TR").includes(query) || (product.sku ?? "").toLocaleLowerCase("tr-TR").includes(query);
-    return (Boolean(query) || matchesCat) && matchesSearch;
+    return selectedQuickCat === "all" || product.category.id === selectedQuickCat;
   });
 
   if (!cashierSession) {
@@ -1092,6 +1174,72 @@ export function CashierApp() {
 
       {/* SAĞ: Kasiyer Bilgisi, Kilitleme, Vardiya İşlemleri ve Bağlantı */}
       <div className="cashier-header-right">
+        {/* İşlem Butonları Grubu (X-Raporu, Vardiya, Son Fiş, Geri Dön) */}
+        <div className="cashier-header-actions">
+          {/* Vardiya Kapat / Aç Butonu */}
+          {activeShift && mainRegister ? (
+            <button
+              type="button"
+              className="cashier-header-btn btn-close-shift"
+              disabled={cashBusy || cashLoading || Boolean(cashError)}
+              onClick={() => {
+                setCashAmount("");
+                setCashDenominations({});
+                setCashNote("");
+                setRetainedFloatInput(activeShift ? String(Math.floor(activeShift.openingCashMinor / 100)) : "0");
+                setCashActionError("");
+                setCashNotice("");
+                void reload();
+                void loadUnfinishedChecks();
+                setCashDialog({
+                  mode: "close",
+                  registerId: mainRegister.id,
+                  shiftId: activeShift.id,
+                  version: activeShift.version,
+                  expected: activeShift.expectedCashMinor ?? undefined,
+                });
+              }}
+              title="Vardiyayı kapat ve gün sonu Z-Raporu al"
+            >
+              🔒 Vardiyayı Kapat
+            </button>
+          ) : (
+            mainRegister && !isShiftOpen && (
+              <button
+                type="button"
+                className="cashier-header-btn btn-open-shift"
+                onClick={() => {
+                  setMorningError("");
+                  setMorningConfirming(false);
+                  setMorningDismissed(false);
+                }}
+                title="Sabah kasa açılışı yap ve vardiyayı başlat"
+              >
+                ☀️ Vardiya Aç
+              </button>
+            )
+          )}
+
+          {/* Son hesap fişi (varsa) */}
+          {lastCompletedReceipt && (
+            <button
+              type="button"
+              className="cashier-header-btn"
+              onClick={() => printAccountReceipt(lastCompletedReceipt, false, "BILGI")}
+              title="Son tamamlanan tahsilatın bilgi fişini tekrar yazdır"
+            >
+              🧾 Son Fiş
+            </button>
+          )}
+
+          {/* Detay ekranındayken Geri Dön */}
+          {selected && cashierMode === "tables" && (
+            <button type="button" className="cashier-header-btn btn-back" onClick={() => setSelectedId("")}>
+              ← Masalara Dön
+            </button>
+          )}
+        </div>
+
         {/* Personel Rozeti & Kilitleme */}
         <div className="cashier-operator-pill">
           <span className="operator-name">👤 {cashierSession.user.fullName}</span>
@@ -1108,98 +1256,6 @@ export function CashierApp() {
             🔒 Kilitle
           </button>
         </div>
-
-        {/* X-Raporu Butonu */}
-        {mainRegister && isShiftOpen && activeShift && (
-          <button
-            type="button"
-            className="cashier-header-btn btn-x-report"
-            disabled={cashBusy || cashLoading || zReportLoading}
-            onClick={() => void openZReport(activeShift.id)}
-            title="Gün içi ara kasa dökümünü (X-Raporu) görüntüler"
-          >
-            📊 X-Raporu
-          </button>
-        )}
-
-        {/* Vardiya Kapat / Aç Butonu */}
-        {activeShift && mainRegister ? (
-          <button
-            type="button"
-            className="cashier-header-btn btn-close-shift"
-            disabled={cashBusy || cashLoading || Boolean(cashError)}
-            onClick={() => {
-              setCashAmount("");
-              setCashDenominations({});
-              setCashNote("");
-              setRetainedFloatInput(activeShift ? String(Math.floor(activeShift.openingCashMinor / 100)) : "0");
-              setCashActionError("");
-              setCashNotice("");
-              void reload();
-              void loadUnfinishedChecks();
-              setCashDialog({
-                mode: "close",
-                registerId: mainRegister.id,
-                shiftId: activeShift.id,
-                version: activeShift.version,
-                expected: activeShift.expectedCashMinor ?? undefined,
-              });
-            }}
-            title="Vardiyayı kapat ve gün sonu Z-Raporu al"
-          >
-            🔒 Vardiyayı Kapat
-          </button>
-        ) : (
-          mainRegister && !isShiftOpen && (
-            <button
-              type="button"
-              className="cashier-header-btn btn-open-shift"
-              onClick={() => {
-                setMorningError("");
-                setMorningConfirming(false);
-                setMorningDismissed(false);
-              }}
-              title="Sabah kasa açılışı yap ve vardiyayı başlat"
-            >
-              ☀️ Vardiya Aç
-            </button>
-          )
-        )}
-
-        {/* Son hesap fişi (varsa) */}
-        {lastCompletedReceipt && (
-          <button
-            type="button"
-            className="cashier-header-btn"
-            onClick={() => printAccountReceipt(lastCompletedReceipt, false, "BILGI")}
-            title="Son tamamlanan tahsilatın bilgi fişini tekrar yazdır"
-          >
-            🧾 Son Fiş
-          </button>
-        )}
-
-        {/* Detay ekranındayken Geri Dön */}
-        {selected && cashierMode === "tables" && (
-          <button type="button" className="cashier-header-btn btn-back" onClick={() => setSelectedId("")}>
-            ← Masalara Dön
-          </button>
-        )}
-
-        {/* Hızlı satış ödemesindeyken Menüye Dön */}
-        {isQuickPayment && (
-          <button
-            type="button"
-            className="cashier-header-btn btn-back"
-            onClick={() => {
-              setQuickActiveCheck(null);
-              setQuickCart([]);
-              setQuickStep("menu");
-              setQuickNotice("Satış açık bırakıldı. Açık masasız adisyonlar listesinden devam edebilirsiniz.");
-            }}
-          >
-            ← Menüye Dön
-          </button>
-        )}
 
         {/* Bağlantı Durumu */}
         <span
@@ -1618,26 +1674,13 @@ export function CashierApp() {
     {error && <p className="ops-error" role="alert">{error}{updated && " Gösterilen bilgiler son başarılı güncellemeye aittir."}</p>}
     {loading && <p className="ops-message">Masalar ve adisyonlar yükleniyor…</p>}
     {!selected && cashierMode === "tables" && (() => {
-      const emptyCount = tables.filter((t) => statusOf(t) === "idle").length;
-      const occupiedCount = tables.filter((t) => statusOf(t) === "occupied").length;
-      const billReqCount = tables.filter((t) => statusOf(t) === "bill_requested").length;
       const floorSections = buildFloorSections(tables, configuredFloors).filter((f) => tables.some((t) => normalizeFloorName(t.floor) === f.key));
       const hasMultipleFloors = floorSections.length > 1;
 
       return (
         <>
           <div className="cashier-table-toolbar">
-            <div className="cashier-table-toolbar-left">
-              <h2 className="cashier-table-title">🍽️ Masalar</h2>
-              <div className="cashier-table-stats">
-                <span className="cashier-stat-pill total">Toplam: <strong>{tables.length}</strong></span>
-                <span className="cashier-stat-pill empty">🟢 Boş: <strong>{emptyCount}</strong></span>
-                <span className="cashier-stat-pill occupied">🔴 Dolu: <strong>{occupiedCount}</strong></span>
-                {billReqCount > 0 && (
-                  <span className="cashier-stat-pill bill-req">🟡 Hesap İstendi: <strong>{billReqCount}</strong></span>
-                )}
-              </div>
-            </div>
+            <h2 className="cashier-table-title">🍽️ Masalar</h2>
             <button type="button" className="cashier-refresh-btn" onClick={() => void reload()} disabled={loading}>
               🔄 Yenile
             </button>
@@ -1686,281 +1729,555 @@ export function CashierApp() {
         </>
       );
     })()}
-    {cashierMode === "quick" && quickStep === "menu" && <section className="cashier-quick-section" aria-label="Hızlı Satış Menü Ekranı">
-      <div className="cashier-quick-menu-header">
-        <div className="cashier-quick-search-bar">
-          <input
-            type="search"
-            placeholder="🔍 Barkod okutun veya ürün adı arayın…"
-            value={quickSearch}
-            onChange={(e) => setQuickSearch(e.target.value)}
-            onKeyDown={(e) => {
-              const exactCode = catalogProducts.filter(product => product.sku && product.sku.toLocaleLowerCase("tr-TR") === quickSearch.trim().toLocaleLowerCase("tr-TR"));
-              const match = exactCode.length === 1 ? exactCode[0] : filteredQuickProducts.length === 1 ? filteredQuickProducts[0] : null;
-              if (e.key === "Enter" && match && !pendingQuick) {
-                setQuickOptionSelection(null); setQuickOptionProduct(match);
-                setQuickSearch("");
-              }
-            }}
-          />
-        </div>
-        <div className="cashier-quick-header-actions">
-          {quickCart.length > 0 && (
-            <button
-              type="button"
-              className="cashier-quick-clear-btn"
-              disabled={Boolean(pendingQuick)}
-              onClick={() => setQuickCart([])}
-            >
-              🗑️ Sepeti Temizle
-            </button>
+    {cashierMode === "quick" && (
+      <section className="cashier-quick-split-container" aria-label="Hızlı Satış ve Tahsilat Ekranı">
+        {/* SOL BÖLÜM: %65 - Menü ve Menü Altı Sepet */}
+        <div className="cashier-quick-left-col">
+          {unfinishedChecks.length > 0 && quickActiveCheck && (
+            <div className="quick-pending-banner">
+              <span>⏸️ <strong>{unfinishedChecks.length}</strong> bekleyen tezgâh / paket satışı var</span>
+              <button
+                type="button"
+                className="quick-pending-banner-btn"
+                onClick={() => {
+                  setQuickActiveCheck(null);
+                  setQuickNotice("Bekleyen satışlar sağ panelde listeleniyor.");
+                }}
+              >
+                Bekleyenleri Gör →
+              </button>
+            </div>
           )}
-          {quickCart.length > 0 && (
-            <button
-              type="button"
-              style={{
-                background: "#fef3c7",
-                color: "#92400e",
-                border: "1.5px solid #f59e0b",
-                fontWeight: 700,
-                padding: "8px 14px",
-                borderRadius: 8,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-              }}
-              disabled={quickBusy || Boolean(pendingQuick)}
-              onClick={() => {
-                setParkLabelInput(`Paket #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`);
-                setParkDialogOpen(true);
-              }}
-            >
-              ⏸️ Askıya Al / Beklet
-            </button>
-          )}
-          <button
-            type="button"
-            className={`cashier-quick-enter-cart-btn ${quickCart.length > 0 ? "active" : "disabled"}`}
-            disabled={(!pendingQuick && quickCart.length === 0) || quickBusy}
-            onClick={() => void proceedToPayment()}
-          >
-            {quickBusy ? "Adisyon Açılıyor…" : pendingQuick ? "Önceki isteği tekrar dene" : quickCart.length > 0 ? `🛒 Sepete Gir (${quickCartCount} Ürün · ${money(quickTotalMinor)}) →` : "🛒 Sepete Gir (Sepet Boş)"}
-          </button>
-        </div>
-      </div>
 
-      {quickSuccess && <div className="cashier-quick-success-banner" role="status">
-        <strong>Satış tamamlandı · Kasaya kaydedildi</strong>
-        <span>Toplam Tutar: {money(quickSuccess.totalMinor)}</span>
-        {quickSuccess.payments && quickSuccess.payments.length > 1 ? (
-          <div className="cashier-quick-split-tags">
-            <span>Parçalı Tahsilat ({quickSuccess.payments.length} Ödeme):</span>
-            {quickSuccess.payments.map((p, idx) => (
-              <span key={p.id || idx} className="cashier-quick-split-tag">
-                {idx + 1}. {p.method === "cash" ? "💵 Nakit" : "💳 Kart"}: {money(p.amountMinor)}
-              </span>
+          {quickNotice && <p className="ops-success" role="status" style={{ margin: "0 0 6px" }}>{quickNotice}</p>}
+          {quickError && <p className="ops-error" role="alert" style={{ margin: "0 0 6px" }}>{quickError}</p>}
+          {unfinishedError && <p className="ops-error" role="alert" style={{ margin: "0 0 6px" }}>Açık satışlar yüklenemedi: {unfinishedError}</p>}
+          {catalogError && (
+            <p className="ops-error" role="alert" style={{ margin: "0 0 6px" }}>
+              Ürünler yüklenemedi: {catalogError}{" "}
+              <button type="button" onClick={() => setCatalogRevision((v) => v + 1)}>Tekrar dene</button>
+            </p>
+          )}
+
+          {/* Kategori Sekmeleri */}
+          <div className="cashier-quick-categories" aria-label="Kategoriler">
+            <button
+              type="button"
+              className={`cashier-quick-cat-btn ${selectedQuickCat === "all" ? "active" : ""}`}
+              onClick={() => setSelectedQuickCat("all")}
+            >
+              Tüm Ürünler ({catalogProducts.length})
+            </button>
+            {catalogCategories.map((cat) => (
+              <button
+                type="button"
+                key={cat.id}
+                className={`cashier-quick-cat-btn ${selectedQuickCat === cat.id ? "active" : ""}`}
+                onClick={() => setSelectedQuickCat(cat.id)}
+              >
+                {cat.name}
+              </button>
             ))}
           </div>
-        ) : (
-          <span>Ödeme Yöntemi: {quickSuccess.method}</span>
-        )}
-        {quickSuccess.changeMinor > 0 && <span className="change-alert">💵 Verilecek Para Üstü: {money(quickSuccess.changeMinor)}</span>}
-      </div>}
-      {quickNotice && <p className="ops-success" role="status" style={{ margin: "0 0 10px" }}>{quickNotice}</p>}
-      {quickError && <p className="ops-error" role="alert">{quickError}</p>}
-      {catalogError && <p className="ops-error" role="alert">Ürünler yüklenemedi: {catalogError} <button type="button" onClick={() => setCatalogRevision(value => value + 1)}>Tekrar dene</button></p>}
-      {pendingQuick && <p className="ops-error" role="status">Önceki satış isteğinin sonucu kesinleşmedi. Yeni satışa başlamadan aynı isteği tekrar deneyin.</p>}
-      {unfinishedError && <p className="ops-error" role="alert">Açık satışlar alınamadı: {unfinishedError} <button type="button" onClick={() => void loadUnfinishedChecks()}>Tekrar dene</button></p>}
-      {unfinishedChecks.length > 0 && (
-        <section
-          style={{
-            background: "#fffbeb",
-            border: "1.5px solid #fde68a",
-            borderRadius: 12,
-            padding: "14px 16px",
-            marginBottom: 16,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-          }}
-          aria-label="Bekleyen Hızlı Satışlar"
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }} aria-hidden="true">⏸️</span>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "#92400e", letterSpacing: 0.5 }}>
-                BEKLEYEN TEZGÂH & PAKET SATIŞLARI
-              </h2>
-              <span style={{ background: "#fef3c7", color: "#b45309", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 700, border: "1px solid #fcd34d" }}>
-                {unfinishedChecks.length} Bekleyen
-              </span>
-            </div>
-            <button
-              type="button"
-              className="ops-secondary"
-              style={{ padding: "4px 10px", fontSize: 12, fontWeight: 600, background: "#ffffff", border: "1px solid #d1d5db" }}
-              onClick={() => void loadUnfinishedChecks()}
-              disabled={quickBusy}
-            >
-              🔄 Listeyi Yenile
-            </button>
-          </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {unfinishedChecks.map((check) => {
-              const label = check.orders[0]?.items[0]?.note || `Satış #${check.id.slice(0, 6)}`;
-              const itemsSummary = check.orders.flatMap((order) => order.items).map((item) => `${item.quantity}× ${item.productName}`).join(", ");
-              const isPartiallyPaid = (check.paidMinor ?? 0) > 0;
-
-              return (
-                <article
-                  key={check.id}
-                  style={{
-                    background: "#ffffff",
-                    border: "1.5px solid #e5e7eb",
-                    borderRadius: 10,
-                    padding: "12px 14px",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                  }}
-                >
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6, marginBottom: 4 }}>
-                      <strong style={{ fontSize: 14, color: "#1f2937", display: "flex", alignItems: "center", gap: 4 }}>
-                        <span>🏷️</span>
-                        <span>{label}</span>
-                      </strong>
-                      <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, whiteSpace: "nowrap" }}>
-                        ⏱️ {formatElapsedMinutes(check.createdAt)}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#4b5563", lineHeight: 1.4, margin: "4px 0" }}>
-                      {itemsSummary}
-                    </div>
-                  </div>
-
-                  <div style={{ borderTop: "1px dashed #e5e7eb", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>Kalan Tutar</div>
-                      <b style={{ fontSize: 15, color: "#1e40af", fontWeight: 800 }}>{money(check.remainingMinor)}</b>
-                      {isPartiallyPaid && (
-                        <span style={{ fontSize: 10.5, color: "#059669", display: "block" }}>
-                          (Ödenen: {money(check.paidMinor ?? 0)})
+          {/* Ürün Kartları Izgarası */}
+          <div className="cashier-quick-products-grid">
+            {filteredQuickProducts.length === 0 ? (
+              <p className="ops-message" style={{ gridColumn: "1 / -1" }}>Eşleşen ürün bulunamadı.</p>
+            ) : (
+              filteredQuickProducts.map((product) => {
+                const inCart = quickCart.find((item) => item.product.id === product.id);
+                return (
+                  <div
+                    key={product.id}
+                    className={`cashier-quick-product-card ${inCart ? "has-cart" : ""}`}
+                    onClick={() => {
+                      if (!pendingQuick) {
+                        setQuickOptionSelection(null);
+                        setQuickOptionProduct(product);
+                      }
+                    }}
+                  >
+                    <div className="cashier-quick-product-top">
+                      {product.image.startsWith("upload:") && (
+                        <span className="cashier-quick-product-image">
+                          <PosProductImage image={product.image} productId={product.id} name={product.name} />
                         </span>
                       )}
+                      <span className="cashier-quick-product-name">{product.name}</span>
+                      {inCart && <span className="cashier-quick-product-badge">Sepette ({inCart.quantity})</span>}
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        type="button"
-                        style={{
-                          background: "#fee2e2",
-                          color: "#991b1b",
-                          border: "1px solid #fca5a5",
-                          borderRadius: 6,
-                          padding: "6px 9px",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                        disabled={quickBusy || Boolean(pendingQuick) || check.payments.length > 0}
-                        title={check.payments.length > 0 ? "Ödeme alınmış adisyon iptal edilemez" : "Siparişi iptal et"}
-                        onClick={() => setCancellingCheck({ id: check.id, version: check.version, label })}
-                      >
-                        🗑️ İptal
-                      </button>
-                      <button
-                        type="button"
-                        style={{
-                          background: "#2563eb",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: 6,
-                          padding: "6px 14px",
-                          fontSize: 12.5,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                        disabled={quickBusy || Boolean(pendingQuick)}
-                        onClick={() => void resumeQuickCheck(check.id)}
-                      >
-                        ⚡ Tahsil Et →
-                      </button>
-                    </div>
+                    <strong className="cashier-quick-product-price">{money(product.price.amountMinor)}</strong>
                   </div>
-                </article>
-              );
-            })}
+                );
+              })
+            )}
           </div>
-        </section>
-      )}
 
-      <div className="cashier-quick-catalog-full">
-        <div className="cashier-quick-categories" aria-label="Kategoriler">
-          <button
-            type="button"
-            className={`cashier-quick-cat-btn ${selectedQuickCat === "all" ? "active" : ""}`}
-            onClick={() => setSelectedQuickCat("all")}
-          >
-            Tüm Ürünler ({catalogProducts.length})
-          </button>
-          {catalogCategories.map((cat) => (
-            <button
-              type="button"
-              key={cat.id}
-              className={`cashier-quick-cat-btn ${selectedQuickCat === cat.id ? "active" : ""}`}
-              onClick={() => setSelectedQuickCat(cat.id)}
-            >
-              {cat.name}
-            </button>
-          ))}
-        </div>
-
-        <div className="cashier-quick-products-grid">
-          {filteredQuickProducts.length === 0 ? (
-            <p className="ops-message" style={{ gridColumn: "1 / -1" }}>Eşleşen ürün bulunamadı.</p>
-          ) : (
-            filteredQuickProducts.map((product) => {
-              const inCart = quickCart.find((item) => item.product.id === product.id);
-              return (
-                <div
-                  key={product.id}
-                  className={`cashier-quick-product-card ${inCart ? "has-cart" : ""}`}
-                  onClick={() => { if (!pendingQuick) { setQuickOptionSelection(null); setQuickOptionProduct(product); } }}
-                >
-                  <div className="cashier-quick-product-top">
-                    {product.image.startsWith("upload:") && <span className="cashier-quick-product-image"><PosProductImage image={product.image} productId={product.id} name={product.name} /></span>}
-                    <span className="cashier-quick-product-name">{product.name}</span>
-                    {inCart && <span>Sepette</span>}
+          {/* Menü Altı Canlı Sepet ve Onay Alanı */}
+          {(quickCart.length > 0 || orderSentToast) && (
+            <section className="quick-cart-inline" aria-label="Menü Altı Sepet">
+              {/* 2 Saniyelik Minik Onay Rozeti (Sadece burada görünür ve kaybolur) */}
+              {orderSentToast && (
+                <div className="quick-order-sent-toast" role="status">
+                  <span className="toast-icon">✅</span>
+                  <div className="toast-content">
+                    <strong>Sipariş mutfağa iletildi!</strong>
+                    <span>{orderSentToast.label} · {orderSentToast.count} ürün · {money(orderSentToast.totalMinor)}</span>
                   </div>
-                  <strong className="cashier-quick-product-price">{money(product.price.amountMinor)}</strong>
                 </div>
-              );
-            })
+              )}
+
+              {quickCart.length > 0 && (
+                <>
+                  <div className="quick-cart-inline-header">
+                    <h3>🛒 Sepet ({quickCartCount} Ürün)</h3>
+                    <strong>Toplam: {money(quickTotalMinor)}</strong>
+                  </div>
+
+                  <div className="quick-cart-inline-list">
+                    {quickCart.map((item) => (
+                      <div className="quick-cart-inline-row" key={item.id}>
+                        <div className="quick-cart-inline-info">
+                          <strong>{item.product.name}</strong>
+                          {item.options.length > 0 && (
+                            <small>
+                              {item.options.map((opt) => `${opt.optionName}${opt.quantity > 1 ? ` × ${opt.quantity}` : ""}`).join(", ")}
+                            </small>
+                          )}
+                          <span className="item-price">
+                            {money(
+                              (item.product.price.amountMinor +
+                                item.options.reduce((sum, opt) => sum + opt.priceDeltaMinor * opt.quantity, 0)) *
+                                item.quantity
+                            )}
+                          </span>
+                        </div>
+                        <div className="quick-cart-inline-qty">
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingQuick)}
+                            onClick={() => updateQuickCartQty(item.id, -1)}
+                            aria-label={`${item.product.name} azalt`}
+                          >
+                            −
+                          </button>
+                          <b>{item.quantity}</b>
+                          <button
+                            type="button"
+                            disabled={Boolean(pendingQuick)}
+                            onClick={() => updateQuickCartQty(item.id, 1)}
+                            aria-label={`${item.product.name} artır`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Sabit Sepet Aksiyon Çubuğu */}
+                  <div className="quick-cart-inline-actions">
+                    <button
+                      type="button"
+                      className="quick-cart-btn-clear"
+                      disabled={quickBusy || Boolean(pendingQuick)}
+                      onClick={() => setQuickCart([])}
+                    >
+                      🗑️ Sepeti Temizle
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-cart-btn-park"
+                      disabled={quickBusy || Boolean(pendingQuick)}
+                      onClick={() => {
+                        setParkLabelInput(`Paket #${new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`);
+                        setParkDialogOpen(true);
+                      }}
+                    >
+                      ⏸️ Askıya Al / Beklet
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-cart-btn-submit"
+                      disabled={quickBusy || Boolean(pendingQuick)}
+                      onClick={() => void proceedToPayment()}
+                    >
+                      {quickBusy
+                        ? "Sipariş Oluşturuluyor…"
+                        : `🛒 Sepeti Onayla & Mutfağa Gönder (${quickCartCount} Ürün · ${money(quickTotalMinor)}) →`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
           )}
         </div>
-      </div>
-    </section>}
-    {cashierMode === "quick" && quickStep === "menu" && quickCart.length > 0 && <section className="quick-cart-compact" aria-label="Hızlı satış sepeti">
-      <header><h2>Sepet <span>{quickCartCount} ürün</span></h2><strong>Toplam {money(quickTotalMinor)}</strong></header>
-      <div className="quick-cart-compact-list">{quickCart.map(item => <div className="quick-cart-compact-row" key={item.id}>
-        <div className="quick-cart-compact-info"><strong>{item.product.name}</strong>{item.options.length > 0 && <small>{item.options.map(option => `${option.optionName}${option.quantity > 1 ? ` × ${option.quantity}` : ""}`).join(", ")}</small>}<span>{money((item.product.price.amountMinor + item.options.reduce((sum, option) => sum + option.priceDeltaMinor * option.quantity, 0)) * item.quantity)}</span></div>
-        <div className="quick-cart-compact-qty"><button type="button" disabled={Boolean(pendingQuick)} onClick={() => updateQuickCartQty(item.id, -1)} aria-label={`${item.product.name} azalt`}>−</button><b>{item.quantity}</b><button type="button" disabled={Boolean(pendingQuick)} onClick={() => updateQuickCartQty(item.id, 1)} aria-label={`${item.product.name} artır`}>+</button></div>
-      </div>)}</div>
-    </section>}
+
+        {/* SAĞ BÖLÜM: %35 - Canlı Adisyon & Masa Tipi Detaylı Tahsilat */}
+        <div className="cashier-quick-right-col">
+          {quickSuccess && (
+            <div className="cashier-quick-success-banner" role="status">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong>✅ Satış Tamamlandı</strong>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#14532d", fontWeight: 700 }}
+                  onClick={() => setQuickSuccess(null)}
+                >
+                  ✕
+                </button>
+              </div>
+              <div>Toplam: {money(quickSuccess.totalMinor)} · {quickSuccess.method}</div>
+              {quickSuccess.changeMinor > 0 && (
+                <div className="change-alert" style={{ marginTop: 4 }}>
+                  💵 Verilecek Para Üstü: <strong>{money(quickSuccess.changeMinor)}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {splitNotice && <p className="ops-success" role="status" style={{ margin: "0 0 6px" }}>{splitNotice}</p>}
+
+          {quickActiveCheck ? (
+            <article className="quick-checkout-card">
+              <header className="quick-checkout-header">
+                <div>
+                  <span className="quick-checkout-eyebrow">⚡ GEL-AL / PAKET ADİSYONU</span>
+                  <h2 className="quick-checkout-title">
+                    {quickActiveCheck.orders[0]?.items[0]?.note || `Satış #${quickActiveCheck.id.slice(0, 8).toUpperCase()}`}
+                  </h2>
+                  <small className="quick-checkout-meta">
+                    Açılış: {new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(new Date(quickActiveCheck.createdAt))} · {mainRegister?.name ?? "Kasa"}
+                  </small>
+                </div>
+                <span className={`cashier-open-badge ${quickActiveCheck.paymentStatus}`}>
+                  {paymentLabel(quickActiveCheck.paymentStatus)}
+                </span>
+              </header>
+
+              {/* Kalemler Listesi */}
+              <div className="quick-checkout-items">
+                {quickActiveCheck.orders.flatMap((order) =>
+                  order.items.map((line) => (
+                    <div className="quick-checkout-item-row" key={`${order.id}:${line.id}`}>
+                      <span className="item-qty">{line.quantity}×</span>
+                      <div className="item-details">
+                        <strong>{line.productName}</strong>
+                        <small>{line.quantity} × {money(line.unitPriceMinor)}</small>
+                        {Boolean(line.note || line.options?.length) && (
+                          <small className="item-options">
+                            {[...(line.options ?? []).map((o) => o.optionName), line.note].filter(Boolean).join(" · ")}
+                          </small>
+                        )}
+                      </div>
+                      <b className="item-total">{money(line.lineTotalMinor)}</b>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Masa Tipi Yönetim Butonları (Müdür PIN Korumalı) */}
+              <div className="quick-checkout-actions">
+                <button
+                  type="button"
+                  className="quick-action-btn"
+                  disabled={Boolean(error) || quickActiveCheck.payments.length > 0}
+                  onClick={() => showCashierAction("discount")}
+                  title={quickActiveCheck.payments.length > 0 ? "Ödeme alınmış adisyona indirim uygulanamaz" : "İndirim uygula"}
+                >
+                  🏷️ İndirim
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-btn"
+                  disabled={Boolean(error) || quickActiveCheck.payments.length > 0}
+                  onClick={() => showCashierAction("comp")}
+                  title={quickActiveCheck.payments.length > 0 ? "Ödeme alınmış adisyona ikram uygulanamaz" : "Ürün ikramı"}
+                >
+                  🎁 İkram
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-btn"
+                  disabled={Boolean(error) || quickActiveCheck.payments.length > 0}
+                  onClick={() => showCashierAction("void")}
+                  title={quickActiveCheck.payments.length > 0 ? "Ödeme alınmış adisyondan ürün iptal edilemez" : "Kalem iptali"}
+                >
+                  🗑️ İptal
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-btn"
+                  disabled={Boolean(error) || quickActiveCheck.payments.length > 0}
+                  onClick={() => {
+                    setSplitCheck(quickActiveCheck);
+                    setSplitQuantities({});
+                    setSplitError("");
+                    setSplitNotice("");
+                  }}
+                  title={quickActiveCheck.payments.length > 0 ? "Ödeme alınmış adisyon bölünemez" : "Adisyonu böl"}
+                >
+                  ✂️ Böl
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-btn park"
+                  onClick={() => {
+                    setQuickActiveCheck(null);
+                    setQuickNotice("Adisyon askıya alındı. Sıradaki müşterinin siparişini alabilirsiniz.");
+                    void loadUnfinishedChecks();
+                  }}
+                >
+                  ⏸️ Askıya Al
+                </button>
+                <button
+                  type="button"
+                  className="quick-action-btn cancel"
+                  disabled={quickActiveCheck.payments.length > 0}
+                  onClick={() => {
+                    setCancellingCheck({
+                      id: quickActiveCheck.id,
+                      version: quickActiveCheck.version,
+                      label: quickActiveCheck.orders[0]?.items[0]?.note || `Satış #${quickActiveCheck.id.slice(0, 6)}`,
+                    });
+                  }}
+                >
+                  ❌ İptal Et
+                </button>
+              </div>
+
+              {/* Bakiye Özeti */}
+              <div className="quick-checkout-balance-box">
+                <div className="quick-checkout-due-row">
+                  <div>
+                    <span className="due-label">KALAN TUTAR</span>
+                    {quickActiveCheck.paidMinor > 0 && (
+                      <small className="paid-sublabel">Ödenen: {money(quickActiveCheck.paidMinor)}</small>
+                    )}
+                  </div>
+                  <strong className="due-value">{money(quickActiveCheck.remainingMinor)}</strong>
+                </div>
+                {quickActiveCheck.adjustmentMinor > 0 && (
+                  <div className="quick-checkout-discount-row">
+                    <span>Uygulanan İndirim / İkram:</span>
+                    <strong>−{money(quickActiveCheck.adjustmentMinor)}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Ödeme Yöntemleri Seçimi */}
+              <div className="quick-checkout-methods">
+                <div className="quick-methods-grid">
+                  <button
+                    type="button"
+                    className={`quick-method-btn ${paymentMethod === "cash" ? "active" : ""}`}
+                    onClick={() => { setPaymentMethod("cash"); setPaymentSubMethod(""); }}
+                  >
+                    💵 Nakit
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-method-btn ${paymentMethod === "card" ? "active" : ""}`}
+                    onClick={() => { setPaymentMethod("card"); setPaymentSubMethod("Ziraat POS"); }}
+                  >
+                    💳 Kredi Kartı
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-method-btn ${paymentMethod === "meal" ? "active" : ""}`}
+                    onClick={() => { setPaymentMethod("meal"); setPaymentSubMethod("Sodexo"); }}
+                  >
+                    🍱 Yemek Kartı
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-method-btn ${paymentMethod === "cari" ? "active" : ""}`}
+                    onClick={() => { setPaymentMethod("cari"); setCustomerSearch(""); setCustomerOpen(true); }}
+                  >
+                    👤 Cariye Yaz
+                  </button>
+                  <button
+                    type="button"
+                    className={`quick-method-btn ${paymentMethod === "transfer" ? "active" : ""}`}
+                    onClick={() => { setPaymentMethod("transfer"); setPaymentSubMethod(""); }}
+                  >
+                    🏦 Havale / EFT
+                  </button>
+                </div>
+
+                {/* Alt Metodlar (POS veya Yemek Kartı) */}
+                {paymentMethod === "card" && (
+                  <div className="quick-submethods-row">
+                    {["Ziraat POS", "VakıfBank POS", "Garanti POS"].map((sub) => (
+                      <button
+                        type="button"
+                        key={sub}
+                        className={`quick-submethod-btn ${paymentSubMethod === sub ? "active" : ""}`}
+                        onClick={() => setPaymentSubMethod(sub)}
+                      >
+                        {sub}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {paymentMethod === "meal" && (
+                  <div className="quick-submethods-row">
+                    {["Sodexo", "Multinet", "Ticket", "Setcard", "Metropol"].map((sub) => (
+                      <button
+                        type="button"
+                        key={sub}
+                        className={`quick-submethod-btn ${paymentSubMethod === sub ? "active" : ""}`}
+                        onClick={() => setPaymentSubMethod(sub)}
+                      >
+                        {sub}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {paymentMethod === "cari" && customerSelected && (
+                  <div className="quick-customer-badge">
+                    <span>Müşteri: <strong>{customerSelected.name}</strong></span>
+                    <button type="button" onClick={() => { setCustomerSearch(""); setCustomerOpen(true); }}>Değiştir</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Hızlı Banknotlar & Tuş Takımı */}
+              <div className="quick-checkout-keypad-box">
+                <div className="quick-amounts-grid">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAmountInput(
+                        `${Math.floor(quickActiveCheck.remainingMinor / 100)},${String(
+                          quickActiveCheck.remainingMinor % 100
+                        ).padStart(2, "0")}`
+                      )
+                    }
+                  >
+                    TAM ({money(quickActiveCheck.remainingMinor)})
+                  </button>
+                  <button type="button" onClick={() => setAmountInput("100,00")}>100 ₺</button>
+                  <button type="button" onClick={() => setAmountInput("200,00")}>200 ₺</button>
+                  <button type="button" onClick={() => setAmountInput("500,00")}>500 ₺</button>
+                  <button type="button" className="clear-btn" onClick={() => enterAmountKey("C")}>C</button>
+                </div>
+
+                <div className="quick-input-display">
+                  <span>{paymentMethod === "cash" ? "ALINAN NAKİT" : "GİRİLEN TUTAR"}:</span>
+                  <strong>{money(amountMinor)}</strong>
+                </div>
+
+                {paymentMethod === "cash" && amountMinor > quickActiveCheck.remainingMinor && (
+                  <div className="quick-change-display">
+                    <span>💵 VERİLECEK PARA ÜSTÜ:</span>
+                    <strong>{money(amountMinor - quickActiveCheck.remainingMinor)}</strong>
+                  </div>
+                )}
+
+                <div className="quick-numpad-grid">
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "⌫"].map((key) => (
+                    <button
+                      type="button"
+                      key={key}
+                      onClick={() => enterAmountKey(key)}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tahsilatı Tamamla Butonu */}
+              <button
+                type="button"
+                className="quick-submit-payment-btn"
+                disabled={Boolean(payBlocker) || payBusy || Boolean(error)}
+                onClick={() => {
+                  if (isZeroBalance) void closeZeroCheck();
+                  else void submitPayment();
+                }}
+              >
+                {payBusy
+                  ? "İşleniyor & Yazdırılıyor…"
+                  : isZeroBalance
+                  ? "Adisyonu Kapat (0,00 ₺)"
+                  : `⚡ ${paymentMethod === "cash" ? "💵" : "💳"} ${money(Math.min(amountMinor, quickActiveCheck.remainingMinor))} Tahsil Et & Yazdır`}
+              </button>
+
+              {payError && <p className="ops-error" role="alert" style={{ margin: "6px 0 0" }}>{payError}</p>}
+
+              <footer className="quick-checkout-footer">
+                <button
+                  type="button"
+                  className="quick-print-receipt-btn"
+                  disabled={payBusy}
+                  onClick={() =>
+                    printAccountReceipt(
+                      {
+                        check: quickActiveCheck,
+                        location: "Hızlı Satış",
+                        printedAt: new Date().toISOString(),
+                      },
+                      false,
+                      paymentMethod ? paymentMethod.toUpperCase() : "BILGI"
+                    )
+                  }
+                >
+                  🧾 Bilgi Fişi Yazdır
+                </button>
+              </footer>
+            </article>
+          ) : (
+            <article className="quick-empty-checkout-card">
+              <div className="quick-empty-icon">⚡</div>
+              <h3>Hızlı Satış Tezgâhı Hazır</h3>
+              <p>Sol taraftaki menüden ürünleri sepete ekleyip <strong>'Sepeti Onayla'</strong> butonuna basın veya aşağıdaki bekleyen siparişlerden birini seçin.</p>
+
+              {unfinishedChecks.length > 0 && (
+                <div className="quick-unfinished-list">
+                  <header className="quick-unfinished-header">
+                    <h4>⏸️ BEKLEYEN SATIŞLAR ({unfinishedChecks.length})</h4>
+                    <button type="button" onClick={() => void loadUnfinishedChecks()} disabled={quickBusy}>
+                      🔄
+                    </button>
+                  </header>
+                  <div className="quick-unfinished-items">
+                    {unfinishedChecks.map((chk) => {
+                      const label = chk.orders[0]?.items[0]?.note || `Satış #${chk.id.slice(0, 6)}`;
+                      const itemsSummary = chk.orders.flatMap((o) => o.items).map((it) => `${it.quantity}× ${it.productName}`).join(", ");
+                      return (
+                        <div key={chk.id} className="quick-unfinished-card">
+                          <div className="unfinished-info">
+                            <strong>{label}</strong>
+                            <small>{itemsSummary}</small>
+                            <span className="unfinished-time">⏱️ {formatElapsedMinutes(chk.createdAt)}</span>
+                          </div>
+                          <div className="unfinished-actions">
+                            <b className="unfinished-price">{money(chk.remainingMinor)}</b>
+                            <button
+                              type="button"
+                              className="unfinished-resume-btn"
+                              onClick={() => void resumeQuickCheck(chk.id)}
+                              disabled={quickBusy}
+                            >
+                              ⚡ Tahsil Et
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </article>
+          )}
+        </div>
+      </section>
+    )}
     {quickOptionProduct && <div className="waiter-modal-backdrop" role="dialog" aria-modal="true" aria-label={`${quickOptionProduct.name} seçenekleri`}><div className="waiter-custom-modal"><header><h2>{quickOptionProduct.name}</h2><button type="button" className="waiter-modal-close" onClick={() => setQuickOptionProduct(null)} aria-label="Kapat">×</button></header><ProductOptionPicker key={quickOptionProduct.id} firmId={firmId} branchId={branchId} actor="pos-single" productId={quickOptionProduct.id} basePriceMinor={quickOptionProduct.price.amountMinor} onChange={setQuickOptionSelection} /><p>Birim fiyat: {money(quickOptionSelection?.unitPriceMinor ?? quickOptionProduct.price.amountMinor)}</p><footer><button type="button" className="waiter-cancel-custom" onClick={() => setQuickOptionProduct(null)}>Vazgeç</button><button type="button" className="ops-primary" disabled={!quickOptionSelection?.valid} onClick={() => { if (quickOptionSelection?.valid) addToQuickCart(quickOptionProduct, quickOptionSelection.items); setQuickOptionProduct(null); }}>Sepete ekle</button></footer></div></div>}
-    {((selected && cashierMode === "tables") || (isQuickPayment && activeCheck)) && <section className="cashier-details" aria-label={isQuickPayment ? "Hızlı satış ve tahsilat detayı" : "Masa ve adisyon detayı"}>
+    {selected && cashierMode === "tables" && <section className="cashier-details" aria-label="Masa ve adisyon detayı">
       {splitNotice && <p className="ops-success" role="status">{splitNotice}</p>}
       {selected?.group && <p className="cashier-group-note">Ortak masa grubu: {selected.group.tableNames.join(" + ")} · Ana masa: {selected.name}</p>}
       <div className="cashier-detail-grid">
@@ -2609,7 +2926,22 @@ export function WaiterApp() {
       })));
       setTables(updated);
       setConfiguredFloors(tableResult.floors ?? []);
-      setWaiters(waiterResult.items.filter((item) => item.isActive));
+      const activeWaiters = waiterResult.items.filter((item) => item.isActive);
+      setWaiters(activeWaiters);
+      if (waiterSession?.user?.fullName) {
+        setWaiterId((current) => {
+          if (current && activeWaiters.some(w => w.id === current)) return current;
+          const userFull = waiterSession.user.fullName.trim().toLowerCase();
+          const match = activeWaiters.find(w => {
+            const wName = w.name.trim().toLowerCase();
+            return wName === userFull || userFull.includes(wName) || wName.includes(userFull) ||
+                   userFull.split(" ")[0] === wName.split(" ")[0];
+          });
+          return match ? match.id : (activeWaiters[0]?.id ?? "");
+        });
+      } else if (activeWaiters.length > 0) {
+        setWaiterId((current) => current || activeWaiters[0].id);
+      }
       setConnectionState("connected");
       setLastUpdated(new Date());
       setError("");
@@ -3973,7 +4305,21 @@ export function KitchenApp() {
 
 export function mountOperationalApp() {
   const path = window.location.pathname.replace(/\/$/, "");
-  if (path !== "/waiter" && path !== "/kitchen" && path !== "/cashier") return false;
-  createRoot(document.getElementById("root")!).render(path === "/waiter" ? <WaiterApp /> : path === "/cashier" ? <CashierApp /> : <KitchenApp />);
-  return true;
+  if (path === "/waiter" || path === "/kitchen" || path === "/cashier") {
+    try {
+      localStorage.setItem("hipos_preferred_app", path.slice(1));
+    } catch {}
+    createRoot(document.getElementById("root")!).render(path === "/waiter" ? <WaiterApp /> : path === "/cashier" ? <CashierApp /> : <KitchenApp />);
+    return true;
+  }
+  if (path === "") {
+    try {
+      const preferred = localStorage.getItem("hipos_preferred_app");
+      if (preferred === "waiter" || preferred === "cashier" || preferred === "kitchen") {
+        window.location.replace(`/${preferred}`);
+        return true;
+      }
+    } catch {}
+  }
+  return false;
 }

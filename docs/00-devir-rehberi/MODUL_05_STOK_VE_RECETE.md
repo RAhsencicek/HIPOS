@@ -18,7 +18,7 @@
 | **Reçete Tanımlama** | **Çalışıyor** | Ürün bazlı hammadde gramajları ve sürümleme PostgreSQL'de kalıcıdır. |
 | **Stok Hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış, mal kabul ve fire kayıtları çalışır. |
 | **Sayım ve Düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır. |
-| **Satıştan Otomatik Tüketim** | 🔴 **Eksik (FAZ 1)** | Adisyon kapatıldığında reçetedeki hammadde miktarlarını stoktan düşen köprü henüz kodlanmamıştır. |
+| **Satıştan Otomatik Tüketim** | **Çalışıyor (FAZ 1 - 9 Kasım 2026)** | Adisyon kapandığında reçetedeki hammadde miktarları `inventory.movements` tablosuna `kind: pos_sale` olarak yazılır ve depodan otomatik düşer. |
 | **Mal Kabul / Satın Alma** | **Çalışıyor** | Satın alma siparişi, mal kabul irsaliyesi, kasadan nakit tediye veya cariye borç yazma çalışır. |
 | **Fire Kayıtları** | **Çalışıyor** | Hammadde zayisi ve reçeteli ürün bozulması `waste_loss` hareketi oluşturur. |
 
