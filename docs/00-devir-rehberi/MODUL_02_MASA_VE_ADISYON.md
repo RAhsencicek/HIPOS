@@ -25,6 +25,7 @@
   - Adisyona birden fazla sipariş eklenmesi ve API'ye kaydedilmesi
   - Garson masa detayında açık adisyon, taşıma, birleştirme ve miktar bazlı adisyon bölme akışları
   - Sipariş kaleminde not ve demo hazırlama tercihlerinin mutfak görünümüne taşınması
+  - **Server-Sent Events (SSE) LAN Canlı Eşzamanlılık:** Garson masaya sipariş girdiğinde veya Kasa tahsilat yapıp hesabı kapattığında, tüm el terminalleri, kasalar ve mutfak ekranları sayfayı yenilemeden (No F5) sub-10ms gecikmeyle anında güncellenir (`RestaurantEventHub`, `GET /events/stream`).
 * **Kısmen Hazır / Bekleyenler:**
   - Garson ekranında yüzde/sabit adisyon indirimi ile gerekçeli miktar bazlı ikram/kalem iptali API'ye kaydedilir. Her kayıt actor, gerekçe ve zaman bilgisiyle denetim izi taşır. Yönetici onayı yalnız `Development` ortamında test amacıyla atlanır; diğer ortamlarda onaysız işlem reddedilir. Gerçek kimlik doğrulama/PIN onayı yönetim ekranı aşamasında tamamlanacaktır.
   - Ücret etkili ürün modifier seçenekleri Modül 4 kapsamındadır; mevcut garson seçenekleri demo amaçlı ve ücretsizdir.

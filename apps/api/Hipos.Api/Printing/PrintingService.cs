@@ -305,13 +305,14 @@ public sealed class PrintingService(
         var orders = await salesDb.Orders
             .AsNoTracking()
             .Include(row => row.Lines)
+            .Include(row => row.PaymentAttempts)
             .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId && row.Status != "cancelled")
             .ToListAsync(ct);
 
         var lines = orders.SelectMany(o => o.Lines).ToList();
 
         // Resolve Table and Waiter
-        string tableName = "Masa";
+        string tableName = check.TableId is null ? "Paket / Gel-Al" : "Masa";
         string waiterName = "Kasiyer";
 
         if (check.TableId is not null)
@@ -349,9 +350,12 @@ public sealed class PrintingService(
         long discountMinor = adjustments.Where(a => a.Action is "discount" or "comp").Sum(a => a.AmountMinor);
         long netTotal = Math.Max(0, grossTotal - discountMinor);
 
+        long paidMinor = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").Sum(p => p.AmountMinor);
+        long remainingMinor = Math.Max(0, netTotal - paidMinor);
+
         var receiptBytes = EscPosBuilder.BuildCashierReceipt(
             firmTitle: "HIPOS RESTORAN",
-            branchTitle: "SALON HESAP FISI",
+            branchTitle: check.TableId is null ? "GEL-AL HESAP FISI" : "SALON HESAP FISI",
             tableName: tableName,
             waiterName: waiterName,
             checkNumber: check.Id.ToString()[..8].ToUpperInvariant(),
@@ -361,7 +365,9 @@ public sealed class PrintingService(
             discountMinor: discountMinor,
             netTotalMinor: netTotal,
             paymentMethod: paymentMethod,
-            openCashDrawer: openCashDrawer);
+            openCashDrawer: openCashDrawer,
+            paidMinor: paidMinor,
+            remainingMinor: remainingMinor);
 
         return await transport.SendAsync(_config.CashierPrinter, receiptBytes, ct);
     }

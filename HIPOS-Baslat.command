@@ -185,7 +185,11 @@ printf 'API sağlık:     http://localhost:5180/health\n'
 printf 'Loglar:         %s\n' "$LOG_DIR"
 printf 'Uygulama sunucularını durdurmak için bu Terminal penceresinde Ctrl+C kullanın. PostgreSQL verisi korunur.\n\n'
 
-open http://localhost:5173/admin >/dev/null 2>&1 || true
+if [[ -d "/Applications/Google Chrome.app" ]]; then
+  open -a "Google Chrome" "http://localhost:5173/admin" "http://localhost:5176/cashier" "http://localhost:5176/waiter" "http://localhost:5176/kitchen" >/dev/null 2>&1 || true
+else
+  open "http://localhost:5173/admin" "http://localhost:5176/cashier" "http://localhost:5176/waiter" "http://localhost:5176/kitchen" >/dev/null 2>&1 || true
+fi
 tail -n 20 -F "$LOG_DIR/api.log" "$LOG_DIR/admin.log" "$LOG_DIR/pos.log" &
 TAIL_PID=$!
 

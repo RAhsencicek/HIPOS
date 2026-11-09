@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -22,7 +23,7 @@ public sealed record PaymentCommandResult(
 }
 
 public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate, PaidCheckTableSettlement settlement,
-    FeatureRuntimeCapabilities runtime)
+    FeatureRuntimeCapabilities runtime, IRestaurantEventHub? eventHub = null)
 {
     public sealed record CashShiftLink(Guid Id, Guid RegisterId);
 
@@ -111,6 +112,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             if (attempt.Status == "succeeded")
                 await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            if (attempt.Status == "succeeded")
+            {
+                eventHub?.Publish("payment.settled", firmId, branchId, new { attemptId = attempt.Id, orderId = order.Id, checkId = order.CheckId });
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -260,6 +265,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             if (command.Outcome == "succeeded")
                 await CloseCheckAndReleaseTablesIfSettledAsync(order.CheckId, firmId, branchId, actor, now, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            if (command.Outcome == "succeeded")
+            {
+                eventHub?.Publish("payment.settled", firmId, branchId, new { attemptId = attempt.Id, orderId = order.Id, checkId = order.CheckId });
+            }
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -303,8 +312,12 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
                 db.Database.CurrentTransaction?.GetDbTransaction(),
                 check.Id, firmId, branchId, actor, now, cancellationToken);
         }
-        if (check.TableId is null) return;
-        await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, cancellationToken);
+        if (check.TableId is not null)
+        {
+            await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, cancellationToken);
+            eventHub?.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
+        }
+        eventHub?.Publish("check.closed", firmId, branchId, new { checkId = check.Id, tableId = check.TableId });
     }
 
     public static async Task DepleteInventoryForCheckAsync(

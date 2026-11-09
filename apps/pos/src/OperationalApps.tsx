@@ -49,6 +49,71 @@ function buildFloorSections(tables: Table[], configuredFloors: string[] = []): A
   list.push({ key: "unassigned", label: "Katı belirlenmemiş masalar" });
   return list;
 }
+
+function useRestaurantRealtime(onEvent: (event: { type: string; data?: any }) => void) {
+  useEffect(() => {
+    const token = localStorage.getItem("hipos_token");
+    const sseUrl = `${apiBase}/api/v1/firms/${firmId}/branches/${branchId}/events/stream?actor=pos-single${
+      token ? `&token=${encodeURIComponent(token)}` : ""
+    }`;
+    let eventSource: EventSource | null = null;
+    let retryTimeout: number | null = null;
+    let isDisposed = false;
+
+    function connect() {
+      if (isDisposed) return;
+      try {
+        eventSource = new EventSource(sseUrl);
+
+        eventSource.addEventListener("connected", () => {
+          console.log("⚡ [SSE] Restoran LAN canlı senkronizasyonuna bağlandı.");
+        });
+
+        const eventTypes = [
+          "table.updated",
+          "check.created",
+          "check.updated",
+          "check.closed",
+          "check.cancelled",
+          "payment.settled",
+          "kitchen.updated",
+          "order.created",
+        ];
+
+        eventTypes.forEach((type) => {
+          eventSource?.addEventListener(type, (e: MessageEvent) => {
+            console.log(`⚡ [SSE] Anlık olay: ${type}`, e.data);
+            try {
+              const parsed = JSON.parse(e.data);
+              onEvent({ type, data: parsed.data ?? parsed });
+            } catch {
+              onEvent({ type });
+            }
+          });
+        });
+
+        eventSource.onerror = () => {
+          if (isDisposed) return;
+          console.warn("⚠️ [SSE] Bağlantı kesildi, yeniden bağlanılıyor...");
+          eventSource?.close();
+          retryTimeout = window.setTimeout(connect, 3000);
+        };
+      } catch (err) {
+        if (!isDisposed) {
+          retryTimeout = window.setTimeout(connect, 5000);
+        }
+      }
+    }
+
+    connect();
+
+    return () => {
+      isDisposed = true;
+      if (retryTimeout) window.clearTimeout(retryTimeout);
+      eventSource?.close();
+    };
+  }, [onEvent]);
+}
 type OpenCheck = { id: string; status: string; paymentStatus?: string; tableId?: string | null; version: number; totalMinor: number; paidMinor?: number; remainingMinor?: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[]; payments: Array<{ id: string; amountMinor?: number; status?: string }>; orders: Array<{ id: string; version?: number; remainingMinor?: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; note?: string | null }> }> };
 type KitchenStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
 type KitchenStatusItem = { id: string; orderId: string; productName: string; quantity: number; note?: string | null; status: KitchenStatus; statusChangedAt?: string | null };
@@ -793,23 +858,31 @@ export function CashierApp() {
     }
   }, [selectedRegisterId]);
 
-  // Otomatik canlı senkronizasyon (F5 gerektirmeyen, kendini onaran döngü)
+  // Canlı senkronizasyon fonksiyonu
+  const triggerSync = useCallback(() => {
+    void reload();
+    void loadCash();
+    if (cashierMode === "quick" && quickStep === "menu") {
+      void loadUnfinishedChecks();
+    }
+  }, [reload, loadCash, cashierMode, quickStep]);
+
+  // 1. SSE ile anlık LAN push bildirimi (Masa açılınca, sipariş girilince, hesap istenince anında güncellenir)
+  useRestaurantRealtime(
+    useCallback(
+      (evt) => {
+        console.log("⚡ [CashierApp] Anlık LAN bildirimi alındı:", evt.type);
+        triggerSync();
+      },
+      [triggerSync]
+    )
+  );
+
+  // 2. Yedek periyodik kontrol ve ekran odaklanma tetikleyicisi
   useEffect(() => {
-    const triggerSync = () => {
-      void reload();
-      void loadCash();
-      if (cashierMode === "quick" && quickStep === "menu") {
-        void loadUnfinishedChecks();
-      }
-    };
-
-    // İlk açılışta anında çek
     triggerSync();
+    const intervalTimer = window.setInterval(triggerSync, 15000);
 
-    // Sürekli canlı kalma (4 saniyede bir)
-    const intervalTimer = window.setInterval(triggerSync, 4000);
-
-    // Ekran uyandığında, sekmeye dönüldüğünde veya Wi-Fi geri geldiğinde ANINDA yenile
     const handleWakeOrFocus = () => {
       triggerSync();
     };
@@ -824,7 +897,7 @@ export function CashierApp() {
       window.removeEventListener("focus", handleWakeOrFocus);
       window.removeEventListener("online", handleWakeOrFocus);
     };
-  }, [reload, loadCash, cashierMode, quickStep, cashRefresh]);
+  }, [triggerSync, cashRefresh]);
 
   async function submitCashShift(event: React.FormEvent) {
     event.preventDefault();
@@ -2953,11 +3026,25 @@ export function WaiterApp() {
     finally { if (serial === reloadSerial.current) setLoading(false); }
   }, [tableAction, tableId]);
   useEffect(() => { void reload(); }, [reload, refreshTick, tableId]);
+
+  // 1. SSE ile anlık masa ve adisyon durumu senkronizasyonu
+  useRestaurantRealtime(
+    useCallback(
+      (evt) => {
+        if (tableStatusSaving || saving || operationSaving) return;
+        console.log("⚡ [WaiterApp] Anlık masa/adisyon güncellemesi alındı:", evt.type);
+        void reload();
+      },
+      [tableStatusSaving, saving, operationSaving, reload]
+    )
+  );
+
+  // 2. Yedek periyodik kontrol
   useEffect(() => {
     if (tableStatusSaving || saving || operationSaving) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void reload();
-    }, 5000);
+    }, 20000);
     return () => window.clearInterval(timer);
   }, [tableStatusSaving, saving, operationSaving, reload]);
 
@@ -3974,7 +4061,31 @@ export function KitchenApp() {
       setError(""); setLastRefresh(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Mutfak kuyruğu alınamadı."); }
   }, []);
-  useEffect(() => { void load(); const timer = window.setInterval(() => { void load(); }, 3000); return () => window.clearInterval(timer); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  // 1. SSE ile anlık sipariş ve mutfak akışı
+  useRestaurantRealtime(
+    useCallback(
+      (evt) => {
+        if (
+          evt.type === "order.created" ||
+          evt.type === "kitchen.updated" ||
+          evt.type === "check.cancelled" ||
+          evt.type === "check.closed"
+        ) {
+          console.log("⚡ [KitchenApp] Anlık mutfak siparişi tetiklendi:", evt.type);
+          void load();
+        }
+      },
+      [load]
+    )
+  );
+
+  // 2. Yedek periyodik kontrol
+  useEffect(() => {
+    const timer = window.setInterval(() => { void load(); }, 15000);
+    return () => window.clearInterval(timer);
+  }, [load]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer); }, []);
 
   type KitchenGroup = {

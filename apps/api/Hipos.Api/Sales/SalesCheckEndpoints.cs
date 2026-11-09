@@ -4,6 +4,7 @@ using System.Text;
 using Hipos.Api.Auth;
 using Hipos.Api.Cari;
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Hipos.Api.Service;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -63,7 +64,7 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("", async (string firmId, string branchId, CreateSalesCheck command,
-            HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate) =>
+            HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -89,13 +90,20 @@ public static class SalesCheckEndpoints
             if (persisted is null) return Fail(context, "CHECK_NOT_FOUND", 404, "Adisyon bulunamadı.");
             if (persisted.CustomerId != check.CustomerId || persisted.TableId != check.TableId || persisted.WaiterId != check.WaiterId)
                 return Fail(context, "CHECK_REQUEST_CONFLICT", 409, "requestId farklı adisyon bilgileriyle kullanılmış.");
+
+            eventHub.Publish("check.created", firmId, branchId, new { checkId = check.Id, tableId = check.TableId });
+            if (check.TableId is not null)
+            {
+                eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "occupied" });
+            }
+
             return result.Created
                 ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{command.RequestId}", persisted)
                 : Results.Ok(persisted);
         });
 
         group.MapPost("/{checkId:guid}/orders", async (string firmId, string branchId, Guid checkId,
-            CreatePosOrder command, HttpContext context, SalesDbContext db, SalesOrders sales) =>
+            CreatePosOrder command, HttpContext context, SalesDbContext db, SalesOrders sales, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -103,6 +111,7 @@ public static class SalesCheckEndpoints
                 DemoAccess.Resolve(context)!.Name, context.RequestAborted, checkId, null, "sales.checks", "test_pos");
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
+            eventHub.Publish("check.updated", firmId, branchId, new { checkId, orderId = command.OrderId });
             return result.Created ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}", detail)
                 : Results.Ok(detail);
         });
@@ -475,7 +484,8 @@ public static class SalesCheckEndpoints
 
         // Ödenecek tutarı sıfır olan (tamamı ikram/iptal/indirim veya boş) adisyonu tahsilat olmadan kapatır.
         group.MapPost("/{checkId:guid}/close-zero-balance", async (string firmId, string branchId, Guid checkId,
-            CloseZeroBalanceCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement) =>
+            CloseZeroBalanceCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement,
+            IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -517,13 +527,20 @@ public static class SalesCheckEndpoints
             if (check.TableId is not null)
                 await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+
+            eventHub.Publish("check.closed", firmId, branchId, new { checkId, tableId = check.TableId });
+            if (check.TableId is not null)
+            {
+                eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
+            }
+
             return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
 
         // Açık adisyonu (ödeme alınmamışsa) gerekçeli ve opsiyonel yönetici onayıyla iptal eder.
         group.MapPost("/{checkId:guid}/cancel", async (string firmId, string branchId, Guid checkId,
             CancelSalesCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement,
-            [FromServices] AuthDbContext? authDb) =>
+            [FromServices] AuthDbContext? authDb, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -598,6 +615,12 @@ public static class SalesCheckEndpoints
             if (check.TableId is not null)
                 await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+
+            eventHub.Publish("check.cancelled", firmId, branchId, new { checkId, tableId = check.TableId });
+            if (check.TableId is not null)
+            {
+                eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
+            }
 
             return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });

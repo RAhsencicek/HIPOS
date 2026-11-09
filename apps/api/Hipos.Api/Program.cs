@@ -11,6 +11,7 @@ using Hipos.Api.Kitchen;
 using Hipos.Api.Auth;
 using Hipos.Api.Overview;
 using Hipos.Api.Reports;
+using Hipos.Api.Realtime;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -21,6 +22,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
+builder.Services.AddSingleton<IRestaurantEventHub, RestaurantEventHub>();
 
 // TODO: X-Demo-Actor geçici kimlik çözümüdür — ileride gerçek auth (JWT vb.) eklenecek.
 // Üretim kilidi kaldırıldı: artık Production ortamında da çalışır.
@@ -168,6 +170,7 @@ if (storage == "postgres") app.MapPrintingEndpoints();
 if (storage == "postgres") app.MapAuthEndpoints(authReady);
 if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
 if (storage == "postgres") app.MapReportsEndpoints(salesReady);
+if (storage == "postgres") app.MapRealtimeEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

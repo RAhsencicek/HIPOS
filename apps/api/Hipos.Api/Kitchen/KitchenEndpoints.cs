@@ -1,4 +1,5 @@
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
@@ -83,7 +84,7 @@ public static class KitchenEndpoints
         });
 
         group.MapPost("/{taskId}/status", async (string firmId, string branchId, string taskId,
-            ChangeKitchenTaskStatus command, HttpContext context, KitchenDbContext db) =>
+            ChangeKitchenTaskStatus command, HttpContext context, KitchenDbContext db, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -119,7 +120,10 @@ public static class KitchenEndpoints
                 Actor = actor.Name, Action = "status_changed", Status = task.Status,
                 Version = task.Version, OccurredAt = DateTimeOffset.UtcNow,
             });
-            try { await db.SaveChangesAsync(context.RequestAborted); }
+            try {
+                await db.SaveChangesAsync(context.RequestAborted);
+                eventHub.Publish("kitchen.updated", firmId, branchId, new { taskId = task.Id, status = task.Status });
+            }
             catch (DbUpdateConcurrencyException)
             { return Fail(context, "VERSION_CONFLICT", 409, "Görev başka bir cihazda değişti; listeyi yenileyin."); }
             catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })

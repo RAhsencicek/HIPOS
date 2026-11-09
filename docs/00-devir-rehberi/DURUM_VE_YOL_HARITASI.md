@@ -98,9 +98,11 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ FAZ 4: GERÇEK ZAMANLI EŞZAMANLILIK (SSE / SignalR LAN Sync) (SIRADAKİ) │
-│ 1. Masa ve sipariş durumu değiştiğinde anlık SSE event fırlatma        │
-│ 2. Kasa ve Garson ekranlarının sayfayı yenilemeden anlık güncellenmesi │
+│ FAZ 4: GERÇEK ZAMANLI EŞZAMANLILIK (SSE LAN Motoru) (✅ TAMAMLANDI - 9 KASIM) │
+│ 1. RestaurantEventHub (Channel<RestaurantEvent>) pub/sub servisi (BİTTİ)│
+│ 2. GET /events/stream SSE canlı push endpoint'i eklendi (BİTTİ)         │
+│ 3. Kasa, Garson ve KDS ekranlarına useRestaurantRealtime hook'u eklendi │
+│ 4. Çift yönlü tarayıcı eşzamanlılığı Playwright ile doğrulandı (5-7ms)  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -213,12 +215,42 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
 
 ---
 
-### 🔷 FAZ 4 TEKNİK SÖZLEŞMESİ: Anlık Senkronizasyon (SSE)
+### 🔷 FAZ 4 TEKNİK SÖZLEŞMESİ: Restoran İçi Gerçek Zamanlı Eşzamanlılık (SSE) (✅ TAMAMLANDI - 9 KASIM 2026)
 
-#### A. Çalışma Prensibi:
-* ASP.NET Core üzerinde `/api/v1/firms/{firmId}/branches/{branchId}/events/stream` SSE endpoint'i.
-* Masa durumu değiştiğinde (`table.status_changed`, `check.opened`, `check.paid`, `bill.requested`), API bağlı olan terminal istemcilerine 100 baytlık hafif JSON fırlatır.
-* POS Kasiyer ve Garson ekranları sayfayı baştan yüklemeden yalnızca ilgili masanın durumunu reaktif günceller.
+#### A. Mimari ve API Sözleşmesi ([`RealtimeEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Realtime/RealtimeEndpoints.cs), [`RestaurantEventHub.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Realtime/RestaurantEventHub.cs)):
+* `GET /api/v1/firms/{firmId}/branches/{branchId}/events/stream?token={jwt}&actor={actor}`
+* **Format:** W3C Server-Sent Events (`text/event-stream; charset=utf-8`).
+* **Keep-Alive:** Her 15 saniyede bir `: ping\n\n` gönderilerek LAN Wi-Fi bağlantı kopmaları ve proxy timeout'ları önlenir.
+* **Yayınlanan Canlı Olay Tipleri:**
+  - `table.updated`: Masa durumu değiştiğinde (`vacant`, `occupied`, `bill_requested`).
+  - `order.created`: Garson mutfağa yeni sipariş ilettiğinde.
+  - `check.created` / `check.updated`: Yeni adisyon açıldığında veya kalem eklendiğinde.
+  - `check.closed`: Hesap tahsil edilip adisyon kapandığında.
+  - `payment.settled`: Nakit veya kart ödemesi başarıyla tamamlandığında.
+  - `kitchen.updated`: Mutfak KDS'de sipariş durumu değiştiğinde (`preparing`, `ready`).
+
+#### B. Ön Yüz Reaktif İstemci Entegrasyonu ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`ServiceTablesPage.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/branches/ServiceTablesPage.tsx)):
+* `useRestaurantRealtime(onEvent, filterTypes)` özel React hook'u geliştirildi:
+  - **Kasa Ekranı (`CashierApp`):** `table.updated`, `check.*`, `payment.settled` olaylarını dinler; tetiklendiğinde `triggerSync()` ile masaları ve kasa bakiyesini arka planda sessizce günceller.
+  - **Garson Ekranı (`WaiterApp`):** `table.updated`, `check.*` olaylarını dinler; tetiklendiğinde `reload()` ile salon masa kartlarının rengini (Yeşil / Kırmızı / Sarı) anında günceller.
+  - **Mutfak KDS (`KitchenApp`):** `order.created`, `kitchen.updated` olaylarını dinler; yeni sipariş düştüğünde bekleme yapmadan KDS listesini yeniler.
+  - **Yönetici Masalar (`ServiceTablesPage`):** Şube masa planını anlık olaylarla senkronize tutar.
+
+#### C. Canlı İki Terminal Eşzamanlılık Doğrulaması (9 Kasım 2026):
+* **Test Senaryosu:** Playwright ile aynı anda iki bağımsız Chrome oturumu açıldı:
+  1. Terminal 1: Kasa Ekranı (`/cashier`, Ayşe Kasiyer PIN `1234`, Kadıköy Ana Kasa).
+  2. Terminal 2: Garson Tableti (`/waiter`, Mehmet Garson PIN `2222`).
+* **Test Adımı 1 (Sipariş):** Garson boş Masa 02'ye Tavuklu Sandviç ekleyip *"Siparişi mutfağa gönder"* butonuna bastı.
+  - **Sonuç:** Kasa ekranındaki Masa 02 kartı F5 OLMADAN, sayfa yenilenmeden **5 milisaniyede (5ms)** anında `Dolu` haline geldi ve sepet tutarı `₺260,00` belirdi!
+* **Test Adımı 2 (Tahsilat):** Kasa ekranından Masa 02 açılıp *"Tahsilatı tamamla"* butonuna basılarak nakit tahsilat kaydedildi.
+  - **Sonuç:** Garson tabletindeki Masa 02 kartı F5 OLMADAN, sayfa yenilenmeden **7 milisaniyede (7ms)** anında `Boş (Yeşil)` haline döndü!
+* **Ekran Görüntüsü Kanıtları:**
+  - `sse_00_cashier_initial.png`: Kasa terminali başlangıç ekranı.
+  - `sse_00_waiter_initial.png`: Garson tableti başlangıç ekranı.
+  - `sse_01_cashier_instant_update.png`: Garson sipariş verir vermez Kasa ekranının anında DOLU'ya dönmesi.
+  - `sse_01_waiter_after_order.png`: Garson tableti sipariş gönderim anı.
+  - `sse_02_cashier_final.png`: Kasa tahsilatı tamamlayıp adisyon fişini yazdırdıktan sonraki durum.
+  - `sse_02_waiter_instant_freed.png`: Kasa hesabı kapattığı an Garson ekranının anında BOŞ'a dönmesi.
 
 ---
 

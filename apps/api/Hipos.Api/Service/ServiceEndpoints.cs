@@ -1,5 +1,6 @@
 using Hipos.Api.Auth;
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -101,7 +102,7 @@ public static class ServiceEndpoints
         });
 
         group.MapPost("/tables/{tableId}/request-bill", async (string firmId, string branchId, string tableId,
-            UpdateServiceTableState command, HttpContext context, ServiceDbContext db) =>
+            UpdateServiceTableState command, HttpContext context, ServiceDbContext db, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
             if (denied is not null) return denied;
@@ -118,11 +119,12 @@ public static class ServiceEndpoints
             table.Status = "bill_requested"; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
             AddAudit(db, firmId, branchId, table.Id, "bill_requested", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
             await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = table.Status });
             return Results.Ok(new { tableId, status = table.Status, version = table.Version });
         });
 
         group.MapPost("/tables/{tableId}/cancel-bill-request", async (string firmId, string branchId, string tableId,
-            UpdateServiceTableState command, HttpContext context, ServiceDbContext db) =>
+            UpdateServiceTableState command, HttpContext context, ServiceDbContext db, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
             if (denied is not null) return denied;
@@ -139,6 +141,7 @@ public static class ServiceEndpoints
             table.Status = "occupied"; table.Version++; table.UpdatedAt = DateTimeOffset.UtcNow;
             AddAudit(db, firmId, branchId, table.Id, "bill_request_cancelled", DemoAccess.Resolve(context)!.Name, table.UpdatedAt);
             await db.SaveChangesAsync(context.RequestAborted); await transaction.CommitAsync(context.RequestAborted);
+            eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = table.Status });
             return Results.Ok(new { tableId, status = table.Status, version = table.Version });
         });
 
@@ -522,7 +525,7 @@ public static class ServiceEndpoints
 
         group.MapPost("/tables/{tableId}/orders", async (string firmId, string branchId, string tableId,
             CreateWaiterOrder command, HttpContext context, ServiceDbContext db, SalesDbContext salesDb,
-            SalesOrders salesOrders) =>
+            SalesOrders salesOrders, IRestaurantEventHub eventHub) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
             if (denied is not null) return denied;
@@ -564,6 +567,10 @@ public static class ServiceEndpoints
                 checkId: checkId, checkToCreate: checkToCreate,
                 featureKey: "sales.checks", source: "waiter_web");
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
+
+            eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = "occupied" });
+            eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, tableId });
+
             return result.Created
                 ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/orders/{command.OrderId}",
                     new { order = result.Order, table = table.Name, waiter = waiter.Name })

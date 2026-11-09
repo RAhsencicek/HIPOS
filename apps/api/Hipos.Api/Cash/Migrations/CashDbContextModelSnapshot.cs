@@ -381,6 +381,10 @@ namespace Hipos.Api.Cash.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("difference_minor");
 
+                    b.Property<long?>("DroppedRevenueMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("dropped_revenue_minor");
+
                     b.Property<long?>("ExpectedCashMinor")
                         .HasColumnType("bigint")
                         .HasColumnName("expected_cash_minor");
@@ -413,6 +417,10 @@ namespace Hipos.Api.Cash.Migrations
                     b.Property<Guid>("RegisterId")
                         .HasColumnType("uuid")
                         .HasColumnName("register_id");
+
+                    b.Property<long?>("RetainedFloatMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("retained_float_minor");
 
                     b.Property<string>("Status")
                         .IsRequired()

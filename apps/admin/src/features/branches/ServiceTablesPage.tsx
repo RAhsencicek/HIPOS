@@ -82,6 +82,47 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
     return () => { requestSerial.current++; };
   }, [reload]);
 
+  // SSE Canlı Masa Eşzamanlılığı
+  useEffect(() => {
+    const branchApiId = ctx.selectedBranch?.apiId;
+    if (source !== "http" || !branchApiId) return;
+    const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
+    const token = localStorage.getItem("hipos_token");
+    const sseUrl = `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchApiId)}/events/stream?actor=${actor}${
+      token ? `&token=${encodeURIComponent(token)}` : ""
+    }`;
+    let eventSource: EventSource | null = null;
+    let timer: number | null = null;
+    let disposed = false;
+
+    function connect() {
+      if (disposed) return;
+      try {
+        eventSource = new EventSource(sseUrl);
+        const handleEvent = () => {
+          void reload();
+        };
+        eventSource.addEventListener("table.updated", handleEvent);
+        eventSource.addEventListener("check.created", handleEvent);
+        eventSource.addEventListener("check.closed", handleEvent);
+        eventSource.addEventListener("check.cancelled", handleEvent);
+        eventSource.onerror = () => {
+          if (disposed) return;
+          eventSource?.close();
+          timer = window.setTimeout(connect, 4000);
+        };
+      } catch {
+        if (!disposed) timer = window.setTimeout(connect, 5000);
+      }
+    }
+    connect();
+    return () => {
+      disposed = true;
+      if (timer) window.clearTimeout(timer);
+      eventSource?.close();
+    };
+  }, [source, scope, actor, reload]);
+
   const selected = data?.items.find((table) => table.id === selectedId) ?? null;
   const activeTables = data?.items.filter((table) => table.isActive) ?? [];
   const floors = Array.from(new Set([

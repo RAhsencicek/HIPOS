@@ -1991,27 +1991,44 @@ button, select { font: inherit; }
   .waiter-product-modal { width: min(100%, 560px); max-height: calc(100dvh - 24px); overflow-x: hidden; }
 }
 
+/* Container width consistency for cashier */
+.ops-shell.cashier-shell {
+  width: min(100% - 24px, 1560px);
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 10px 0 32px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .ops-shell.cashier-shell {
+    width: calc(100% - 16px);
+    padding: 6px 0 24px;
+  }
+}
+
 /* ========================================================
-   Clean, Touch-Friendly Cashier Header & Table Toolbar
+   Clean, Responsive Cashier Header & Table Toolbar
    ======================================================== */
 .cashier-header-clean {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  gap: 12px !important;
+  gap: 10px 14px !important;
   background: #ffffff;
-  border-bottom: 1px solid #e2e8f0 !important;
+  border: 1px solid #e2e8f0 !important;
   padding: 8px 14px !important;
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   margin-bottom: 10px !important;
-  flex-wrap: nowrap !important;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .cashier-header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -2021,20 +2038,20 @@ button, select { font: inherit; }
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  padding: 3px 8px;
+  padding: 3px 7px;
   border-radius: 6px;
-  margin-left: 6px;
+  margin-left: 4px;
 }
 
 .cashier-station-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: #f8fafc;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  padding: 5px 11px;
-  font-size: 13px;
+  padding: 4px 9px;
+  font-size: 12.5px;
   color: #0f172a;
 }
 
@@ -2042,19 +2059,23 @@ button, select { font: inherit; }
   font-weight: 700;
   color: #1e293b;
   white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .station-change-btn {
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 5px;
-  padding: 2px 7px;
+  padding: 2px 6px;
   font-size: 11px;
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  margin-left: 4px;
+  margin-left: 2px;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .station-change-btn:hover {
@@ -2063,11 +2084,12 @@ button, select { font: inherit; }
   border-color: #94a3b8;
 }
 
-/* Orta Mod Seçici */
+/* Orta Mod Seçici (Masalar & Salon / Hızlı Satış) */
 .cashier-header-center {
   display: flex;
   justify-content: center;
-  flex: 1 1 auto;
+  align-items: center;
+  flex: 0 1 auto;
 }
 
 .cashier-segmented-nav {
@@ -2077,15 +2099,17 @@ button, select { font: inherit; }
   border-radius: 12px;
   border: 1px solid #e2e8f0;
   gap: 6px;
+  max-width: 100%;
 }
 
 .cashier-seg-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 18px;
-  border-radius: 9px;
-  font-size: 13.5px;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 700;
   border: none;
   cursor: pointer;
@@ -2112,12 +2136,19 @@ button, select { font: inherit; }
   box-shadow: 0 2px 6px rgba(22, 163, 74, 0.28);
 }
 
-/* Sağ Kontroller */
+/* Sağ Kontroller & Eylemler */
 .cashier-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.cashier-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .cashier-operator-pill {
@@ -2128,13 +2159,16 @@ button, select { font: inherit; }
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 4px 6px 4px 10px;
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .cashier-operator-pill .operator-name {
   color: #1d4ed8;
   font-weight: 700;
   white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .operator-lock-btn {
@@ -2144,12 +2178,13 @@ button, select { font: inherit; }
   background: #f1f5f9;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   font-size: 11px;
   font-weight: 700;
   color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .operator-lock-btn:hover {
@@ -2161,7 +2196,7 @@ button, select { font: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 11px;
+  padding: 5px 10px;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
@@ -2210,6 +2245,7 @@ button, select { font: inherit; }
   background: #f1f5f9;
   border-color: #cbd5e1;
   color: #0f172a;
+  font-weight: 800;
 }
 
 .cashier-conn-dot {
@@ -2218,7 +2254,7 @@ button, select { font: inherit; }
   gap: 5px;
   font-size: 11.5px;
   font-weight: 700;
-  padding: 5px 8px;
+  padding: 4px 7px;
   border-radius: 6px;
   white-space: nowrap;
 }
@@ -2259,85 +2295,36 @@ button, select { font: inherit; }
   background: #dc2626;
 }
 
-/* Masa Üstü Araç Çubuğu (Clean Table Sub-Bar) */
+/* Masa Üstü Araç Çubuğu (Clean Table Bar - No Redundant Stats) */
 .cashier-table-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 6px 0 12px;
-  padding: 10px 16px;
+  margin: 4px 0 10px;
+  padding: 8px 14px;
   background: #ffffff;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.cashier-table-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  box-sizing: border-box;
 }
 
 .cashier-table-title {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: #0f172a;
-}
-
-.cashier-table-stats {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 700;
-}
-
-.cashier-stat-pill {
-  padding: 4px 10px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cashier-stat-pill.total {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.cashier-stat-pill.empty {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.cashier-stat-pill.occupied {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.cashier-stat-pill.bill-req {
-  background: #fef3c7;
-  color: #b45309;
-}
-
-.cashier-stat-pill.reserved {
-  background: #f3e8ff;
-  color: #7e22ce;
 }
 
 .cashier-refresh-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 5px;
+  padding: 5px 12px;
   background: #f8fafc;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 12.5px;
+  border-radius: 7px;
+  font-size: 12px;
   font-weight: 700;
   color: #475569;
   cursor: pointer;
@@ -2348,4 +2335,1007 @@ button, select { font: inherit; }
   background: #f1f5f9;
   border-color: #94a3b8;
   color: #0f172a;
+}
+
+/* Tabletler ve Orta Boy Kasa Ekranları (1280px altı) */
+@media (max-width: 1280px) {
+  .cashier-header-clean {
+    flex-wrap: wrap !important;
+    gap: 8px 12px !important;
+  }
+
+  .cashier-header-left {
+    order: 1;
+    flex: 0 0 auto;
+  }
+
+  .cashier-header-right {
+    order: 2;
+    margin-left: auto;
+    flex: 0 0 auto;
+  }
+
+  .cashier-header-center {
+    order: 3;
+    width: 100%;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid #f1f5f9;
+    display: flex;
+    justify-content: center;
+  }
+
+  .cashier-segmented-nav {
+    width: 100%;
+    max-width: 480px;
+    justify-content: center;
+    margin: 0 auto;
+  }
+
+  .cashier-seg-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Mobil Ekranlar (768px altı) */
+@media (max-width: 768px) {
+  .cashier-header-clean {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Satır 1: Sol Marka & İstasyon */
+  .cashier-header-left {
+    order: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .cashier-header-left .ops-brand img {
+    height: 24px;
+    width: auto;
+  }
+
+  .cashier-station-badge {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+
+  .cashier-station-badge .station-name {
+    max-width: 110px;
+  }
+
+  /* Satır 2: İşlem Butonları + Personel & Bağlantı */
+  .cashier-header-right {
+    order: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 6px;
+    margin-left: 0;
+  }
+
+  .cashier-header-actions {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .cashier-header-btn {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  .cashier-operator-pill {
+    padding: 3px 5px 3px 7px;
+    font-size: 11px;
+  }
+
+  .cashier-operator-pill .operator-name {
+    max-width: 85px;
+  }
+
+  /* Satır 3: Masalar & Hızlı Satış Sekmeleri (Tam Genişlik) */
+  .cashier-header-center {
+    order: 3;
+    width: 100%;
+    margin-top: 2px;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .cashier-segmented-nav {
+    width: 100%;
+    max-width: none;
+    gap: 4px;
+    padding: 3px;
+  }
+
+  .cashier-seg-btn {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 12px;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .cashier-table-toolbar {
+    padding: 6px 10px;
+    margin: 4px 0 8px;
+  }
+
+  .cashier-table-title {
+    font-size: 0.95rem;
+  }
+}
+
+
+/* ========================================================
+   HIZLI SATIŞ (GEL-AL) BÖLÜNMÜŞ EKRAN (%65 / %35)
+   ======================================================== */
+.cashier-quick-split-container {
+  display: grid;
+  grid-template-columns: minmax(0, 65%) minmax(0, calc(35% - 14px));
+  gap: 14px;
+  width: 100%;
+  align-items: start;
+  margin-top: 6px;
+}
+
+@media (max-width: 1100px) {
+  .cashier-quick-split-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sol Kolon: Menü & Sepet */
+.cashier-quick-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #dce5ef;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+}
+
+.quick-pending-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fffbeb;
+  border: 1.5px solid #fde68a;
+  color: #92400e;
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.quick-pending-banner-btn {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #b45309;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.quick-pending-banner-btn:hover {
+  background: #fde68a;
+}
+
+/* 2 Saniyelik Minik Mutfak Onay Bildirimi */
+.quick-order-sent-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ecfdf5;
+  border: 1.5px solid #6ee7b7;
+  color: #065f46;
+  padding: 10px 14px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.15);
+  animation: quickToastFade 2s ease-in-out forwards;
+}
+
+.quick-order-sent-toast .toast-icon {
+  font-size: 22px;
+}
+
+.quick-order-sent-toast .toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quick-order-sent-toast .toast-content strong {
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.quick-order-sent-toast .toast-content span {
+  font-size: 11.5px;
+  opacity: 0.9;
+}
+
+@keyframes quickToastFade {
+  0% { opacity: 0; transform: translateY(-6px); }
+  12% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+
+/* Menü Altı Canlı Sepet */
+.quick-cart-inline {
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.quick-cart-inline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1.5px solid #e2e8f0;
+  padding-bottom: 8px;
+}
+
+.quick-cart-inline-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.quick-cart-inline-header strong {
+  font-size: 15px;
+  font-weight: 850;
+  color: #15803d;
+}
+
+.quick-cart-inline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-cart-inline-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.quick-cart-inline-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.quick-cart-inline-info strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.quick-cart-inline-info small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.quick-cart-inline-info .item-price {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: #15803d;
+}
+
+.quick-cart-inline-qty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.quick-cart-inline-qty button {
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all 0.1s ease;
+}
+
+.quick-cart-inline-qty button:active {
+  background: #cbd5e1;
+  transform: scale(0.94);
+}
+
+.quick-cart-inline-qty b {
+  font-size: 14px;
+  font-weight: 800;
+  min-width: 18px;
+  text-align: center;
+}
+
+.quick-cart-inline-actions {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  border-top: 1.5px dashed #cbd5e1;
+  padding-top: 10px;
+  align-items: center;
+}
+
+.quick-cart-btn-clear {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1.5px solid #fca5a5;
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+
+.quick-cart-btn-clear:hover {
+  background: #fecaca;
+}
+
+.quick-cart-btn-park {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1.5px solid #f59e0b;
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+  touch-action: manipulation;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+
+.quick-cart-btn-park:hover {
+  background: #fde68a;
+}
+
+.quick-cart-btn-submit {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 2px 5px rgba(37, 99, 235, 0.25);
+  transition: all 0.12s ease;
+  text-align: center;
+}
+
+.quick-cart-btn-submit:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.quick-cart-btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Sağ Kolon: Adisyon ve Detaylı Tahsilat */
+.cashier-quick-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  position: sticky;
+  top: 10px;
+}
+
+.quick-checkout-card {
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quick-checkout-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  border-bottom: 1.5px solid #f1f5f9;
+  padding-bottom: 8px;
+}
+
+.quick-checkout-eyebrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.quick-checkout-title {
+  margin: 2px 0;
+  font-size: 16px;
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.quick-checkout-meta {
+  font-size: 11px;
+  color: #64748b;
+  display: block;
+}
+
+.quick-checkout-items {
+  max-height: 180px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-bottom: 1px dashed #e2e8f0;
+  padding-bottom: 8px;
+}
+
+.quick-checkout-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+
+.quick-checkout-item-row .item-qty {
+  font-weight: 800;
+  color: #2563eb;
+  min-width: 20px;
+}
+
+.quick-checkout-item-row .item-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.quick-checkout-item-row .item-details strong {
+  font-size: 12.5px;
+  color: #1e293b;
+}
+
+.quick-checkout-item-row .item-details small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.quick-checkout-item-row .item-options {
+  color: #94a3b8;
+  font-size: 10.5px;
+}
+
+.quick-checkout-item-row .item-total {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.quick-checkout-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.quick-action-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 6px 4px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #334155;
+  cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  transition: all 0.1s ease;
+}
+
+.quick-action-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.quick-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quick-action-btn.park {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.quick-action-btn.cancel {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.quick-checkout-balance-box {
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quick-checkout-due-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.quick-checkout-due-row .due-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #475569;
+  display: block;
+}
+
+.quick-checkout-due-row .paid-sublabel {
+  font-size: 11px;
+  color: #16a34a;
+  font-weight: 700;
+  display: block;
+}
+
+.quick-checkout-due-row .due-value {
+  font-size: 22px;
+  font-weight: 900;
+  color: #1e40af;
+}
+
+.quick-checkout-discount-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: #b91c1c;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+/* Ödeme Yöntemleri */
+.quick-checkout-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.quick-methods-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.quick-method-btn {
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 4px;
+  font-size: 11.5px;
+  font-weight: 750;
+  color: #334155;
+  cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  transition: all 0.12s ease;
+}
+
+.quick-method-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.quick-method-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.quick-submethods-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 4px;
+  background: #eff6ff;
+  border-radius: 7px;
+}
+
+.quick-submethod-btn {
+  background: #ffffff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.quick-submethod-btn.active {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+
+.quick-customer-badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.quick-customer-badge button {
+  background: #ffffff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Tuş Takımı & Tutar */
+.quick-checkout-keypad-box {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-amounts-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  gap: 4px;
+}
+
+.quick-amounts-grid button {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 2px;
+  font-size: 11px;
+  font-weight: 750;
+  color: #1e293b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quick-amounts-grid button:first-child {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
+  font-weight: 800;
+}
+
+.quick-amounts-grid .clear-btn {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.quick-input-display {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #0f172a;
+  color: #ffffff;
+  border-radius: 7px;
+  padding: 6px 10px;
+}
+
+.quick-input-display span {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.quick-input-display strong {
+  font-size: 18px;
+  font-weight: 900;
+  color: #38bdf8;
+}
+
+.quick-change-display {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 7px;
+  padding: 6px 10px;
+  color: #166534;
+}
+
+.quick-change-display span {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.quick-change-display strong {
+  font-size: 16px;
+  font-weight: 900;
+  color: #15803d;
+}
+
+.quick-numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.quick-numpad-grid button {
+  min-height: 38px;
+  font-size: 18px;
+  font-weight: 800;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all 0.08s ease;
+}
+
+.quick-numpad-grid button:active {
+  background: #e2e8f0;
+  transform: scale(0.96);
+}
+
+.quick-submit-payment-btn {
+  background: #16a34a;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 850;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3);
+  touch-action: manipulation;
+  transition: all 0.12s ease;
+}
+
+.quick-submit-payment-btn:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.quick-submit-payment-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.quick-checkout-footer {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 6px;
+}
+
+.quick-print-receipt-btn {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+  transition: all 0.12s ease;
+}
+
+.quick-print-receipt-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+/* Boş Durum & Bekleyen Satışlar Kartı */
+.quick-empty-checkout-card {
+  background: #ffffff;
+  border: 2px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 20px 16px;
+  text-align: center;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-empty-icon {
+  font-size: 32px;
+  margin: 0 auto;
+}
+
+.quick-empty-checkout-card h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.quick-empty-checkout-card p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.quick-unfinished-list {
+  margin-top: 12px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-unfinished-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
+}
+
+.quick-unfinished-header h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #92400e;
+}
+
+.quick-unfinished-header button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.quick-unfinished-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.quick-unfinished-card {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.unfinished-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.unfinished-info strong {
+  font-size: 12.5px;
+  color: #1e293b;
+}
+
+.unfinished-info small {
+  font-size: 11px;
+  color: #4b5563;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unfinished-time {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.unfinished-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.unfinished-price {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #1e40af;
+}
+
+.unfinished-resume-btn {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 750;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.unfinished-resume-btn:hover {
+  background: #1d4ed8;
 }

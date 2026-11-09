@@ -131,7 +131,9 @@ public static class EscPosBuilder
         long discountMinor,
         long netTotalMinor,
         string paymentMethod = "NAKIT",
-        bool openCashDrawer = false)
+        bool openCashDrawer = false,
+        long paidMinor = 0,
+        long remainingMinor = 0)
     {
         var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -193,9 +195,30 @@ public static class EscPosBuilder
         SetDoubleSize(bw, false);
         SetBold(bw, false);
 
-        WriteText(bw, "================================================\n");
-        SetAlignment(bw, 1); // Center
-        WriteText(bw, $"ODEME TURU: {paymentMethod.ToUpperInvariant()}\n");
+        if (paidMinor > 0 && remainingMinor > 0)
+        {
+            WriteText(bw, "------------------------------------------------\n");
+            WriteText(bw, $"TAHSIL EDILEN : {FormatMoney(paidMinor)}\n");
+            SetBold(bw, true);
+            WriteText(bw, $"KALAN BAKIYE  : {FormatMoney(remainingMinor)}\n");
+            SetBold(bw, false);
+            WriteText(bw, "================================================\n");
+            SetAlignment(bw, 1); // Center
+            WriteText(bw, $"ODEME: {paymentMethod.ToUpperInvariant()} (ARA TAHSILAT)\n");
+            WriteText(bw, "** KISMI ODEME ARA BILGI FISIDIR **\n");
+        }
+        else
+        {
+            if (paidMinor > 0)
+            {
+                WriteText(bw, $"ODENEN TUTAR : {FormatMoney(paidMinor)}\n");
+                WriteText(bw, "KALAN BAKIYE : 0,00 TL\n");
+            }
+            WriteText(bw, "================================================\n");
+            SetAlignment(bw, 1); // Center
+            WriteText(bw, $"ODEME TURU: {paymentMethod.ToUpperInvariant()}\n");
+            WriteText(bw, "** HESAP TAMAMEN KAPATILMISTIR **\n");
+        }
         WriteText(bw, "------------------------------------------------\n");
         WriteText(bw, "AFIYET OLSUN\n");
         WriteText(bw, "MALI DEGERI YOKTUR - BILGI FISIDIR\n");

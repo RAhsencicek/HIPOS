@@ -54,11 +54,20 @@ public static class DemoAccess
         };
     public static DemoActor? Resolve(HttpContext context)
     {
-        // 1. Önce gelen istekte gerçek JWT Bearer Token var mı kontrol et
+        // 1. Önce gelen istekte gerçek JWT Bearer Token var mı kontrol et (Header veya Query String)
         var authHeader = context.Request.Headers.Authorization.ToString();
+        string? tokenString = null;
         if (!string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            var tokenString = authHeader["Bearer ".Length..].Trim();
+            tokenString = authHeader["Bearer ".Length..].Trim();
+        }
+        else if (context.Request.Query.TryGetValue("token", out var queryToken) && !string.IsNullOrWhiteSpace(queryToken))
+        {
+            tokenString = queryToken.ToString().Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(tokenString))
+        {
             try
             {
                 var handler = new JwtSecurityTokenHandler();
@@ -84,8 +93,13 @@ public static class DemoAccess
             }
         }
 
-        // 2. Geriye dönük uyumluluk: Eğer token yoksa sahte X-Demo-Actor başlığına bak
-        return Actors.TryGetValue(context.Request.Headers["X-Demo-Actor"].ToString(), out var actor) ? actor : null;
+        // 2. Geriye dönük uyumluluk: Eğer token yoksa sahte X-Demo-Actor başlığına veya query param'a bak
+        var actorKey = context.Request.Headers["X-Demo-Actor"].ToString();
+        if (string.IsNullOrWhiteSpace(actorKey))
+        {
+            actorKey = context.Request.Query["actor"].ToString();
+        }
+        return Actors.TryGetValue(actorKey, out var actor) ? actor : null;
     }
     private static string Scope(string firmId, string branchId) => $"{firmId}:{branchId}";
 }
