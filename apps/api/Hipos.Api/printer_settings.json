@@ -4,14 +4,14 @@
     "Type": "Network",
     "IpAddress": "192.168.1.200",
     "Port": 9100,
-    "FallbackToUsb": false
+    "FallbackToUsb": true
   },
   "KitchenPrinter": {
     "Name": "Mutfak Bilet Yazıcısı",
     "Type": "Network",
     "IpAddress": "192.168.1.201",
     "Port": 9100,
-    "FallbackToUsb": false
+    "FallbackToUsb": true
   },
   "AutoPrintKitchenOnOrder": true
 }

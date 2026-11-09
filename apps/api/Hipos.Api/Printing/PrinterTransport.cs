@@ -24,7 +24,7 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
             }
             catch (OperationCanceledException)
             {
-                var msg = $"Ağ yazıcısına ({config.IpAddress}:{config.Port}) zaman aşımı (2 sn) nedeniyle ulaşılamadı. Cihaz kapalı veya IP adresi hatalı olabilir.";
+                var msg = $"Ağ yazıcısına ({config.IpAddress}:{config.Port}) zaman aşımı (6 sn) nedeniyle ulaşılamadı. Cihaz kapalı veya IP adresi hatalı olabilir.";
                 logger.LogWarning("{Message}", msg);
                 if (!config.FallbackToUsb)
                 {
@@ -72,7 +72,7 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
     {
         using var client = new TcpClient();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(2)); // Quick timeout so it doesn't freeze POS
+        cts.CancelAfter(TimeSpan.FromSeconds(6)); // Up to 6s for network printer / Wi-Fi wake-up
 
         await client.ConnectAsync(ip, port, cts.Token);
         using var stream = client.GetStream();

@@ -3382,18 +3382,22 @@ export function WaiterApp() {
           options: null,
         };
       });
-      const result = await request<{ order: { id: string }; table: string; waiter: string }>(
+      const result = await request<{ order: { id: string }; table: string; waiter: string; autoPrinted?: boolean }>(
         `${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/orders`, "pos-single",
         { orderId, waiterId: waiter.id, items: itemsPayload });
       
       let kitchenPrintNotice = "";
-      try {
-        const printRes = await request<{ success: boolean; transportUsed: string }>(
-          `/api/v1/firms/${firmId}/branches/${branchId}/sales/orders/${result.order.id}/print-kitchen`, "pos-single", {}
-        );
-        kitchenPrintNotice = ` 🖨️ Mutfak fişi yazdırıldı (${printRes.transportUsed})!`;
-      } catch {
-        kitchenPrintNotice = " (Mutfak yazıcısına ulaşılamadı)";
+      if (result.autoPrinted) {
+        kitchenPrintNotice = " 🖨️ Mutfak fişi yazıcıya aktarıldı!";
+      } else {
+        try {
+          const printRes = await request<{ success: boolean; transportUsed: string }>(
+            `/api/v1/firms/${firmId}/branches/${branchId}/sales/orders/${result.order.id}/print-kitchen`, "pos-single", {}
+          );
+          kitchenPrintNotice = ` 🖨️ Mutfak fişi yazdırıldı (${printRes.transportUsed})!`;
+        } catch {
+          kitchenPrintNotice = " (Mutfak yazıcısına ulaşılamadı)";
+        }
       }
 
       setCart([]); setRetryOrderId(null); setLastOrderId(result.order.id);
@@ -4039,6 +4043,34 @@ export function WaiterApp() {
   </main>;
 }
 
+function playKitchenChime() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.frequency.setValueAtTime(587.33, now);
+    gain1.gain.setValueAtTime(0.25, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.35);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.frequency.setValueAtTime(880, now + 0.15);
+    gain2.gain.setValueAtTime(0.25, now + 0.15);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.55);
+  } catch {
+    // AudioContext silently ignored if blocked by autoplay policy
+  }
+}
+
 export function KitchenApp() {
   const [kitchenSession, setKitchenSession] = useState<boolean>(() =>
     Boolean(localStorage.getItem("hipos_kitchen_token"))
@@ -4074,6 +4106,9 @@ export function KitchenApp() {
           evt.type === "check.closed"
         ) {
           console.log("⚡ [KitchenApp] Anlık mutfak siparişi tetiklendi:", evt.type);
+          if (evt.type === "order.created") {
+            playKitchenChime();
+          }
           void load();
         }
       },
@@ -4196,6 +4231,8 @@ export function KitchenApp() {
   const readyTasks = visibleTasks.filter((task) => task.status === "ready");
   const readyGroups = groupTasks(readyTasks);
   const cancelledTasks = visibleTasks.filter((task) => task.status === "cancelled").slice(-6).reverse();
+  const servedTasks = visibleTasks.filter((task) => task.status === "served").slice(-8).reverse();
+  const servedGroups = groupTasks(servedTasks);
 
   function printTicket(task: KitchenTask) {
     const isFood = isFoodTask(task);
@@ -4286,7 +4323,7 @@ export function KitchenApp() {
     return (
       <PinPadModal
         title="Mutfak KDS Girişi"
-        allowedRoles={["chef", "owner", "manager"]}
+        allowedRoles={["chef", "owner", "manager", "waiter"]}
         subtitle="Mutfak ekranını açmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
           localStorage.setItem("hipos_kitchen_token", data.token);
@@ -4403,6 +4440,37 @@ export function KitchenApp() {
       </section>
     )}
     {readyGroups.length > 0 && <section className="kitchen-section"><div className="kitchen-section-title"><span>SERVİSE HAZIR</span><b>{readyGroups.length}</b></div><div className="kitchen-grid">{readyGroups.map((group) => ticketCard(group, true))}</div></section>}
+    {servedGroups.length > 0 && (
+      <section className="kitchen-section kitchen-served" style={{ marginTop: "24px", opacity: 0.85 }}>
+        <div className="kitchen-section-title"><span>✅ SON SERVİS EDİLENLER (TAMAMLANANLAR)</span><b>{servedGroups.length}</b></div>
+        <div className="kitchen-grid">
+          {servedGroups.map((group) => (
+            <article key={group.key} className="kitchen-ticket kitchen-ticket-served" style={{ borderColor: "#10b981", background: "#f0fdf4" }}>
+              <div className="kitchen-screen-ticket-content">
+                <header>
+                  <div>
+                    <span>{group.tableName ?? "MASA SİPARİŞİ"}{group.waiterName ? ` · ${group.waiterName}` : ""}</span>
+                    <h2>{group.orderId.slice(0, 8).toUpperCase()}</h2>
+                  </div>
+                  <time style={{ color: "#059669", fontWeight: "bold" }}>TAMAMLANDI</time>
+                </header>
+                <div className="kitchen-station-label" style={{ background: "#d1fae5", color: "#065f46" }}>
+                  {group.stationName}
+                </div>
+                <ul>
+                  {group.tasks.map((task) => (
+                    <li key={task.id}>
+                      <strong>{task.quantity}×</strong>
+                      <span>{task.productName}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    )}
     {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
     {selected && <div className="kitchen-print-preview" role="dialog" aria-modal="true" aria-label="Mutfak fişi önizlemesi">
       <div className="kitchen-print-preview-panel">

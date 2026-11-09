@@ -1,7 +1,9 @@
 using Hipos.Api.Auth;
 using Hipos.Api.Features;
+using Hipos.Api.Printing;
 using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -525,7 +527,8 @@ public static class ServiceEndpoints
 
         group.MapPost("/tables/{tableId}/orders", async (string firmId, string branchId, string tableId,
             CreateWaiterOrder command, HttpContext context, ServiceDbContext db, SalesDbContext salesDb,
-            SalesOrders salesOrders, IRestaurantEventHub eventHub) =>
+            SalesOrders salesOrders, IRestaurantEventHub eventHub, [FromServices] PrintingService printing,
+            [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowOperator: true);
             if (denied is not null) return denied;
@@ -571,10 +574,30 @@ public static class ServiceEndpoints
             eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = "occupied" });
             eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, tableId });
 
+            bool autoPrinted = false;
+            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            {
+                autoPrinted = true;
+                var orderGuid = command.OrderId;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var scopedPrinting = scope.ServiceProvider.GetRequiredService<PrintingService>();
+                        await scopedPrinting.PrintKitchenOrderAsync(firmId, branchId, orderGuid);
+                    }
+                    catch
+                    {
+                        // Logged in PrinterTransport
+                    }
+                });
+            }
+
             return result.Created
                 ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/orders/{command.OrderId}",
-                    new { order = result.Order, table = table.Name, waiter = waiter.Name })
-                : Results.Ok(new { order = result.Order, table = table.Name, waiter = waiter.Name });
+                    new { order = result.Order, table = table.Name, waiter = waiter.Name, autoPrinted })
+                : Results.Ok(new { order = result.Order, table = table.Name, waiter = waiter.Name, autoPrinted });
         });
 
         group.MapGet("/employees", async (string firmId, string branchId, HttpContext context, ServiceDbContext db, AuthDbContext authDb) =>
