@@ -282,11 +282,8 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
     const kind = section === "inventory" ? "supplier" : item === "customers" || item === "history" ? "customer" : "all";
     const view = section === "inventory" ? "suppliers" : item as "customers" | "accounts" | "history";
     content = cariSource === "http" ? <CarilerHttpPage ctx={ctx} kind={kind} view={view} /> : <CarilerDemoPage ctx={ctx} kind={kind} view={view} />;
-  } else if (
-    section === "reports" &&
-    (item === "sales" || item === "branches")
-  ) {
-    content = <ReportsPage ctx={ctx} />;
+  } else if (section === "reports") {
+    content = <ReportsPage ctx={ctx} activeTab={item ?? "sales"} />;
   } else if (section === "settings" && item === "modules") {
     content = <ModulesPage ctx={ctx} />;
   } else if (section === "settings" && item === "integrations") {
@@ -339,6 +336,7 @@ export function RouteView({ ctx }: { ctx: ViewContext }) {
       {!generic &&
         !(presentationSection === "overview" && (presentationItem === "daily" || presentationItem === "turnover" || presentationItem === "alerts" || presentationItem === "activity")) &&
         !(presentationSection === "cash" && ["summary", "registers", "cash", "card"].includes(presentationItem)) &&
+        presentationSection !== "reports" &&
         !suppressCatalogStageNotice && <div className="notice feature-stage-notice" role="status">
         <StatusPill tone={presentation.stage === "working" ? "green" : presentation.stage === "demo" ? "purple" : "orange"}>{presentation.label}</StatusPill>
         <span>{presentation.description}</span>

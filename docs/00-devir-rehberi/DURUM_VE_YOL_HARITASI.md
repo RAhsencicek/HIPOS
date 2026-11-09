@@ -90,16 +90,17 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ FAZ 3: YÖNETİCİ RAPORLARI VE GERÇEK CİRO ANALİTİĞİ (SIRADAKİ FAZ)      │
-│ 1. Backend'e GET /api/v1/reports/sales-analytics endpoint'i ekleme     │
-│ 2. ReportsPage.tsx'i gerçek satış ve ciro tablolarına bağlama          │
-│ 3. Arayüzlerdeki yanıltıcı "Test / Simüle" etiketlerini temizleme      │
+│ FAZ 3: YÖNETİCİ RAPORLARI VE GERÇEK CİRO ANALİTİĞİ (✅ TAMAMLANDI)      │
+│ 1. Backend GET /reports/sales-analytics analitik motoru eklendi (BİTTİ) │
+│ 2. ReportsPage.tsx mockupsuz PostgreSQL canlı agregasyonuna bağlandı    │
+│ 3. Yanıltıcı "Demo / Örnek gösterim" etiketleri temizlendi (BİTTİ)     │
+│ 4. Tarih filtreleri (Bugün, Dün, 7 Gün, Ay, Tümü) & saatlik grafik bitti│
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
-│ FAZ 4: GERÇEK ZAMANLI EŞZAMANLILIK (SSE / SignalR LAN Sync)           │
-│ 1. Masa ve sipariş durumu değiştiğinde anlık SSE event fırlatma       │
-│ 2. Kasa ve Garson ekranlarının sayfayı yenilemeden anlık güncellenmesi│
+│ FAZ 4: GERÇEK ZAMANLI EŞZAMANLILIK (SSE / SignalR LAN Sync) (SIRADAKİ) │
+│ 1. Masa ve sipariş durumu değiştiğinde anlık SSE event fırlatma        │
+│ 2. Kasa ve Garson ekranlarının sayfayı yenilemeden anlık güncellenmesi │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -165,23 +166,50 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
 
 ---
 
-### 🔷 FAZ 3 TEKNİK SÖZLEŞMESİ: Gerçek Raporlar ve Ciro Analitiği
+### 🔷 FAZ 3 TEKNİK SÖZLEŞMESİ: Gerçek Raporlar ve Ciro Analitiği (✅ TAMAMLANDI - 9 KASIM 2026)
 
-#### A. API Endpoint'i:
-* `GET /api/v1/firms/{firmId}/branches/{branchId}/reports/sales-analytics?from={from}&to={to}`
-  Dönen Veri:
-  - `grossRevenueMinor`: Brüt ciro.
-  - `netRevenueMinor`: Net ciro (indirimler düşülmüş).
-  - `cashRevenueMinor`: Kasa çekmecesine giren nakit ciro.
-  - `cardRevenueMinor`: Banka POS'larına giren kart cirosu.
-  - `checkCount`: Toplam adisyon adedi.
-  - `averageCheckMinor`: Ortalama sepet tutarı.
-  - `topProducts`: En çok satan ilk 10 ürün (Adet, Ciro payı).
-  - `hourlyTrends`: Saatlik sipariş ve ciro dağılımı grafiği (09:00 - 23:00).
+#### A. Backend API Sözleşmesi ([`ReportsEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Reports/ReportsEndpoints.cs)):
+* `GET /api/v1/firms/{firmId}/branches/{branchId}/reports/sales-analytics?range=today|yesterday|week|month|all&from={from}&to={to}`
+* `GET /api/v1/firms/{firmId}/reports/sales-analytics?range=today|yesterday|week|month|all` (Firma Geneli Çoklu Şube)
+* **Dönen Canlı Agregasyon:**
+  - `grossRevenueMinor`: Kapanan adisyonların ve başarılı tahsilatların (`sales.payment_attempts.status == 'succeeded'`) brüt toplamı.
+  - `netRevenueMinor`: İkram ve iskonto indirimleri düşülmüş net ciro (`sales.check_adjustments`).
+  - `discountMinor`: Toplam iskonto ve ikram tutarı.
+  - `cashRevenueMinor`: Kasa çekmecesine giren nakit ciro (`method == 'cash'`).
+  - `cardRevenueMinor`: Banka POS'larına giren kart cirosu (`method == 'card'`).
+  - `completedChecksCount`: Seçili periyotta kapanan masa ve sipariş adedi (`sales.checks.status == 'closed'`).
+  - `averageCheckMinor`: Kapanan adisyon başına ortalama sepet büyüklüğü.
+  - `openChecksCount` & `openChecksBalanceMinor`: Masalarda henüz ödenmemiş açık adisyon adedi ve bekleyen toplam bakiye.
+  - `topProducts`: Sipariş kalemlerinden (`sales.order_lines`) derlenen en çok satan 10 ürün (Adet, Ciro, Ciro Payı %, Ürün Kategorisi).
+  - `hourlyTrends`: 24 saatlik gün içi restoran satış nabzı histogramı (saatlik işlem adedi ve brüt ciro sütunları).
+  - `channelBreakdown`: Masa servisi (`waiter_web`) ile Paket / Hızlı satış (`test_pos`) karşılaştırması.
+  - `branchComparison`: Çoklu şube veya seçili şubenin toplam cirodaki payı ve kapanan adisyon karşılaştırması.
 
-#### B. Arayüz (`ReportsPage.tsx`):
-* Sahte `SAMPLE_SALES` dizisi kaldırılacak.
-* Veriler doğrudan yukarıdaki analitik API'sinden çekilerek patronun önüne konacak.
+#### B. Arayüz Entegrasyonu ([`ReportsPage.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/reports/ReportsPage.tsx)):
+* Sahte `SAMPLE_SALES` ve `b.sales / 70000` statik hesaplamaları tamamen kaldırıldı.
+* Üst çubuktaki "Örnek gösterim" ve "Demo" uyarıları silindi; yerine yeşil rozet `🟢 Canlı Veritabanı` ve `[Yenile]` butonu eklendi.
+* Hızlı tarih kapsamı butonları eklendi: `[Bugün]`, `[Dün]`, `[Son 7 Gün]`, `[Bu Ay]`, `[Tüm Zamanlar]`.
+* Görsel grafikler eklendi:
+  - Nakit ve Kredi Kartı için renkli ilerleme çubukları (`%100 Nakit` vs `%0 Kart`).
+  - Masa ve Paket kanalları için oran çubukları.
+  - Saatlik satış histogramı (08:00 - 23:00).
+  - Şube ciro payı çubukları.
+
+#### C. Canlı Tarayıcı ve Veritabanı Doğrulaması (9 Kasım 2026):
+* **Bugün (09.11.2026):**
+  - Brüt Ciro: `₺3.020,00` (Nakit: `₺3.020,00`, Kart: `₺0,00`).
+  - Kapanan Adisyon: `3` (Ortalama Sepet: `₺1.006,66`).
+  - Açık Adisyon: `3` (`₺2.170,00` bekleyen açık bakiye).
+  - Satılan Ürün: `18 adet` (Lider: Tavuklu Sandviç, 7 adet, `₺1.820,00`).
+  - Saatlik Trafik: 10:00 (1 adisyon, ₺520) ve 11:00 (2 adisyon, ₺2.500) tam eşleşti.
+* **Tüm Zamanlar:**
+  - Brüt Ciro: `₺16.020,00` (Net: `₺15.843,50`, İndirim: `₺176,50`).
+  - Kapanan Adisyon: `53`, Satılan Ürün: `122 adet`.
+  - Nakit: `₺12.465,00` (%77.8), Kart: `₺3.555,00` (%22.2).
+* **Ekran Görüntüsü Kanıtları:**
+  - `admin_reports_today.png`: Bugünün canlı ciro ve analitik görünümü.
+  - `admin_reports_all_time.png`: Tüm zamanların kümülatif analitiği ve saatlik dağılımı.
+  - `admin_reports_sales_subroute.png`: `/admin/reports/sales` alt rotası.
 
 ---
 

@@ -10,6 +10,7 @@ using Hipos.Api.Printing;
 using Hipos.Api.Kitchen;
 using Hipos.Api.Auth;
 using Hipos.Api.Overview;
+using Hipos.Api.Reports;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -166,6 +167,7 @@ if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
 if (storage == "postgres") app.MapPrintingEndpoints();
 if (storage == "postgres") app.MapAuthEndpoints(authReady);
 if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
+if (storage == "postgres") app.MapReportsEndpoints(salesReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

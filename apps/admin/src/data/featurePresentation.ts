@@ -57,6 +57,8 @@ export function featurePresentation(section: string, item: string, sources: Sour
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "catalog/channels" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
+  if (section === "reports")
+    return { stage: "working", label: "Çalışıyor", description: "Gerçek satış ve ciro analitiği canlı veritabanından üretilir." };
   if (key === "catalog/prices" && sources.catalogSource === "http")
     return { stage: "working", label: "Çalışıyor", description };
   if (key === "catalog/menus" && sources.catalogSource === "http")
