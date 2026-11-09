@@ -103,6 +103,16 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 │ 2. GET /events/stream SSE canlı push endpoint'i eklendi (BİTTİ)         │
 │ 3. Kasa, Garson ve KDS ekranlarına useRestaurantRealtime hook'u eklendi │
 │ 4. Çift yönlü tarayıcı eşzamanlılığı Playwright ile doğrulandı (5-7ms)  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 5: DONANIM & KDS MUTFAK ENTEGRASYONU (✅ TAMAMLANDI - 9 KASIM 2026) │
+│ 1. Zombi Masa Temizliği: Ekim ayından kalan 14 sahipsiz masa sıfırlandı│
+│ 2. Mutfak Fişi Otomatik Baskı: Garson siparişi aldığı anda arka planda  │
+│    sunucu seviyesinde (AutoPrintKitchenOnOrder) termal yazıcıya basıldı │
+│ 3. Termal Ağ Yazıcı Soket Süresi: 2s -> 6s uzatıldı (Wi-Fi/LAN gecikmesi)│
+│ 4. KDS Sesli Bildirim: Web Audio API ile sipariş gelince bip/çan sesi   │
+│ 5. KDS Servis Edilenler Geçmişi: Tamamlanan siparişler için geçmiş blok│
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
