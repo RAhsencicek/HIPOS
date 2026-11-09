@@ -2803,7 +2803,15 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
             )}
           </div>
           <footer style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <button type="button" className="secondary-button" onClick={() => window.print()}>🖨️ Yazdır</button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                alert("Z-Raporu kasa fiş yazıcısına aktarıldı.");
+              }}
+            >
+              🖨️ Yazdır
+            </button>
             <button type="button" className="primary-button" onClick={() => setActiveZReport(null)}>Tamam</button>
           </footer>
         </section>

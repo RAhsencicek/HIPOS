@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { flushSync } from "react-dom";
 import { createRequestId } from "./requestId";
 import { ProductOptionPicker, type SelectedOption, type OptionSelection } from "./ProductOptionPicker";
 import "./operational.css";
@@ -504,8 +503,18 @@ export function CashierApp() {
   const [quickActiveCheck, setQuickActiveCheck] = useState<CashierCheck | null>(null);
   const [orderSentToast, setOrderSentToast] = useState<{ id: string; label: string; count: number; totalMinor: number } | null>(null);
   const toastTimer = useRef<number | null>(null);
-  const [accountReceipt, setAccountReceipt] = useState<AccountReceipt | null>(null);
   const [lastCompletedReceipt, setLastCompletedReceipt] = useState<AccountReceipt | null>(null);
+  const [printToast, setPrintToast] = useState<{ title: string; subtitle?: string; icon?: string } | null>(null);
+  const printToastTimer = useRef<number | null>(null);
+
+  function showPrintToast(title: string, subtitle?: string, icon: string = "🧾") {
+    if (printToastTimer.current) window.clearTimeout(printToastTimer.current);
+    setPrintToast({ title, subtitle, icon });
+    printToastTimer.current = window.setTimeout(() => {
+      setPrintToast(null);
+    }, 2200);
+  }
+
   async function printThermalCashierBill(checkId: string, openCashDrawer: boolean = false, paymentMethod: string = "NAKIT") {
     try {
       const res = await request<{ success: boolean; target: string; transportUsed: string }>(
@@ -513,18 +522,21 @@ export function CashierApp() {
         "pos-single",
         {}
       );
+      showPrintToast("Adisyon Fişi Yazıcıya İletildi", `Termal Yazıcı (${res.transportUsed})`, "🧾");
       setSplitNotice(`🧾 Adisyon fişi basıldı (${res.transportUsed})`);
       return true;
     } catch (cause) {
       console.warn("Termal adisyon fişi basılamadı:", cause);
+      showPrintToast("Yazıcıya Ulaşılamadı", cause instanceof Error ? cause.message : "Bağlantı hatası", "⚠️");
       return false;
     }
   }
+
   function printAccountReceipt(receipt: AccountReceipt, openCashDrawer: boolean = false, paymentMethod: string = "NAKIT") {
-    flushSync(() => setAccountReceipt({ ...receipt, printedAt: new Date().toISOString() }));
     void printThermalCashierBill(receipt.check.id, openCashDrawer, paymentMethod);
-    try { window.print(); } catch {}
+    showPrintToast("Tahsilat Tamamlandı", "Adisyon fişi termal yazıcıya aktarıldı", "🧾");
   }
+
   const [kitchenPrinting, setKitchenPrinting] = useState(false);
   async function printKitchenTicketForCheck(checkId: string) {
     if (kitchenPrinting) return;
@@ -535,8 +547,10 @@ export function CashierApp() {
         "pos-single",
         {}
       );
+      showPrintToast("Mutfak Fişi Basıldı", `Kopya · ${res.transportUsed}`, "🖨️");
       setSplitNotice(`🖨️ Mutfak fişi basıldı (KOPYA - ${res.transportUsed})`);
     } catch (cause) {
+      showPrintToast("Mutfak Fişi Hatası", cause instanceof Error ? cause.message : "Yazdırılamadı", "⚠️");
       setSplitNotice(cause instanceof Error ? `Mutfak fişi hatası: ${cause.message}` : "Mutfak fişi basılamadı.");
     } finally {
       setKitchenPrinting(false);
@@ -2452,7 +2466,6 @@ export function CashierApp() {
         <article className="cashier-detail-panel cashier-keypad-panel"><div className="cashier-amount"><span>{paymentMethod === "cash" ? "ALINAN NAKİT · ÖNİZLEME" : "GİRİLEN TUTAR"}</span><strong aria-live="polite">{activeCheck ? money(amountMinor) : "—"}</strong><small>{activeCheck ? `Adisyonda kalan: ${money(activeCheck.remainingMinor)}` : "Tutar girmek için açık adisyon seçin"}</small></div>{paymentMethod === "cash" && activeCheck && <div className="cashier-change" aria-live="polite"><span>PARA ÜSTÜ <small>Önizleme · tahsilat kaydedilmez</small></span><strong>{money(Math.max(0, amountMinor - activeCheck.remainingMinor))}</strong></div>}<div className="cashier-quick-amounts" aria-label="Hızlı tutarlar">{[{ label: "TAM KALAN", minor: activeCheck?.remainingMinor ?? 0 }, { label: "100 ₺", minor: 10000 }, { label: "200 ₺", minor: 20000 }, { label: "500 ₺", minor: 50000 }, { label: "1.000 ₺", minor: 100000 }].map((item) => <button type="button" disabled={!activeCheck} key={item.label} onClick={() => setAmountInput(`${Math.floor(item.minor / 100)},${String(item.minor % 100).padStart(2, "0")}`)}>{item.label}</button>)}<button type="button" className="cashier-clear-amount" disabled={!activeCheck} onClick={() => enterAmountKey("C")}>Temizle</button></div><div className="cashier-keypad" aria-label="Tutar tuş takımı">{["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "⌫"].map((key) => <button type="button" disabled={!activeCheck} key={key} aria-label={key === "C" ? "Tutarı temizle" : key === "⌫" ? "Son karakteri sil" : key === "," ? "Kuruş için virgül" : key} onClick={() => enterAmountKey(key)}>{key}</button>)}</div><button className="cashier-complete" disabled={Boolean(payBlocker) || payBusy || Boolean(error)} onClick={() => { if (isZeroBalance) void closeZeroCheck(); else void submitPayment(); }}>{payBusy ? (isZeroBalance ? "Kapatılıyor…" : "Kaydediliyor…") : isZeroBalance ? "Adisyonu Kapat (0,00 ₺)" : "Tahsilatı tamamla"}</button>{payError && <p className="ops-error" role="alert">{payError}</p>}<p className="cashier-disabled-hint">{isZeroBalance ? "Ödenecek tutar bulunmuyor. Adisyonu kapatıp masayı boşaltmak için butona tıklayın." : (payBlocker || (paymentMethod === "card" && activeCheck && amountMinor > activeCheck.remainingMinor ? `Kart çekimi kalan tutar kadar yapılır: ${money(activeCheck.remainingMinor)}.` : `Tahsilat ${mainRegister?.name ?? "seçili kasa"} vardiyasına kaydedilir.`))}</p></article>
       </div><div className="cashier-detail-footer"><span>Geliştirme ekranı · Gerçek tahsilat yapılmaz</span><button type="button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) printAccountReceipt({ check: activeCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() }, false, "BILGI"); }}>🧾 Hesap fişi yazdır</button><button disabled={!activeCheck || activeCheck.totalMinor > 0 || payBusy || Boolean(error)} title={activeCheck && activeCheck.totalMinor > 0 ? "Önce tahsilatı tamamlayın" : undefined} onClick={() => void closeZeroCheck()}>{payBusy ? "Kaydediliyor…" : "Adisyonu kapat"}</button></div>
     </section>}
-    {accountReceipt && <section className="account-receipt print-target" aria-label="Yazdırılacak hesap fişi"><header><strong>HESAP FİŞİ</strong><span>MALİ DEĞERİ YOKTUR</span></header><p>{accountReceipt.location}<br />Adisyon: {accountReceipt.check.id}<br />Tarih: {new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(accountReceipt.printedAt))}</p><div className="account-receipt-items">{accountReceipt.check.orders.flatMap(order => order.items.map(line => <div className="account-receipt-line" key={`${order.id}:${line.id}`}><span><strong>{line.productName}</strong><small>{line.quantity} × {money(line.unitPriceMinor)}</small>{Boolean(line.options?.length || line.note) && <small>{[...(line.options ?? []).map(option => option.optionName), line.note].filter(Boolean).join(" · ")}</small>}</span><b>{money(line.lineTotalMinor)}</b></div>))}</div><div className="account-receipt-totals"><div><span>Ara toplam</span><b>{money(accountReceipt.check.grossTotalMinor)}</b></div>{accountReceipt.check.adjustmentMinor > 0 && <div><span>İndirim / düzeltme</span><b>−{money(accountReceipt.check.adjustmentMinor)}</b></div>}<div><span>Toplam</span><b>{money(accountReceipt.check.totalMinor)}</b></div>{accountReceipt.check.paidMinor > 0 && <div><span>Simüle ödeme</span><b>{money(accountReceipt.check.paidMinor)}</b></div>}<div><strong>Kalan tutar</strong><b>{money(accountReceipt.check.remainingMinor)}</b></div></div><p className="account-receipt-disclaimer">Bu belge mali fiş değildir. Test ödemeleri gerçek tahsilat değildir.</p></section>}
     <dialog ref={customerDialog} className="waiter-reservation-dialog" aria-labelledby="cashier-customer-title" onCancel={() => setCustomerOpen(false)} onClose={() => setCustomerOpen(false)}>
       {customerOpen && <section className="waiter-custom-modal"><header><div><span className="ops-eyebrow">CARİYE YAZ · ÖNİZLEME</span><h2 id="cashier-customer-title">Müşteri ara</h2></div><button type="button" className="waiter-modal-close" onClick={() => setCustomerOpen(false)} aria-label="Kapat">×</button></header><label className="waiter-note-field">Ad veya telefon<input autoFocus type="search" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Müşteri adı veya telefonu" /></label><p className="cashier-preview-note">Cari limit kontrolü ve hesaba yazma henüz bağlı değildir.</p>{customerLoading && <p className="ops-message">Müşteriler yükleniyor…</p>}{customerError && <p className="ops-error" role="alert">{customerError}</p>}
       {!customerLoading && !customerError && <div className="cashier-customer-list">{customers.filter((customer) => { const query = customerSearch.trim().toLocaleLowerCase("tr-TR"); const digits = query.replace(/\D/g, ""); return !query || customer.name.toLocaleLowerCase("tr-TR").includes(query) || (digits.length > 0 && (customer.phone ?? "").replace(/\D/g, "").includes(digits)); }).map((customer) => <button type="button" key={customer.id} onClick={() => { setCustomerSelected(customer); setCustomerOpen(false); }}><span><strong>{customer.name}</strong><small>{customer.phone ?? "Telefon yok"}</small></span><span><strong>{customer.customerBalanceMinor > 0 ? "Borç" : customer.customerBalanceMinor < 0 ? "Alacak" : "Bakiye"}: {money(Math.abs(customer.customerBalanceMinor))}</strong><small>Limit bilgisi yok</small></span></button>)}{customers.filter((customer) => { const query = customerSearch.trim().toLocaleLowerCase("tr-TR"); const digits = query.replace(/\D/g, ""); return !query || customer.name.toLocaleLowerCase("tr-TR").includes(query) || (digits.length > 0 && (customer.phone ?? "").replace(/\D/g, "").includes(digits)); }).length === 0 && <p className="ops-message">Eşleşen aktif müşteri bulunamadı.</p>}</div>}<footer><button type="button" className="waiter-cancel-custom" onClick={() => setCustomerOpen(false)}>Kapat</button></footer></section>}
@@ -2600,7 +2613,14 @@ export function CashierApp() {
           </div>
 
           <footer style={{ marginTop: 16, borderTop: "2px dashed #cbd5e0", paddingTop: 12, display: "flex", justifyContent: "space-between" }}>
-            <button type="button" className="ops-primary" onClick={() => window.print()} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              className="ops-primary"
+              onClick={() => {
+                showPrintToast("Z-Raporu Yazdırıldı", "Kasa termal yazıcısına aktarıldı", "🧾");
+              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
               🖨️ Fiş Yazdır
             </button>
             <button type="button" className="waiter-cancel-custom" onClick={() => setActiveZReport(null)}>
@@ -2840,6 +2860,15 @@ export function CashierApp() {
               </button>
             )}
           </footer>
+        </div>
+      </div>
+    )}
+    {printToast && (
+      <div className="pos-smooth-toast" role="status">
+        <span className="toast-icon">{printToast.icon ?? "🧾"}</span>
+        <div className="toast-text">
+          <strong>{printToast.title}</strong>
+          {printToast.subtitle && <small>{printToast.subtitle}</small>}
         </div>
       </div>
     )}
@@ -4107,10 +4136,32 @@ export function KitchenApp() {
   const [stations, setStations] = useState<KitchenStation[]>([]);
   const [stationFilter, setStationFilter] = useState("all");
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<KitchenTask | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [savingTaskId, setSavingTaskId] = useState("");
+  const [kitchenToast, setKitchenToast] = useState<{ title: string; subtitle?: string; icon?: string } | null>(null);
+  const kitchenToastTimer = useRef<number | null>(null);
+
+  function showKitchenToast(title: string, subtitle?: string, icon: string = "🖨️") {
+    if (kitchenToastTimer.current) window.clearTimeout(kitchenToastTimer.current);
+    setKitchenToast({ title, subtitle, icon });
+    kitchenToastTimer.current = window.setTimeout(() => {
+      setKitchenToast(null);
+    }, 2200);
+  }
+
+  async function printKitchenOrderDirect(task: KitchenTask) {
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/sales/orders/${encodeURIComponent(task.orderId)}/print-kitchen?isReprint=true`,
+        "manager-single",
+        {}
+      );
+      showKitchenToast("Mutfak Fişi Yazıcıya İletildi", `${task.tableName ?? "Sipariş"} (${res.transportUsed})`, "🖨️");
+    } catch (cause) {
+      showKitchenToast("Yazıcıya Ulaşılamadı", cause instanceof Error ? cause.message : "Mutfak yazıcısı hatası", "⚠️");
+    }
+  }
   const load = useCallback(async () => {
     try {
       const [result, stationResult] = await Promise.all([
@@ -4303,7 +4354,7 @@ export function KitchenApp() {
     const firstTask = group.tasks[0]!;
 
     return <article
-      className={`kitchen-ticket ${ready || isReady ? "kitchen-ready" : `kitchen-${age.level}`} ${selected?.orderId === group.orderId && ((group.isFood && isFoodTask(selected)) || (group.isDrink && isDrinkTask(selected)) || selected.stationCode === group.stationCode) ? "print-target" : ""}`}
+      className={`kitchen-ticket ${ready || isReady ? "kitchen-ready" : `kitchen-${age.level}`}`}
       key={group.key}
     >
       <div className="kitchen-screen-ticket-content">
@@ -4340,7 +4391,7 @@ export function KitchenApp() {
           >
             {isSaving ? "Kaydediliyor…" : actionLabel}
           </button>
-          <button className="kitchen-print-button" onClick={() => setSelected(firstTask)}>Fiş yazdır</button>
+          <button className="kitchen-print-button" onClick={() => void printKitchenOrderDirect(firstTask)}>Fiş yazdır</button>
         </div>
       </div>
       <div aria-hidden="true">{printTicket(firstTask)}</div>
@@ -4500,13 +4551,15 @@ export function KitchenApp() {
       </section>
     )}
     {cancelledTasks.length > 0 && <section className="kitchen-section kitchen-cancelled"><div className="kitchen-section-title"><span>İPTAL EDİLENLER</span><b>{cancelledTasks.length}</b></div><ul>{cancelledTasks.map((task) => <li key={task.id}><span><strong>{task.quantity}× {task.productName}</strong><small>{task.tableName ?? task.orderId.slice(0, 8).toUpperCase()} · {task.cancellationReason}</small></span><time>{task.cancelledAt ? new Date(task.cancelledAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}</time></li>)}</ul></section>}
-    {selected && <div className="kitchen-print-preview" role="dialog" aria-modal="true" aria-label="Mutfak fişi önizlemesi">
-      <div className="kitchen-print-preview-panel">
-        <div className="kitchen-print-preview-header"><strong>80 mm fiş önizlemesi</strong><button onClick={() => setSelected(null)} aria-label="Önizlemeyi kapat">×</button></div>
-        <div className="kitchen-print-preview-paper">{printTicket(selected)}</div>
-        <div className="kitchen-print-preview-actions"><button onClick={() => setSelected(null)}>Kapat</button><button className="kitchen-print-confirm" onClick={() => window.print()}>Yazdır</button></div>
+    {kitchenToast && (
+      <div className="pos-smooth-toast" role="status">
+        <span className="toast-icon">{kitchenToast.icon ?? "🖨️"}</span>
+        <div className="toast-text">
+          <strong>{kitchenToast.title}</strong>
+          {kitchenToast.subtitle && <small>{kitchenToast.subtitle}</small>}
+        </div>
       </div>
-    </div>}
+    )}
   </main>;
 }
 
