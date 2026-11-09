@@ -68,16 +68,41 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
         return new PrintResult(true, config.Name, "Console / Virtual", "Fiziksel aygıta ulaşılamadı, konsola simüle edildi.");
     }
 
-    private static async Task SendToNetworkAsync(string ip, int port, byte[] data, CancellationToken ct)
+    private async Task SendToNetworkAsync(string ip, int port, byte[] data, CancellationToken ct)
     {
-        using var client = new TcpClient();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(6)); // Up to 6s for network printer / Wi-Fi wake-up
+        Exception? lastException = null;
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                using var client = new TcpClient();
+                int timeoutSec = attempt == 1 ? 8 : 5;
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
 
-        await client.ConnectAsync(ip, port, cts.Token);
-        using var stream = client.GetStream();
-        await stream.WriteAsync(data, ct);
-        await stream.FlushAsync(ct);
+                await client.ConnectAsync(ip, port, cts.Token);
+                using var stream = client.GetStream();
+                await stream.WriteAsync(data, ct);
+                await stream.FlushAsync(ct);
+                return; // Başarılı
+            }
+            catch (Exception ex) when (attempt == 1 && !ct.IsCancellationRequested)
+            {
+                lastException = ex;
+                logger.LogInformation("Ağ yazıcısı ({Ip}:{Port}) uyku modunda olabilir, uyandırma ardından tekrar deneniyor...",
+                    ip, port);
+                await Task.Delay(300, ct);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+            }
+        }
+
+        if (lastException is not null)
+        {
+            throw lastException;
+        }
     }
 
     private async Task<bool> SendToCupsUsbAsync(byte[] data, CancellationToken ct)
