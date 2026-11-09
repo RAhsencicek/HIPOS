@@ -4,6 +4,7 @@ using System.Text;
 using Hipos.Api.Auth;
 using Hipos.Api.Cari;
 using Hipos.Api.Features;
+using Hipos.Api.Printing;
 using Hipos.Api.Realtime;
 using Hipos.Api.Service;
 using Microsoft.AspNetCore.Mvc;
@@ -64,7 +65,8 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("", async (string firmId, string branchId, CreateSalesCheck command,
-            HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate, IRestaurantEventHub eventHub) =>
+            HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate, IRestaurantEventHub eventHub,
+            [FromServices] PrintingService printing, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -92,9 +94,28 @@ public static class SalesCheckEndpoints
                 return Fail(context, "CHECK_REQUEST_CONFLICT", 409, "requestId farklı adisyon bilgileriyle kullanılmış.");
 
             eventHub.Publish("check.created", firmId, branchId, new { checkId = check.Id, tableId = check.TableId });
+            eventHub.Publish("order.created", firmId, branchId, new { orderId = command.FirstOrderId, checkId = check.Id, isQuickSale = check.TableId == null });
             if (check.TableId is not null)
             {
                 eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "occupied" });
+            }
+
+            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            {
+                var orderGuid = command.FirstOrderId;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var scopedPrinting = scope.ServiceProvider.GetRequiredService<PrintingService>();
+                        await scopedPrinting.PrintKitchenOrderAsync(firmId, branchId, orderGuid);
+                    }
+                    catch
+                    {
+                        // Failure logged in PrintingService / PrinterTransport
+                    }
+                });
             }
 
             return result.Created
@@ -103,7 +124,8 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("/{checkId:guid}/orders", async (string firmId, string branchId, Guid checkId,
-            CreatePosOrder command, HttpContext context, SalesDbContext db, SalesOrders sales, IRestaurantEventHub eventHub) =>
+            CreatePosOrder command, HttpContext context, SalesDbContext db, SalesOrders sales, IRestaurantEventHub eventHub,
+            [FromServices] PrintingService printing, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -112,6 +134,26 @@ public static class SalesCheckEndpoints
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
             eventHub.Publish("check.updated", firmId, branchId, new { checkId, orderId = command.OrderId });
+            eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, checkId });
+
+            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            {
+                var orderGuid = command.OrderId;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var scopedPrinting = scope.ServiceProvider.GetRequiredService<PrintingService>();
+                        await scopedPrinting.PrintKitchenOrderAsync(firmId, branchId, orderGuid);
+                    }
+                    catch
+                    {
+                        // Failure logged in PrintingService / PrinterTransport
+                    }
+                });
+            }
+
             return result.Created ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}", detail)
                 : Results.Ok(detail);
         });

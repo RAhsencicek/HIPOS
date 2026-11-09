@@ -57,6 +57,9 @@ public static class KitchenEndpoints
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && orderIds.Contains(row.Id))
                 .ToDictionaryAsync(row => row.Id, row => row.CheckId, context.RequestAborted);
             var checkIds = checkByOrder.Values.Distinct().ToArray();
+            var checks = await sales.Checks.AsNoTracking()
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.Id))
+                .ToDictionaryAsync(row => row.Id, context.RequestAborted);
             var assignments = await service.Assignments.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId &&
                     row.ClosedAt == null && checkIds.Contains(row.CheckId))
@@ -64,7 +67,9 @@ public static class KitchenEndpoints
             var tables = await service.Tables.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId)
                 .ToDictionaryAsync(row => row.Id, row => row.Name, context.RequestAborted);
-            var waiterIds = assignments.Where(row => row.WaiterId != null).Select(row => row.WaiterId!).Distinct().ToArray();
+            var waiterIds = assignments.Where(row => row.WaiterId != null).Select(row => row.WaiterId!)
+                .Concat(checks.Values.Where(c => c.WaiterId != null).Select(c => c.WaiterId!))
+                .Distinct().ToArray();
             var waiters = await service.Employees.AsNoTracking()
                 .Where(row => row.FirmId == firmId && row.BranchId == branchId && waiterIds.Contains(row.Id))
                 .ToDictionaryAsync(row => row.Id, row => row.Name, context.RequestAborted);
@@ -72,10 +77,41 @@ public static class KitchenEndpoints
             var items = tasks.Select(task =>
             {
                 ServiceAssignmentRow? assignment = null;
+                SalesCheckRow? check = null;
                 if (checkByOrder.TryGetValue(task.OrderId, out var checkId))
+                {
                     assignmentByCheck.TryGetValue(checkId, out assignment);
-                var tableName = assignment is not null && tables.TryGetValue(assignment.TableId, out var table) ? table : null;
-                var waiterName = assignment?.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter : null;
+                    checks.TryGetValue(checkId, out check);
+                }
+
+                string? tableName = null;
+                if (assignment is not null && tables.TryGetValue(assignment.TableId, out var table))
+                {
+                    tableName = table;
+                }
+                else if (check?.TableId is not null && tables.TryGetValue(check.TableId, out var checkTable))
+                {
+                    tableName = checkTable;
+                }
+                else if (check is not null)
+                {
+                    tableName = "Hızlı Satış (Gel-Al)";
+                }
+
+                string? waiterName = null;
+                if (assignment?.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter))
+                {
+                    waiterName = waiter;
+                }
+                else if (check?.WaiterId is not null && waiters.TryGetValue(check.WaiterId, out var checkWaiter))
+                {
+                    waiterName = checkWaiter;
+                }
+                else if (check is not null)
+                {
+                    waiterName = "Kasa / Kasiyer";
+                }
+
                 var station = task.StationId is not null && stations.TryGetValue(task.StationId.Value, out var found)
                     ? found : null;
                 return ToView(task, tableName, waiterName, station);

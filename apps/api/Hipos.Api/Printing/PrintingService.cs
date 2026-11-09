@@ -138,6 +138,18 @@ public sealed class PrintingService(
                     .FirstOrDefaultAsync(row => row.Id == check.TableId, ct);
                 if (table is not null) tableName = table.Name;
             }
+            else
+            {
+                tableName = "Hızlı Satış (Gel-Al)";
+                waiterName = "Kasa / Kasiyer";
+            }
+
+            if (check?.WaiterId is not null)
+            {
+                var waiter = await serviceDb.Employees.AsNoTracking()
+                    .FirstOrDefaultAsync(row => row.Id == check.WaiterId, ct);
+                if (waiter is not null) waiterName = waiter.Name;
+            }
         }
 
         var items = new List<KitchenTicketItem>();
@@ -215,6 +227,28 @@ public sealed class PrintingService(
             return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Bu masada açık bir sipariş/adisyon bulunamadı.");
         }
 
+        return await PrintKitchenCheckAsync(firmId, branchId, check.Id, isReprint, ct);
+    }
+
+    public async Task<PrintResult> PrintKitchenCheckAsync(
+        string firmId,
+        string branchId,
+        Guid checkId,
+        bool isReprint = false,
+        CancellationToken ct = default)
+    {
+        EnsureLoaded();
+
+        var check = await salesDb.Checks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == checkId && row.FirmId == firmId && row.BranchId == branchId, ct);
+
+        if (check is null)
+        {
+            logger.LogWarning("Mutfak fişi için adisyon bulunamadı: Check={CheckId}", checkId);
+            return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Adisyon bulunamadı.");
+        }
+
         // 2. Bu adisyona ait iptal edilmemiş tüm siparişleri bul
         var orders = await salesDb.Orders
             .AsNoTracking()
@@ -225,22 +259,37 @@ public sealed class PrintingService(
 
         if (orders.Count == 0 || orders.All(o => o.Lines.Count == 0))
         {
-            return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Masaya ait yazdırılacak sipariş kalemi bulunamadı.");
+            return new PrintResult(false, _config.KitchenPrinter.Name, "None", "Yazdırılacak sipariş kalemi bulunamadı.");
         }
 
         // 3. Masa ve Garson adını çöz
-        string tableName = "Masa";
-        string waiterName = "Garson";
+        string tableName = check.TableId is not null ? "Masa" : "Hızlı Satış (Gel-Al)";
+        string waiterName = check.TableId is not null ? "Garson" : "Kasa / Kasiyer";
 
-        var table = await serviceDb.Tables.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == tableId, ct);
-        if (table is not null) tableName = table.Name;
+        if (check.TableId is not null)
+        {
+            var table = await serviceDb.Tables.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.Id == check.TableId, ct);
+            if (table is not null) tableName = table.Name;
+        }
 
         if (check.WaiterId is not null)
         {
             var waiter = await serviceDb.Employees.AsNoTracking()
                 .FirstOrDefaultAsync(row => row.Id == check.WaiterId, ct);
             if (waiter is not null) waiterName = waiter.Name;
+        }
+        else
+        {
+            var assignment = await serviceDb.Assignments.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.CheckId == check.Id && row.ClosedAt == null, ct);
+            if (assignment?.WaiterId is not null)
+            {
+                var waiter = await serviceDb.Employees.AsNoTracking()
+                    .FirstOrDefaultAsync(row => row.Id == assignment.WaiterId, ct);
+                if (waiter is not null) waiterName = waiter.Name;
+            }
         }
 
         var items = new List<KitchenTicketItem>();

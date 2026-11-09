@@ -44,6 +44,21 @@ public static class PrintingEndpoints
                 : Results.BadRequest(new { success = false, result.Error });
         });
 
+        // 1.2 Adisyona Göre Mutfak Fişi Yazdır / Tekrar Bas (Hızlı Satış & Masalar İçin)
+        group.MapMethods("/sales/checks/{checkId:guid}/print-kitchen", ["GET", "POST"], async (
+            string firmId,
+            string branchId,
+            Guid checkId,
+            bool? isReprint,
+            [FromServices] PrintingService printing,
+            CancellationToken ct) =>
+        {
+            var result = await printing.PrintKitchenCheckAsync(firmId, branchId, checkId, isReprint ?? false, ct);
+            return result.Success
+                ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
+                : Results.BadRequest(new { success = false, result.Error });
+        });
+
         // 2. Kasa / Adisyon Fişi Yazdır (Check Bazlı)
         group.MapPost("/sales/checks/{checkId:guid}/print-bill", async (
             string firmId,

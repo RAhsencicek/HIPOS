@@ -297,7 +297,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
         try
         {
             await db.SaveChangesAsync(cancellationToken);
-            if (runtime.KitchenReady && source == "waiter_web")
+            if (runtime.KitchenReady)
                 await CreateKitchenTasksAsync(order, actor, transaction.GetDbTransaction(), cancellationToken);
             if (createCheck && check.TableId is not null)
                 await CreateServiceAssignmentAsync(check, order, actor, transaction.GetDbTransaction(), cancellationToken);

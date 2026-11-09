@@ -277,6 +277,38 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
 
 ---
 
+### 🔷 FAZ 5 TEKNİK SÖZLEŞMESİ: Mutfak KDS & Donanım Yazıcı Hattı (Network ESC/POS) ve Hızlı Satış (Gel-Al) Mutfak Entegrasyonu (✅ TAMAMLANDI - 9 KASIM 2026)
+
+#### A. Donanım Ağ Yazıcısı ve Zaman Aşımı İyileştirmesi ([`PrinterTransport.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrinterTransport.cs)):
+* Restorandaki fiziksel termal mutfak yazıcısının (`192.168.1.201:9100`) güç tasarrufu/uyku modundan uyanırken LAN soket bağlantısının ~4.06 saniye sürdüğü ve 2 saniyelik eski zaman aşımına takılarak hata verdiği tespit edildi.
+* Soket zaman aşımı 2 saniyeden 6 saniyeye çıkarıldı ve bağlantı kopmalarına karşı `printer_settings.json` üzerinde `FallbackToUsb: true` devreye alındı.
+* Garson sipariş verdiğinde ve hızlı satış onaylandığında `AutoPrintKitchenOnOrder` yapılandırması kontrol edilerek arka planda otomatik ESC/POS çıktısı tetiklendi.
+
+#### B. Hızlı Satış (Gel-Al / Kasa) Siparişlerinin Mutfağa Düşmeme Sorununun Çözümü:
+* **Kök Neden:**
+  1. [`SalesOrders.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesOrders.cs) içinde `if (runtime.KitchenReady && source == "waiter_web")` koşulu bulunuyordu. Hızlı satış siparişleri kasadan `test_pos` kaynağı ile açıldığı için `kitchen.tasks` kayıtları üretilmiyordu.
+  2. [`SalesCheckEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesCheckEndpoints.cs) endpoint'i (`POST /sales/checks`) yalnızca `check.created` yayınlıyor; mutfak ekranının dinlediği `order.created` olayını yayınlamıyordu.
+  3. Masasız adisyonlarda masa ve garson bilgisi boş (`null`) geldiğinde KDS kartları tanımsız kalıyordu.
+* **Geliştirilen Çözüm:**
+  1. `SalesOrders.cs` içindeki `source == "waiter_web"` koşulu kaldırılarak mutfak görevlerinin tüm satış kanallarından (`waiter_web`, `test_pos`, `cashier`) üretilmesi sağlandı.
+  2. `POST /sales/checks` ve `POST /sales/checks/{checkId}/orders` endpoint'lerine `order.created` SSE bildirimi ve otomatik mutfak fişi yazdırma (`PrintKitchenOrderAsync`) eklendi.
+  3. [`KitchenEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Kitchen/KitchenEndpoints.cs) ve [`PrintingService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingService.cs) güncellenerek masası olmayan hızlı satış siparişlerinde kart ve fiş başlığı `Hızlı Satış (Gel-Al) · Kasa / Kasiyer` olarak standartlaştırıldı.
+  4. Adisyon bazlı fiş basımı ve kopyalama için yeni `POST /sales/checks/{checkId}/print-kitchen` endpoint'i ve [`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx) kasa ekranında `[🖨️ Mutfak Fişi Tekrar]` butonu eklendi.
+
+#### C. Mutfak Ekranı (KDS) Canlı Bildirim & Ses Entegrasyonu:
+* Mutfak KDS ekranına (`/kitchen`), SSE üzerinden yeni bir `order.created` olayı ulaştığında Web Audio API ile 587Hz ve 880Hz frekanslarında 2 tonlu aşçı uyarı gongu (`playKitchenChime`) eklendi.
+* Tamamlanan ve servis edilen siparişlerin aşçı tarafından takip edilebilmesi için KDS ekranının altına *"Son Servis Edilenler (Tamamlananlar)"* geçmiş bölümü eklendi.
+* PIN korumalı KDS girişine `waiter` rolü eklendi; Kemal Aşçı PIN `3333` ve Ahmet Patron PIN `9999` ile giriş doğrulanabilir kılındı.
+
+#### D. Uçtan Uca Saha Doğrulaması (9 Kasım 2026):
+* **Fiziksel Termal Yazıcı Kanıtı:**
+  `info: Hipos.Api.Printing.PrinterTransport[0] Yazdırma başarılı (AĞ): Mutfak Bilet Yazıcısı -> 192.168.1.201:9100 (544 bayt)`
+* **Ekran Görüntüsü Kanıtları:**
+  - `kitchen_with_both_quick_sales.png`: KDS ekranında hem masalardan (`Masa 08`, `Masa 01`) hem de kasadan (`Hızlı Satış (Gel-Al)`) gelen siparişlerin anlık görünümü.
+  - `cashier_step3_order_submitted.png`: Kasa terminalinde Hızlı Satış onaylandıktan sonra tahsilat ve fiş tekrar basım ekranı.
+
+---
+
 ## 5. DOKÜMANTASYON GÜNCELLEME TAAHHÜDÜ
 
 Her faz uygulandığında:

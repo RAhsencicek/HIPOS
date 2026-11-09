@@ -525,6 +525,23 @@ export function CashierApp() {
     void printThermalCashierBill(receipt.check.id, openCashDrawer, paymentMethod);
     try { window.print(); } catch {}
   }
+  const [kitchenPrinting, setKitchenPrinting] = useState(false);
+  async function printKitchenTicketForCheck(checkId: string) {
+    if (kitchenPrinting) return;
+    setKitchenPrinting(true);
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/sales/checks/${encodeURIComponent(checkId)}/print-kitchen?isReprint=true`,
+        "pos-single",
+        {}
+      );
+      setSplitNotice(`🖨️ Mutfak fişi basıldı (KOPYA - ${res.transportUsed})`);
+    } catch (cause) {
+      setSplitNotice(cause instanceof Error ? `Mutfak fişi hatası: ${cause.message}` : "Mutfak fişi basılamadı.");
+    } finally {
+      setKitchenPrinting(false);
+    }
+  }
   const [unfinishedChecks, setUnfinishedChecks] = useState<CashierCheck[]>([]);
   const [unfinishedError, setUnfinishedError] = useState("");
   const [pendingQuick, setPendingQuick] = useState<QuickCreate | null>(() => { try { const value = localStorage.getItem(quickRequestKey); return value ? JSON.parse(value) as QuickCreate : null; } catch { return null; } });
@@ -2403,6 +2420,17 @@ export function CashierApp() {
                 }}
               >
                 🗑️ Siparişi İptal Et
+              </button>
+            )}
+            {activeCheck && (
+              <button
+                type="button"
+                className="cashier-split-button"
+                style={{ background: "#e0f2fe", color: "#0369a1", borderColor: "#38bdf8", fontWeight: 700 }}
+                disabled={kitchenPrinting}
+                onClick={() => void printKitchenTicketForCheck(activeCheck.id)}
+              >
+                {kitchenPrinting ? "Basılıyor…" : "🖨️ Mutfak Fişi Tekrar"}
               </button>
             )}
             <button className="cashier-split-button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) { setSplitCheck(activeCheck); setSplitQuantities({}); setSplitError(""); setSplitNotice(""); } }}>Adisyonu böl</button>
