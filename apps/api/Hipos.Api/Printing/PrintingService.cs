@@ -399,8 +399,44 @@ public sealed class PrintingService(
         long discountMinor = adjustments.Where(a => a.Action is "discount" or "comp").Sum(a => a.AmountMinor);
         long netTotal = Math.Max(0, grossTotal - discountMinor);
 
-        long paidMinor = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").Sum(p => p.AmountMinor);
+        var successfulPayments = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").ToList();
+        long paidMinor = successfulPayments.Sum(p => p.AmountMinor);
         long remainingMinor = Math.Max(0, netTotal - paidMinor);
+
+        if (successfulPayments.Count > 1)
+        {
+            var parts = successfulPayments.Select(p =>
+            {
+                var label = !string.IsNullOrWhiteSpace(p.Provider)
+                    ? p.Provider
+                    : p.Method switch
+                    {
+                        "cash" => "Nakit",
+                        "card" => "Kredi Kartı",
+                        "meal" => "Yemek Kartı",
+                        "transfer" => "Havale",
+                        "cari" => "Cari",
+                        _ => p.Method
+                    };
+                return $"{label}: {p.AmountMinor / 100.0:F2} TL";
+            });
+            paymentMethod = string.Join(" | ", parts);
+        }
+        else if (successfulPayments.Count == 1 && string.IsNullOrWhiteSpace(paymentMethod))
+        {
+            var p = successfulPayments[0];
+            paymentMethod = !string.IsNullOrWhiteSpace(p.Provider)
+                ? p.Provider
+                : p.Method switch
+                {
+                    "cash" => "NAKİT",
+                    "card" => "KREDİ KARTI",
+                    "meal" => "YEMEK KARTI",
+                    "transfer" => "HAVALE / EFT",
+                    "cari" => "CARİ / VERESİYE",
+                    _ => p.Method.ToUpperInvariant()
+                };
+        }
 
         var receiptBytes = EscPosBuilder.BuildCashierReceipt(
             firmTitle: "HIPOS RESTORAN",

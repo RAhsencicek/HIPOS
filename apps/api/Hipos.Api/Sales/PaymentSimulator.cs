@@ -10,10 +10,10 @@ namespace Hipos.Api.Sales;
 
 // Yalnız Development: burada dış sağlayıcı çağrısı ve gerçek para hareketi yoktur.
 public sealed record StartSimulatedPayment(
-    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
+    Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null, string? Provider = null, string? CustomerId = null);
 public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
 public sealed record PaymentAttemptInfo(
-    string Id, string OrderId, long AmountMinor, string Currency, string Method,
+    string Id, string OrderId, long AmountMinor, string Currency, string Method, string? Provider,
     string Status, int Version, bool Simulated, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record PaymentCommandResult(
     PaymentAttemptInfo? Attempt, SalesOrderDetail? Order, FeatureFailure? Failure, bool Created)
@@ -32,7 +32,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         string actor, CancellationToken cancellationToken, bool requireCheckCapability = false)
     {
         if (command.AttemptId == Guid.Empty || command.AmountMinor <= 0 ||
-            command.Method is not ("cash" or "card") ||
+            command.Method is not ("cash" or "card" or "meal" or "transfer" or "cari") ||
             command.SimulatedOutcome is not ("succeeded" or "failed" or "pending" or "unknown"))
             return PaymentCommandResult.Rejected("INVALID_PAYMENT", 400, "Örnek ödeme alanları geçersiz.");
         if (command.ExpectedOrderVersion < 1)
@@ -68,6 +68,19 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
                 return PaymentCommandResult.Rejected("CASH_SHIFT_AMBIGUOUS", 409, "Birden fazla açık kasa vardiyası var. Tahsilattan önce yalnız kullanılacak kasanın vardiyasını açık bırakın.");
             cashShift = shiftResult[0];
         }
+
+        string? resolvedCustomerId = null;
+        string? resolvedCustomerName = null;
+        if (command.Method == "cari")
+        {
+            if (!runtime.CariReady)
+                return PaymentCommandResult.Rejected("CARI_STORAGE_UNAVAILABLE", 503, "Cari veritabanı hazır değil; cari migration'larını uygulayıp API'yi yeniden başlatın.");
+
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "cari.management", cancellationToken);
+            if (blocked is not null) return new PaymentCommandResult(null, null, blocked, false);
+        }
+
         var order = await LockOrderAsync(firmId, branchId, orderId, cancellationToken);
         if (order is null)
             return PaymentCommandResult.Rejected("ORDER_NOT_FOUND", 404, "Sipariş bu şubede bulunamadı.");
@@ -84,6 +97,46 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         if (order.PaymentAttempts.Any(row => row.Status is "pending" or "unknown"))
             return PaymentCommandResult.Rejected("PAYMENT_UNRESOLVED", 409,
                 "Bekleyen veya belirsiz ödeme sonuçlanmadan yeni girişim başlatılamaz.");
+
+        if (command.Method == "cari")
+        {
+            resolvedCustomerId = string.IsNullOrWhiteSpace(command.CustomerId) ? null : command.CustomerId.Trim();
+            if (string.IsNullOrWhiteSpace(resolvedCustomerId))
+            {
+                var checkCustomer = await db.Checks.AsNoTracking()
+                    .Where(c => c.Id == order.CheckId && c.FirmId == firmId && c.BranchId == branchId)
+                    .Select(c => c.CustomerId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(checkCustomer))
+                    resolvedCustomerId = checkCustomer;
+            }
+
+            if (string.IsNullOrWhiteSpace(resolvedCustomerId))
+                return PaymentCommandResult.Rejected("CUSTOMER_REQUIRED", 400, "Cariye / veresiye yazmak için lütfen müşteri kartı seçin.");
+
+            await using var cmdParty = db.Database.GetDbConnection().CreateCommand();
+            cmdParty.Transaction = transaction.GetDbTransaction();
+            cmdParty.CommandText = """
+                SELECT name, is_active, types
+                FROM cari.parties
+                WHERE id = @id AND firm_id = @firm_id AND branch_id = @branch_id
+                FOR UPDATE
+                """;
+            AddParameter(cmdParty, "id", resolvedCustomerId);
+            AddParameter(cmdParty, "firm_id", firmId);
+            AddParameter(cmdParty, "branch_id", branchId);
+            await using var reader = await cmdParty.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return PaymentCommandResult.Rejected("CUSTOMER_NOT_FOUND", 404, "Seçilen cari kartı bulunamadı.");
+            resolvedCustomerName = reader.GetString(0);
+            var isActive = reader.GetBoolean(1);
+            var types = (string[])reader.GetValue(2);
+            if (!isActive)
+                return PaymentCommandResult.Rejected("CUSTOMER_INACTIVE", 409, "Seçilen müşteri kartı pasif durumda.");
+            if (!types.Contains("customer"))
+                return PaymentCommandResult.Rejected("CUSTOMER_NOT_ELIGIBLE", 409, "Seçilen cari kartı müşteri türünde değil.");
+        }
+
         var paid = PaidMinor(order);
         var payableTotal = await PayableOrderTotalAsync(order, cancellationToken);
         if (command.AmountMinor > payableTotal - paid)
@@ -91,11 +144,18 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
                 "Tutar siparişin kalan tutarını aşıyor.");
 
         var now = DateTimeOffset.UtcNow;
+        var provider = string.IsNullOrWhiteSpace(command.Provider) ? null : command.Provider.Trim();
+        if (command.Method == "cari" && resolvedCustomerName is not null)
+        {
+            provider = provider is not null && provider.Contains(resolvedCustomerName) ? provider : $"Cari: {resolvedCustomerName}";
+        }
+
         var attempt = new PaymentAttemptRow
         {
             Id = command.AttemptId, CheckId = order.CheckId,
             FirmId = firmId, BranchId = branchId, OrderId = orderId,
             AmountMinor = command.AmountMinor, Currency = "TRY", Method = command.Method,
+            Provider = provider,
             Status = command.SimulatedOutcome, RequestedOutcome = command.SimulatedOutcome,
             Version = 1, Actor = actor, CreatedAt = now, UpdatedAt = now,
         };
@@ -104,9 +164,24 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         UpdateOrderPaymentStatus(order, payableTotal);
         order.Version++;
         AddAudit(attempt, order, actor, "started", now);
+
+        if (command.Method == "cari" && resolvedCustomerId is not null)
+        {
+            await using var cmdCheck = db.Database.GetDbConnection().CreateCommand();
+            cmdCheck.Transaction = transaction.GetDbTransaction();
+            cmdCheck.CommandText = "UPDATE sales.checks SET customer_id = @customer_id, version = version + 1 WHERE id = @check_id AND firm_id = @firm_id AND branch_id = @branch_id AND (customer_id IS NULL OR customer_id = '')";
+            AddParameter(cmdCheck, "customer_id", resolvedCustomerId);
+            AddParameter(cmdCheck, "check_id", order.CheckId);
+            AddParameter(cmdCheck, "firm_id", firmId);
+            AddParameter(cmdCheck, "branch_id", branchId);
+            await cmdCheck.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (attempt.Status == "succeeded" && attempt.Method == "cari" && resolvedCustomerId is not null && resolvedCustomerName is not null)
+                await AddCariChargeAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction()!, firmId, branchId, resolvedCustomerId, resolvedCustomerName, order.CheckId, orderId, attempt, actor, now, cancellationToken);
             if (attempt.Status == "succeeded" && command.PostToCash && cashShift is not null)
                 await AddCashMovementAsync(db.Database.GetDbConnection(), cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
             if (attempt.Status == "succeeded")
@@ -115,6 +190,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             if (attempt.Status == "succeeded")
             {
                 eventHub?.Publish("payment.settled", firmId, branchId, new { attemptId = attempt.Id, orderId = order.Id, checkId = order.CheckId });
+                if (attempt.Method == "cari" && resolvedCustomerId is not null)
+                {
+                    eventHub?.Publish("cari.updated", firmId, branchId, new { partyId = resolvedCustomerId, partyName = resolvedCustomerName, deltaMinor = attempt.AmountMinor, checkId = order.CheckId });
+                }
             }
         }
         catch (DbUpdateConcurrencyException)
@@ -158,6 +237,22 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
     public static async Task AddCashMovementAsync(DbConnection connection, CashShiftLink shift, PaymentAttemptRow attempt, string actor,
         DateTimeOffset now, DbTransaction transaction, CancellationToken cancellationToken)
     {
+        var tenderTitle = (attempt.Method, attempt.Provider) switch
+        {
+            ("cash", _) => "Nakit",
+            ("card", not null and not "") => attempt.Provider,
+            ("card", _) => "Kredi / Banka Kartı",
+            ("meal", not null and not "") => attempt.Provider,
+            ("meal", _) => "Yemek Kartı",
+            ("transfer", _) => "Banka Havalesi / EFT",
+            ("cari", not null and not "") => attempt.Provider,
+            ("cari", _) => "Cari / Veresiye",
+            _ => attempt.Method
+        };
+        var providerValue = string.IsNullOrWhiteSpace(attempt.Provider)
+            ? (attempt.Method == "cash" ? "hipos-cash" : attempt.Method == "cari" ? "hipos-cari" : "hipos-pos")
+            : attempt.Provider;
+
         await using (var movement = connection.CreateCommand())
         {
             movement.Transaction = transaction;
@@ -167,13 +262,14 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
                      currency, description, source, provider, external_reference, provider_event_id, actor, created_at)
                 VALUES
                     (@id, @firm_id, @branch_id, @register_id, @shift_id, 'pos_sale', 'cash_sale', @method, @amount,
-                     'TRY', @description, 'pos', 'hipos-simulator', @external_reference, @event_id, @actor, @created_at)
+                     'TRY', @description, 'pos', @provider, @external_reference, @event_id, @actor, @created_at)
                 """;
             AddParameter(movement, "id", attempt.Id); AddParameter(movement, "firm_id", attempt.FirmId);
             AddParameter(movement, "branch_id", attempt.BranchId); AddParameter(movement, "register_id", shift.RegisterId);
             AddParameter(movement, "shift_id", shift.Id); AddParameter(movement, "method", attempt.Method);
             AddParameter(movement, "amount", attempt.AmountMinor);
-            AddParameter(movement, "description", $"Kasa tahsilatı · {(attempt.Method == "cash" ? "Nakit" : "Kart")} · Adisyon {attempt.CheckId.ToString()[..8]}");
+            AddParameter(movement, "description", $"Kasa tahsilatı · {tenderTitle} · Adisyon {attempt.CheckId.ToString()[..8]}");
+            AddParameter(movement, "provider", providerValue);
             AddParameter(movement, "external_reference", $"{attempt.CheckId}:{attempt.OrderId}");
             AddParameter(movement, "event_id", attempt.Id.ToString()); AddParameter(movement, "actor", actor);
             AddParameter(movement, "created_at", now);
@@ -199,9 +295,85 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             AddParameter(audit, "register_id", shift.RegisterId); AddParameter(audit, "shift_id", shift.Id);
             AddParameter(audit, "request_id", attempt.Id); AddParameter(audit, "entity_id", attempt.Id);
             AddParameter(audit, "actor", actor);
-            AddParameter(audit, "detail", $"pos_sale;method={attempt.Method};amountMinor={attempt.AmountMinor};checkId={attempt.CheckId};orderId={attempt.OrderId}");
+            AddParameter(audit, "detail", $"pos_sale;method={attempt.Method};provider={attempt.Provider};amountMinor={attempt.AmountMinor};checkId={attempt.CheckId};orderId={attempt.OrderId}");
             AddParameter(audit, "occurred_at", now);
             await audit.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    public static async Task AddCariChargeAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string firmId,
+        string branchId,
+        string partyId,
+        string partyName,
+        Guid checkId,
+        Guid orderId,
+        PaymentAttemptRow attempt,
+        string actor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var movementId = $"pm-sale-{attempt.Id:N}"[..Math.Min(80, 8 + 32)];
+        var description = $"Adisyon {checkId.ToString()[..8]} · Veresiye Satış ({partyName})";
+        var reference = checkId.ToString();
+        var effectiveDate = DateOnly.FromDateTime(now.DateTime);
+
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = """
+                INSERT INTO cari.movements
+                    (id, firm_id, branch_id, party_id, kind, entry_type, delta_minor,
+                     currency, description, reference, effective_date, source, actor, created_at)
+                VALUES
+                    (@id, @firm_id, @branch_id, @party_id, 'customer', 'customer_charge', @delta_minor,
+                     'TRY', @description, @reference, @effective_date, 'sales', @actor, @created_at)
+                ON CONFLICT (id) DO NOTHING;
+                """;
+            AddParameter(cmd, "id", movementId);
+            AddParameter(cmd, "firm_id", firmId);
+            AddParameter(cmd, "branch_id", branchId);
+            AddParameter(cmd, "party_id", partyId);
+            AddParameter(cmd, "delta_minor", attempt.AmountMinor);
+            AddParameter(cmd, "description", description);
+            AddParameter(cmd, "reference", reference);
+            AddParameter(cmd, "effective_date", effectiveDate);
+            AddParameter(cmd, "actor", actor);
+            AddParameter(cmd, "created_at", now);
+            await cmd.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmdParty = connection.CreateCommand())
+        {
+            cmdParty.Transaction = transaction;
+            cmdParty.CommandText = """
+                UPDATE cari.parties
+                SET version = version + 1, updated_at = @updated_at
+                WHERE id = @party_id AND firm_id = @firm_id AND branch_id = @branch_id;
+                """;
+            AddParameter(cmdParty, "party_id", partyId);
+            AddParameter(cmdParty, "firm_id", firmId);
+            AddParameter(cmdParty, "branch_id", branchId);
+            AddParameter(cmdParty, "updated_at", now);
+            await cmdParty.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var cmdAudit = connection.CreateCommand())
+        {
+            cmdAudit.Transaction = transaction;
+            cmdAudit.CommandText = """
+                INSERT INTO cari.audit (firm_id, branch_id, party_id, action, actor, detail, occurred_at)
+                VALUES (@firm_id, @branch_id, @party_id, 'sales_charge', @actor, @detail, @occurred_at);
+                """;
+            AddParameter(cmdAudit, "firm_id", firmId);
+            AddParameter(cmdAudit, "branch_id", branchId);
+            AddParameter(cmdAudit, "party_id", partyId);
+            AddParameter(cmdAudit, "actor", actor);
+            AddParameter(cmdAudit, "detail", $"customer_charge: {attempt.AmountMinor} TRY kuruş · Adisyon {checkId.ToString()[..8]} · Ödeme {attempt.Id}");
+            AddParameter(cmdAudit, "occurred_at", now);
+            await cmdAudit.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -257,9 +429,34 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
         UpdateOrderPaymentStatus(order, await PayableOrderTotalAsync(order, cancellationToken));
         order.Version++;
         AddAudit(attempt, order, actor, "resolved", now);
+
+        string? resolveCariPartyId = null;
+        string? resolveCariPartyName = null;
+        if (command.Outcome == "succeeded" && attempt.Method == "cari")
+        {
+            var checkCustomer = await db.Checks.AsNoTracking()
+                .Where(c => c.Id == order.CheckId && c.FirmId == firmId && c.BranchId == branchId)
+                .Select(c => c.CustomerId)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(checkCustomer))
+            {
+                resolveCariPartyId = checkCustomer;
+                await using var cmdParty = db.Database.GetDbConnection().CreateCommand();
+                cmdParty.Transaction = transaction.GetDbTransaction();
+                cmdParty.CommandText = "SELECT name FROM cari.parties WHERE id = @id AND firm_id = @firm_id AND branch_id = @branch_id";
+                AddParameter(cmdParty, "id", resolveCariPartyId);
+                AddParameter(cmdParty, "firm_id", firmId);
+                AddParameter(cmdParty, "branch_id", branchId);
+                var nameVal = await cmdParty.ExecuteScalarAsync(cancellationToken);
+                if (nameVal is string s) resolveCariPartyName = s;
+            }
+        }
+
         try
         {
             await db.SaveChangesAsync(cancellationToken);
+            if (command.Outcome == "succeeded" && attempt.Method == "cari" && resolveCariPartyId is not null && resolveCariPartyName is not null)
+                await AddCariChargeAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction()!, firmId, branchId, resolveCariPartyId, resolveCariPartyName, order.CheckId, order.Id, attempt, actor, now, cancellationToken);
             if (attempt.Status == "succeeded" && command.PostToCash && cashShift is not null)
                 await AddCashMovementAsync(db.Database.GetDbConnection(), cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
             if (command.Outcome == "succeeded")
@@ -268,6 +465,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             if (command.Outcome == "succeeded")
             {
                 eventHub?.Publish("payment.settled", firmId, branchId, new { attemptId = attempt.Id, orderId = order.Id, checkId = order.CheckId });
+                if (attempt.Method == "cari" && resolveCariPartyId is not null)
+                {
+                    eventHub?.Publish("cari.updated", firmId, branchId, new { partyId = resolveCariPartyId, partyName = resolveCariPartyName, deltaMinor = attempt.AmountMinor, checkId = order.CheckId });
+                }
             }
         }
         catch (DbUpdateConcurrencyException)
@@ -318,6 +519,7 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             eventHub?.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
         }
         eventHub?.Publish("check.closed", firmId, branchId, new { checkId = check.Id, tableId = check.TableId });
+        eventHub?.Publish("inventory.stock_updated", firmId, branchId, new { checkId = check.Id, timestamp = now });
     }
 
     public static async Task DepleteInventoryForCheckAsync(
@@ -550,5 +752,5 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
 
     private static PaymentAttemptInfo ToInfo(PaymentAttemptRow row) =>
         new(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor, row.Currency,
-            row.Method, row.Status, row.Version, true, row.CreatedAt, row.UpdatedAt);
+            row.Method, row.Provider, row.Status, row.Version, true, row.CreatedAt, row.UpdatedAt);
 }

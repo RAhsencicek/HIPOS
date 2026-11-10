@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Hipos.Api.Features;
+using Hipos.Api.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -19,7 +20,7 @@ public static class CatalogMenuEndpoints
     public static void MapCatalogMenuEndpoints(this WebApplication app, bool ready)
     {
         var group = app.MapGroup("/api/v1/firms/{firmId}/branches/{branchId}/catalog/menus");
-        group.MapGet("", async (string firmId, string branchId, HttpContext ctx, CatalogDbContext db) =>
+        group.MapGet("", async (string firmId, string branchId, HttpContext ctx, CatalogDbContext db, InventoryDbContext? inventoryDb) =>
         {
             if (Guard(ctx, firmId, branchId, ready, false) is { } denied) return denied;
             var products = await db.Products.AsNoTracking().Include(x => x.BranchPrices)
@@ -31,9 +32,113 @@ public static class CatalogMenuEndpoints
             var ids = menus.Select(x => x.Id).ToArray();
             var sections = await db.MenuSections.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
             var items = await db.MenuItems.AsNoTracking().Where(x => ids.Contains(x.MenuId)).OrderBy(x => x.SortOrder).ToListAsync(ctx.RequestAborted);
-            return Results.Ok(new { source = "postgres", items = menus.Select(x => View(x, sections, items)), categories,
-                products = products.Select(x => new { x.Id, x.Name, x.Sku, x.CategoryId, x.Status, x.IsActive, x.Channels, x.DesiredChannels, x.Image,
-                    price = new CatalogMoney(x.BranchPrices.FirstOrDefault(p => p.BranchId == branchId)?.AmountMinor ?? x.BasePriceMinor, x.Currency) }) });
+
+            // FAZ 8: Reçeteli ürünler için anlık hammadde stok durumu ve kapasite hesaplama
+            var stockInfo = new Dictionary<Guid, (bool isOutOfStock, bool isCriticalStock, int? availablePortions, string? limitingIngredientName)>();
+            if (inventoryDb is not null)
+            {
+                try
+                {
+                    var warehouse = await inventoryDb.Warehouses.AsNoTracking()
+                        .Where(w => w.FirmId == firmId && w.BranchId == branchId && w.IsActive)
+                        .OrderBy(w => w.Name).ThenBy(w => w.Id).FirstOrDefaultAsync(ctx.RequestAborted);
+
+                    if (warehouse is not null)
+                    {
+                        var productIds = products.Select(p => p.Id).ToList();
+                        var recipes = await inventoryDb.Recipes.AsNoTracking().Include(r => r.Lines)
+                            .Where(r => r.FirmId == firmId && r.BranchId == branchId && productIds.Contains(r.ProductId))
+                            .ToListAsync(ctx.RequestAborted);
+
+                        var latestRecipes = recipes
+                            .GroupBy(r => r.ProductId)
+                            .Select(g => g.OrderByDescending(r => r.Version).First())
+                            .ToList();
+
+                        var ingredientIds = latestRecipes.SelectMany(r => r.Lines).Select(l => l.IngredientId).Distinct().ToArray();
+
+                        var ingredients = await inventoryDb.Ingredients.AsNoTracking()
+                            .Where(i => i.FirmId == firmId && i.BranchId == branchId && ingredientIds.Contains(i.Id))
+                            .ToDictionaryAsync(i => i.Id, ctx.RequestAborted);
+
+                        var movements = await inventoryDb.Movements.AsNoTracking()
+                            .Where(m => m.FirmId == firmId && m.BranchId == branchId && m.WarehouseId == warehouse.Id && ingredientIds.Contains(m.IngredientId))
+                            .ToListAsync(ctx.RequestAborted);
+
+                        var balances = movements
+                            .GroupBy(m => m.IngredientId)
+                            .ToDictionary(g => g.Key, g => g.Sum(m => m.Delta));
+
+                        foreach (var recipe in latestRecipes)
+                        {
+                            if (recipe.Lines.Count == 0) continue;
+
+                            decimal minPossible = decimal.MaxValue;
+                            string? limitingName = null;
+                            bool anyCritical = false;
+
+                            foreach (var line in recipe.Lines)
+                            {
+                                var onHand = balances.GetValueOrDefault(line.IngredientId, 0m);
+                                ingredients.TryGetValue(line.IngredientId, out var ing);
+                                var possible = line.Quantity > 0 ? decimal.Floor(onHand / line.Quantity) : 0m;
+
+                                if (possible < minPossible)
+                                {
+                                    minPossible = possible;
+                                    limitingName = ing?.Name ?? line.IngredientId;
+                                }
+
+                                if (ing is not null && onHand <= ing.CriticalBelow)
+                                {
+                                    anyCritical = true;
+                                }
+                            }
+
+                            if (minPossible <= 0)
+                            {
+                                stockInfo[recipe.ProductId] = (true, false, 0, limitingName);
+                            }
+                            else
+                            {
+                                stockInfo[recipe.ProductId] = (false, anyCritical, (int)minPossible, limitingName);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Menü yükleme akışını kesmemek için stok hatasında devam edilir
+                }
+            }
+
+            return Results.Ok(new
+            {
+                source = "postgres",
+                items = menus.Select(x => View(x, sections, items)),
+                categories,
+                products = products.Select(x =>
+                {
+                    var hasStock = stockInfo.TryGetValue(x.Id, out var s);
+                    return new
+                    {
+                        x.Id,
+                        x.Name,
+                        x.Sku,
+                        x.CategoryId,
+                        x.Status,
+                        x.IsActive,
+                        x.Channels,
+                        x.DesiredChannels,
+                        x.Image,
+                        price = new CatalogMoney(x.BranchPrices.FirstOrDefault(p => p.BranchId == branchId)?.AmountMinor ?? x.BasePriceMinor, x.Currency),
+                        isOutOfStock = hasStock ? s.isOutOfStock : false,
+                        isCriticalStock = hasStock ? s.isCriticalStock : false,
+                        availablePortions = hasStock ? s.availablePortions : (int?)null,
+                        limitingIngredientName = hasStock ? s.limitingIngredientName : null
+                    };
+                })
+            });
         });
         group.MapPost("", (string firmId, string branchId, SaveCatalogMenu command, HttpContext ctx,
             CatalogDbContext db, FeatureNewWorkGate gate) => Save(firmId, branchId, command.RequestId, command, true, ctx, db, gate, ready));

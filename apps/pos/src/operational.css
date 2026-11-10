@@ -1370,6 +1370,66 @@ button, select { font: inherit; }
   border-radius: 999px;
   flex-shrink: 0;
 }
+.cashier-quick-product-card.out-of-stock {
+  opacity: 0.55;
+  background: #fef2f2;
+  border-color: #fecaca;
+  cursor: not-allowed;
+}
+.cashier-quick-product-card.out-of-stock:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: #ef4444;
+}
+.cashier-stock-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+.cashier-stock-badge.out-of-stock {
+  background: #dc2626;
+  color: #ffffff;
+}
+.cashier-stock-badge.critical-stock {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.waiter-product.out-of-stock {
+  opacity: 0.6;
+  background: #fef2f2 !important;
+  border-color: #fca5a5 !important;
+}
+.waiter-stock-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 999px;
+  line-height: 1.2;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.waiter-stock-badge.out-of-stock {
+  background: #dc2626;
+  color: #ffffff;
+}
+.waiter-stock-badge.critical-stock {
+  background: #d97706;
+  color: #ffffff;
+}
+.waiter-add-product.out-of-stock {
+  background: #e2e8f0 !important;
+  color: #94a3b8 !important;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
 .cashier-quick-product-price {
   font-size: 15px;
   font-weight: 850;

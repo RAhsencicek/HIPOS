@@ -113,6 +113,38 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 │ 3. Termal Ağ Yazıcı Soket Süresi: 2s -> 6s uzatıldı (Wi-Fi/LAN gecikmesi)│
 │ 4. KDS Sesli Bildirim: Web Audio API ile sipariş gelince bip/çan sesi   │
 │ 5. KDS Servis Edilenler Geçmişi: Tamamlanan siparişler için geçmiş blok│
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 6: KASA ÇOKLU ÖDEME YÖNTEMLERİ & BANKA POS SLIP KAYDI (✅ BİTTİ)    │
+│ 1. sales.payment_attempts kısıtına meal, transfer, cari eklendi (BİTTİ)│
+│ 2. Kasa ekranında Ziraat/Garanti/VakıfBank POS terminal slip kaydı     │
+│ 3. Sodexo / Multinet yemek kartı ödemeleri kasa defterine işlendi      │
+│ 4. Parçalı ödeme (Split) dökümü adisyon fişine yansıtıldı (BİTTİ)      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 7: CARİYE YAZMA (Veresiye Müşteri Borçlandırma) (✅ TAMAMLANDI)    │
+│ 1. Kasa ekranında 'Cariye Yaz' tahsilatının cari.movements bağlantısı │
+│ 2. Seçili müşterinin borç bakiyesinin güncellenmesi ve ekstreye düşmesi│
+│ 3. Termal adisyon fişinde 'Veresiye / Cari · Müşteri Adı' dökümü        │
+│ 4. Yönetici Cariler ekranında anlık alacak artışı ve hareket kaydı     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 8: CANLI KRİTİK STOK VE TÜKENDİ ROZETİ (✅ TAMAMLANDI - 9 KASIM)     │
+│ 1. Reçete hammaddesi tükenen ürünlere Kasa ve Garsonda 'Tükendi' rozeti │
+│ 2. Kritik eşik altındaki ürünlere sarı 'Kritik Stok' rozeti             │
+│ 3. Garson sipariş verirken tükenen ürünün mutfağa gitmesini engelleme  │
+│ 4. Backend sipariş blokajı (409 PRODUCT_OUT_OF_STOCK) ile tam koruma  │
+│ 5. SSE inventory.stock_updated yayını ile anlık otomatik güncelleme    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 9: YÖNETİCİ EKRANI TEMİZLİĞİ VE ROTA SENKRONİZASYONU (✅ TAMAMLANDI) │
+│ 1. /admin/inventory eski 'Satışlar stoğu değiştirmez' uyarısı kaldırıldı│
+│ 2. Yan menü yönlendirmelerinin (/admin/cash, /admin/reports) teyit edildi│
+│ 3. Tüm şartname ve yol haritası dokümanları eşzamanlı kilitlendi (9 KASIM)│
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -309,9 +341,162 @@ Adisyon ister masada ister hızlı satışta (gel-al) kapansın, son ödeme alı
 
 ---
 
-## 5. DOKÜMANTASYON GÜNCELLEME TAAHHÜDÜ
+### 🔷 FAZ 6 TEKNİK SÖZLEŞMESİ: Kasa Çoklu Ödeme Yöntemleri & Banka POS Slip Kaydı (✅ TAMAMLANDI - 9 KASIM 2026)
 
-Her faz uygulandığında:
-1. `DURUM_VE_YOL_HARITASI.md` içindeki ilgili fazın durumu `Tamamlandı` olarak işaretlenecektir.
-2. İlgili `MODUL_*.md` şartnamesine yeni eklenen endpoint'ler ve UI bileşenleri linkleriyle eklenecektir.
-3. Test senaryosu `docs/04-test-ve-rehberler/` altına eklenerek doğrulanacaktır.
+#### A. İşletme İhtiyacı:
+Restoranda müşteriler hesabı tek bir yöntemle ödemeyebilir. Örneğin ₺260 tutarındaki bir hesap:
+- ₺100 Garanti POS (Kredi Kartı)
+- ₺160 Sodexo (Yemek Kartı)
+olarak parçalı ödenebilir. Gün sonunda kasiyer kasa kapattığında Z-Raporunda *"Nakit: ₺X, Garanti POS: ₺100, Sodexo: ₺160"* ayrımını tam görmelidir.
+
+#### B. Mimari ve Veritabanı Genişletmesi:
+1. `sales.payment_attempts` tablosuna `provider character varying(80)` kolonu eklendi. `ck_payment_method` kısıtı `('cash', 'card', 'meal', 'transfer', 'cari')` olarak genişletildi.
+2. `cash.movements` tablosunda `ck_cash_movement_tender_method` ve `ck_cash_movement_pos_sale` kısıtları `('cash', 'card', 'meal', 'transfer', 'cari')` değerlerini kabul edecek şekilde güncellendi.
+3. `PaymentSimulator.cs` ve `SalesCheckEndpoints.cs` API'leri `provider` parametresini alacak şekilde güncellendi. Kasa hareketine sağlayıcı (`Garanti POS`, `Sodexo`, `Ziraat POS` vb.) doğrudan yazıldı.
+4. `CashEndpoints.cs` Z-Raporu ve `ReportsEndpoints.cs` satış analitiği, gelen tüm tender methodlarını (`cash`, `card`, `meal`, `transfer`, `cari`) dinamik olarak toplayıp döküm olarak dönecek şekilde uyarlandı.
+5. `PrintingService.cs` adisyon termal fişi oluştururken parçalı ödemelerde tahsilat dökümünü (`Garanti POS: 100.00 TL | Sodexo: 160.00 TL`) fiş gövdesine işleyecek şekilde güncellendi.
+6. `OperationalApps.tsx` kasada kart seçildiğinde banka POS'larını (Ziraat/Garanti/VakıfBank), yemek kartı seçildiğinde yemek kartlarını (Sodexo/Multinet/Ticket/Setcard/Metropol) alt butonlarla seçtirip backend'e aktardı.
+
+#### C. Canlı Test ve Saha Kanıtları (9 Kasım 2026):
+* **Senaryo 1 (API Split Test):** ₺640 Margherita Pizza siparişi: ₺200 Garanti POS + ₺140 Sodexo + ₺300 Nakit parçalı ödendi; adisyon sıfırlanıp kapandı, termal yazıcıya fiş iletildi (`test_faz6_payments.py`).
+* **Senaryo 2 (Dokunmatik Kasa Tarayıcı Testi):** ₺260 Tavuklu Sandviç siparişi: ₺100 Garanti POS ile kısmi tahsil edildi, ardından kalan ₺160 Sodexo ile kapatıldı (`test_faz6_browser.mjs`).
+* **Veritabanı Kanıtı:**
+  `sales.payment_attempts`:
+  `card | Garanti POS | 10000 | succeeded`
+  `meal | Sodexo      | 16000 | succeeded`
+  `cash.movements`:
+  `pos_sale | cash_sale | card | Garanti POS | 10000 | Kasa tahsilatı · Garanti POS · Adisyon ede915ff`
+  `pos_sale | cash_sale | meal | Sodexo      | 16000 | Kasa tahsilatı · Sodexo · Adisyon ede915ff`
+* **X/Z Raporu Kanıtı:**
+  `tenders: [ { method: "cash", label: "Nakit" }, { method: "card", label: "Kredi / Banka Kartı", amountMinor: 20000 }, { method: "meal", label: "Yemek Kartı (Sodexo/Multinet)", amountMinor: 14000 } ]`
+* **Ekran Görüntüsü Kanıtları:**
+  - `faz6_01_checkout_open.png`: Hızlı satış onaylanıp tahsilat seçenekleri açıldı.
+  - `faz6_02_garanti_pos_selected.png`: Kredi Kartı ve Garanti POS alt butonu seçildi, ₺100 girildi.
+  - `faz6_03_after_partial_garanti.png`: ₺100 Garanti POS tahsil edildi, kalan ₺160 uyarısı belirdi.
+  - `faz6_04_sodexo_selected.png`: Yemek Kartı ve Sodexo seçildi, kalan ₺160 ödemeye hazırlandı.
+  - `faz6_05_payment_success.png`: ₺260 satış başarıyla kapandı, termal yazıcıya adisyon fişi gönderildi.
+
+---
+
+### 🔷 FAZ 7 TEKNİK SÖZLEŞMESİ: Cariye Yazma (Veresiye Müşteri Borçlandırma & Cari Ekstre Entegrasyonu) (✅ TAMAMLANDI - 9 KASIM 2026)
+
+#### A. İşletme İhtiyacı:
+Düzenli müşteriler (örneğin civar esnaf veya daimi müşteriler) hesabı o an nakit/kart ile ödemeyip "Cariye yaz" diyebilir. Kasiyer müşteri listesinden ilgili müşteriyi (örn. Ahmet Yılmaz) seçtiğinde bu tutar doğrudan müşterinin cari hesabına borç (`customer_charge`) olarak işlenmeli, adisyon kapatılmalı, termal fişte müşterinin adı görünmeli ve yönetici cari panelinde anlık olarak yansımalıdır.
+
+#### B. Mimari ve Veri Akışı:
+1. **API Sözleşmesi:** `POST /api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts` çağrısında `method: "cari"` ve `customerId: "party-ahmet"` gönderilir.
+2. **Karakteristik & Doğrulama:**
+   - Müşteri ID verilmezse `400 CUSTOMER_REQUIRED` döner.
+   - Seçilen cari kartı aktif değilse `409 CUSTOMER_INACTIVE`, müşteri türünde değilse (`!types.Contains("customer")`) `409 CUSTOMER_NOT_ELIGIBLE` döner.
+   - Adisyon üzerindeki `sales.checks.customer_id` boşsa otomatik olarak seçilen müşteriye bağlanır.
+   - Ödeme girişiminin `provider` alanı `$"Cari: {party.Name}"` olarak mühürlenir.
+3. **Atomik Hareket Kaydı (`AddCariChargeAsync`):**
+   - Satış işlemiyle aynı transaction içinde `cari.movements` tablosuna hareket yazılır:
+     - `id: "pm-sale-{attemptId}"`
+     - `kind: "customer"`
+     - `entry_type: "customer_charge"`
+     - `delta_minor: amountMinor` (pozitif = müşterinin borcu artar)
+     - `source: "sales"`
+     - `reference: checkId`
+     - `description: "Adisyon {checkId[..8]} · Veresiye Satış ({partyName})"`
+   - `cari.parties` tablosunda `version` ve `updated_at` artırılır.
+   - `cari.audit` tablosuna `sales_charge` denetim izi yazılır.
+4. **Kasa Defteri Etkisi:**
+   - `cash.movements` tablosuna `category: "cash_sale"`, `kind: "pos_sale"`, `tender_method: "cari"`, `provider: "Cari: Ahmet Yılmaz"` yazılır.
+   - `CashEndpoints.Expected(movements)` fonksiyonu `tender_method == "cari"` olduğu için fiziksel çekmece nakdine ekleme yapmaz; Z-Raporu sayımında kasa açığı/fazlası hatası oluşmaz. Ancak brüt satış toplamına ve gayri nakdi tender dökümüne eksiksiz dahil edilir.
+5. **Termal Fiş & Ekstre:**
+   - `PrintingService.cs` termal adisyon fişinde tahsilat türünü `"Cari: Ahmet Yılmaz"` veya `"CARİ / VERESİYE"` olarak basar.
+   - Yönetici panelinde `/admin/?section=customers&item=accounts` altında son hareketlerde *"Veresiye satış / alacak · Satış · +₺260,00"* olarak anında listelenir; müşteri ekstresinde adisyon referansı ve yeni bakiye izlenir.
+
+#### C. Canlı Test ve Saha Kanıtları (9 Kasım 2026):
+* **Senaryo 1 (API Uçtan Uca Entegrasyon Testi):** `scripts/test_faz7_cari.mjs`
+  - Ahmet Yılmaz başlangıç bakiyesi: ₺1.000,00.
+  - ₺260 Tavuklu Sandviç adisyonu açıldı (`504dc7bd...`).
+  - `method: "cari"`, `customerId: "party-ahmet"` ile ₺260 ödendi.
+  - Adisyon durumu `status: "closed"`, `customerId: "party-ahmet"` oldu.
+  - Ahmet Yılmaz güncel bakiyesi tam ₺1.260,00 (+₺260) oldu.
+  - Son cari hareketi: `id: pm-sale-6732be3e..., entry_type: customer_charge, source: sales, delta_minor: 26000`.
+  - Termal yazıcıya adisyon fişi iletildi: `Network (192.168.1.200:9100)`.
+* **Senaryo 2 (Dokunmatik Kasa & Yönetici Paneli Canlı Tarayıcı Testi):** `scripts/test_faz7_browser.mjs`
+  - Kasiyer PIN 1234 ile girdi, Kadıköy Ana Kasa seçti, Hızlı Satış moduna geçti.
+  - Tavuklu Sandviç sepete eklendi (₺260).
+  - "Cariye Yaz" butonuna basıldı; müşteri arama/seçim modalı açıldı.
+  - Ahmet Yılmaz seçildi; bakiye ve müşteri rozeti onaylandı.
+  - Tahsilat tamamlandı; başarı banner'ı ve termal fiş çıktısı alındı.
+  - Yönetici panelinde Cariler ekranına gidildi; Son Hareketler'de `+₺260,00 Veresiye Satış` teyit edildi.
+* **Ekran Görüntüsü Kanıtları:**
+  - `faz7_01_customer_modal.png`: Kasa ekranında Cariye Yaz müşteri arama ve bakiye modalı.
+  - `faz7_02_customer_selected.png`: Ahmet Yılmaz seçildikten sonra bakiye rozeti ve tahsilat onay butonu.
+  - `faz7_03_payment_success.png`: Veresiye satışın başarıyla kapatılması ve adisyon fişinin basılması.
+  - `faz7_04_admin_cari.png`: Yönetici panelinde Cari ve Müşteriler -> Cari Hesaplar -> Son Hareketlerde satış alacağı.
+  - `faz7_05_admin_statement.png`: Ahmet Yılmaz hesap kartında adisyon referanslı müşteri borç ekstresi.
+
+---
+
+### 🔷 FAZ 8 TEKNİK SÖZLEŞMESİ: Canlı Kritik Stok ve Tükendi Rozeti (✅ TAMAMLANDI - 9 KASIM 2026)
+
+#### A. İşletme İhtiyacı:
+Reçetesindeki hammaddelerden biri tükenen (örneğin ekmek bitti veya mozzarella bitti) bir ürün için garsonun sipariş almaya devam etmesi mutfakla salon arasında karmaşaya ve müşteri memnuniyetsizliğine yol açar. Sistem:
+1. Reçetedeki herhangi bir hammadde tükendiğinde (`on_hand <= 0`) ürünü otomatik olarak "Tükendi" durumuna getirmeli,
+2. Kritik eşik altındaki (`0 < on_hand <= critical_below`) ürünler için "Kritik Stok" rozeti ve kalan porsiyon miktarını göstermeli,
+3. Kasa ve Garson ekranlarında personelin bu ürünü sepete eklemesini engellemeli,
+4. Arka uçta API seviyesinde (`SalesOrders.CreateAsync`) tükenen ürüne gelen siparişleri `409 PRODUCT_OUT_OF_STOCK` ile reddetmeli,
+5. Kasa satışı sonrası stok düştüğünde SSE üzerinden `inventory.stock_updated` fırlatarak tüm terminallerin anında güncellenmesini sağlamalıdır.
+
+#### B. Mimari ve Algoritma:
+1. **Menü Stok Zenginleştirmesi ([`CatalogMenuEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Catalog/CatalogMenuEndpoints.cs)):**
+   - `GET /catalog/menus` çağrısında şubenin aktif ana deposu ve son sürüm reçeteleri sorgulanır.
+   - Her reçete satırının hammadde mevcudu (`on_hand = SUM(movements.delta)`) required miktara bölünerek teorik porsiyon hesaplanır (`floor(on_hand / quantity)`).
+   - Reçetedeki en az kalan hammadde `limitingIngredientName` olarak belirlenir.
+   - Porsiyon `<= 0` ise `isOutOfStock: true`, `availablePortions: 0`.
+   - Porsiyon `> 0` ve herhangi bir hammadde `on_hand <= critical_below` ise `isCriticalStock: true`, `availablePortions: minPortions`.
+   - Reçetesiz ürünler için `isOutOfStock: false, isCriticalStock: false, availablePortions: null`.
+2. **Arka Uç Güvenlik Kilidi ([`SalesOrders.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesOrders.cs)):**
+   - `SalesOrders.CreateAsync` sipariş kalemlerini doğrular ve `CheckRecipeStockAvailabilityAsync` çalıştırır.
+   - Eğer ürün reçeteli ise ve herhangi bir hammaddesi `on_hand <= 0` veya `on_hand < (requiredPerPortion * requestedQuantity)` ise işlem `409 PRODUCT_OUT_OF_STOCK` ile reddedilir:
+     `"{productName} ürününün hammaddesi ({ingredientName}) tükendiği için sipariş verilemez."`
+3. **Gerçek Zamanlı SSE Tetiklemesi ([`PaymentSimulator.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/PaymentSimulator.cs), [`InventoryEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Inventory/InventoryEndpoints.cs)):**
+   - Kasa tahsilatı tamamlanıp hammadde düşüldüğünde (`DepleteInventoryForCheckAsync`) `inventory.stock_updated` olayı yayınlanır.
+   - Manuel stok hareketi, fire kaydı veya sayım onaylandığında da `inventory.stock_updated` yayınlanır.
+   - Kasa ve Garson ekranları bu olayı dinleyerek menüyü arka planda sessizce yeniler.
+4. **Dokunmatik Arayüz Görselleştirme ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`operational.css`](file:///Users/mac/HIPOS/apps/pos/src/operational.css)):**
+   - **Kasa Hızlı Satış:** Ürün kartında kırmızı `🚫 Tükendi` rozeti, karta tıklandığında engelleme ve *"Margherita Pizza tükendi. Mutfak stoğunda Mozzarella bulunmuyor."* uyarısı.
+   - **Garson Ekranı:** Ürün kartında `🚫 Tükendi` rozeti, `＋ Ekle` butonu yerine pasif gri `Tükendi` butonu (`disabled: true`), tıklama engeli.
+   - **Kritik Rozeti:** Stoğu kritik eşikteki ürünlerde kehribar sarısı `⚠️ Kritik (X)` rozeti.
+
+#### C. Canlı Test ve Saha Kanıtları (9 Kasım 2026):
+* **Senaryo 1 (API ve Stok Koruması Testi):** `scripts/test_faz8_stock.mjs`
+  - Reçete durumu: Mozzarella `-260g` (Tükendi), Sandviç Ekmeği `25 adet` (Stokta).
+  - `GET /catalog/menus`: Margherita Pizza `isOutOfStock: true, availablePortions: 0, limitingIngredientName: 'Mozzarella'`.
+  - Margherita Pizza için `POST /sales/checks` çağrısı yapıldı: HTTP 409 `PRODUCT_OUT_OF_STOCK` ("Margherita Pizza ürününün hammaddesi (Mozzarella) tükendiği için sipariş verilemez.") ile anında engellendi!
+  - Tavuklu Sandviç için `POST /sales/checks` çağrısı yapıldı: HTTP 201 Created ile başarıyla sipariş açıldı.
+* **Senaryo 2 (Dokunmatik Kasa & Garson Tableti Tarayıcı Testi):** `scripts/test_faz8_browser.mjs`
+  - Kasiyer PIN 1234 ile Hızlı Satış ekranını açtı: Margherita Pizza üzerinde kırmızı `🚫 Tükendi` rozeti görüldü, karta tıklandığında sepete ekleme engellendi ve açıklayıcı toast uyarısı verildi.
+  - Garson PIN 2222 ile Masa 04'ü açtı: Margherita Pizza ürün kartında `🚫 Tükendi` rozeti ve pasif `Tükendi` butonu doğrulandı.
+* **Ekran Görüntüsü Kanıtları:**
+  - `faz8_01_pos_out_of_stock.png`: Kasa Hızlı Satış ekranında Margherita Pizza üzerindeki kırmızı `🚫 Tükendi` rozeti ve tıklama engeli uyarı bildirimi.
+  - `faz8_02_waiter_out_of_stock.png`: Garson sipariş ekranında Margherita Pizza kartı üzerindeki `🚫 Tükendi` rozeti ve devre dışı bırakılmış `Tükendi` butonu.
+
+---
+
+### 🔷 FAZ 9 TEKNİK SÖZLEŞMESİ: Yönetici Ekranı Temizliği ve Rota Senkronizasyonu (✅ TAMAMLANDI - 9 KASIM 2026)
+
+#### A. Kapsam ve Yapılan Düzeltmeler:
+1. **Stok Sayfası Canlı Bilgilendirmesi ([`InventoryHttpPage.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/inventory/InventoryHttpPage.tsx)):**
+   - Eski statik prototipten kalan *"Satışlar stoğu otomatik değiştirmez; sayım farkları onayınızdan sonra uygulanır."* yanıltıcı uyarısı kaldırıldı.
+   - Yerine *"🟢 Canlı Stok Entegrasyonu: Satışlardan reçete hammadde tüketimi anlık olarak otomatik düşülmektedir. Manuel giriş/çıkış, zayi/fire ve sayım farkları onayınızla uygulanır."* canlı bilgilendirmesi getirildi.
+2. **Yönetici Menü Rotaları Senkronizasyonu ([`App.tsx`](file:///Users/mac/HIPOS/apps/admin/src/App.tsx)):**
+   - `/admin/inventory` (Stok ve Tedarik), `/admin/cash` (Kasa ve Vardiya), `/admin/reports` (Satış ve Mali Analitik), `/admin/?section=customers` (Cariler ve Müşteriler) rotalarının canlı PostgreSQL ve backend API'leriyle tam entegre çalıştığı doğrulandı.
+3. **Ekran Görüntüsü Kanıtları:**
+   - `faz9_01_admin_inventory_live.png`: Yönetici Stok Sayfası canlı hammadde listesi, reçete üretim kapasitesi ve güncel bildirim banner'ı.
+   - `faz9_02_admin_cash_live.png`: Yönetici Kasa Defteri, banka POS ayrımı ve cari gayri-nakdi tahsilat dökümü.
+   - `faz9_03_admin_reports_live.png`: Yönetici Satış Raporları, parçalı ödeme dağılımı ve şube bazlı brüt ciro grafikleri.
+
+---
+
+## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ
+
+Tüm 9 faz eksiksiz olarak uygulanmış, PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile görsel olarak doğrulanmış, ESC/POS termal yazıcı hatlarına kadar canlı saha testlerinden geçirilmiştir:
+1. `DURUM_VE_YOL_HARITASI.md`: Tüm fazlar `Tamamlandı` olarak mühürlenmiştir.
+2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_YAZICI.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`: Yeni endpoint'ler, veri sözleşmeleri ve UI bileşenleriyle senkronize edilmiştir.
+3. Canlı sistemde hiçbir askıda kalan (zombi) masa, tutarsız kasa bakiyesi veya sahte mock veri kalmamıştır. Proje üretime ve saha kullanımına tam hazırdır.

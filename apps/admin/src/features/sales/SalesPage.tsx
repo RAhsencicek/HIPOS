@@ -154,9 +154,9 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
   const heading = view === "summary" ? "Satış Özeti" : view === "open" ? "Açık Adisyonlar" : "Adisyonlar";
   return <>
     <PageHeading eyebrow="SATIŞLAR VE ADİSYONLAR" title={heading}
-      description={view === "summary" ? "Test POS üzerinden alınan siparişlerin güncel özeti." : view === "open" ? "Açık test siparişlerini ve kalan tutarları takip edin. Görünüm düzenli olarak yenilenir." : "Siparişleri ve test ödemelerinin durumunu birlikte inceleyin."}
-      action={<StatusPill tone="blue">Salt okunur</StatusPill>} />
-    <div className="notice" role="status">Test ödemeleri gösteriliyor. Bu işlemler gerçek tahsilat yapmaz.</div>
+      description={view === "summary" ? "Kasa ve garson masalarından alınan siparişlerin anlık özeti." : view === "open" ? "Açık siparişleri ve kalan tutarları takip edin. Görünüm düzenli olarak yenilenir." : "Siparişleri ve tahsilat durumlarını birlikte inceleyin."}
+      action={<StatusPill tone="green">Canlı Veri</StatusPill>} />
+    <div className="notice" role="status">🟢 Canlı Satış ve Tahsilat Kayıtları: Kasa (Gel-Al) ve Garson masalarından alınan tüm siparişler ve tahsilatlar anlık listelenmektedir.</div>
     {state === "loading" && <div className="card empty-list" role="status">Siparişler yükleniyor…</div>}
     {state === "error" && <div className="card empty-list" role="alert">{error}</div>}
     {state === "ready" && view === "summary" && <>
@@ -164,7 +164,7 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
         <MetricCard icon={<CreditCard size={22} />} title="AÇIK BAKİYE" value={moneyMinor(openBalance)} foot="Simüle ödeme sonrası kalan" tone="purple" />
         <MetricCard icon={<Package size={22} />} title="SİPARİŞ KALEMİ" value={String(orders.reduce((sum, order) => sum + order.items.reduce((n, item) => n + item.quantity, 0), 0))} foot="Açık siparişlerdeki adet" tone="orange" />
         <MetricCard icon={<Clock3 size={22} />} title="SON SİPARİŞ" value={orders[0] ? new Date(orders[0].createdAt).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"} foot="Son kayıt zamanı" tone="green" /></div>
-      {orders.length ? <div className="card content-card sales-live-list"><div className="card-heading padded"><div><span className="card-kicker">CANLI KAYIT</span><h2>Son test POS siparişleri</h2></div></div><LiveOrderTable orders={orders} ctx={ctx} /></div> : <div className="card empty-list">Bu şubede henüz sipariş yok. Test POS üzerinden ilk siparişinizi oluşturabilirsiniz.</div>}
+      {orders.length ? <div className="card content-card sales-live-list"><div className="card-heading padded"><div><span className="card-kicker">CANLI KAYIT</span><h2>Son satış ve sipariş kayıtları</h2></div></div><LiveOrderTable orders={orders} ctx={ctx} /></div> : <div className="card empty-list">Bu şubede henüz sipariş yok. Test POS üzerinden ilk siparişinizi oluşturabilirsiniz.</div>}
     </>}
     {state === "ready" && view === "checks" && <div className="card content-card sales-live-list"><div className="card-heading padded"><div><span className="card-kicker">GERÇEK KAYIT</span><h2>Sipariş ve ödeme kayıtları</h2></div><StatusPill tone="blue">{orders.length} kayıt</StatusPill></div>{orders.length ? <LiveOrderTable orders={orders} ctx={ctx} /> : <div className="empty-list">Bu şubede henüz kayıtlı sipariş yok.</div>}</div>}
     {state === "ready" && view === "open" && <>{openOrders.length ? <div className="sales-open-summary"><div><strong>{openOrders.length}</strong><span>açık test siparişi</span></div><div><strong>{moneyMinor(openBalance)}</strong><span>kalan bakiye · simüle</span></div><div><strong>{orders.length}</strong><span>toplam sipariş</span></div></div> : <div className="card empty-list">Bu şubede açık sipariş kaydı yok.</div>}
@@ -174,7 +174,7 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
 
 function LiveOrderTable({ orders, ctx }: { orders: LiveOrder[]; ctx: ViewContext }) {
   return <div className="table-scroll"><table><thead><tr><th>SİPARİŞ</th><th>ŞUBE</th><th>ÜRÜNLER</th><th>DURUM</th><th>ÖDEME</th><th>TOPLAM</th><th>AÇILIŞ</th></tr></thead><tbody>{orders.map(order => <tr key={order.id}>
-    <td><strong title={order.id}>{order.id.slice(0, 8)}…{order.id.slice(-4)}</strong><small>{order.source === "demo_service" ? "Kurgu demo" : order.source === "test_pos" ? "Test POS" : order.source === "waiter_web" ? "Garson ekranı" : order.source}</small></td>
+    <td><strong title={order.id}>{order.id.slice(0, 8)}…{order.id.slice(-4)}</strong><small>{order.source === "demo_service" ? "Kurgu demo" : order.source === "test_pos" ? "Kasa (Hızlı Satış)" : order.source === "waiter_web" ? "Garson tableti" : order.source}</small></td>
     <td>{ctx.branches.find(branch => branch.apiId === order.branchId)?.name ?? order.branchId}</td><td>{order.items.map(item => `${item.quantity}× ${item.productName}`).join(", ")}</td>
     <td><StatusPill tone="blue">{order.status === "open" ? "Açık" : order.status}</StatusPill></td><td><StatusPill tone={order.paymentStatus === "paid" ? "green" : order.paymentStatus === "unknown" ? "orange" : "purple"}>{paymentLabel[order.paymentStatus] ?? order.paymentStatus}</StatusPill><small>Ödenen: {moneyMinor(order.paidMinor)} · Kalan: {moneyMinor(order.remainingMinor)}</small></td>
     <td className="numeric strong">{moneyMinor(order.totalMinor)}</td><td className="muted">{new Date(order.createdAt).toLocaleString("tr-TR")}</td></tr>)}</tbody></table><div className="table-footer">{orders.length} kayıt · API sağlayıcısı · en fazla son 100 sipariş</div></div>;

@@ -101,3 +101,22 @@ public static async Task DepleteInventoryForCheckAsync(
    - `inventory.movements` tablosuna `kind: "pos_sale"` olan 2 hareket yazılmalıdır (1 adet ekmek * 2 = -2 adet, 120g tavuk * 2 = -240g).
    - `inventory.ingredients` tablosunda `bread` bakiyesi 38'den 36'ya, `chicken` bakiyesi 7600'den 7360'a düşmelidir.
    - Admin Paneli `/admin/inventory/ingredients` ekranında stok anında güncel görünmelidir.
+
+---
+
+## 4. CANLI KRİTİK STOK VE TÜKENDİ GÜVENLİK SÖZLEŞMESİ (FAZ 8)
+
+### A. İşletme Kuralı ve Eşikler:
+1. **Tükendi Durumu (`isOutOfStock: true`):**
+   - Reçeteli bir ürünün herhangi bir hammaddesi mevcudu `on_hand <= 0` ise ürün derhal tükenmiş sayılır (`availablePortions = 0`).
+   - Kasa Hızlı Satış ve Garson ekranlarında kırmızı `🚫 Tükendi` rozetiyle işaretlenir.
+   - Dokunmatik arayüzde sepete ekleme butonları kilitlenir; tıklandığında *"X ürünü tükendi. Mutfak stoğunda Y bulunmuyor."* uyarısı verilir.
+2. **Kritik Stok Durumu (`isCriticalStock: true`):**
+   - Reçetedeki herhangi bir hammadde kritik eşiğin altına (`0 < on_hand <= critical_below`) indiğinde ürün sarı/kehribar `⚠️ Kritik (X)` rozeti alır.
+   - Personele kalan tahmini porsiyon bilgisi gösterilerek tedbirli satış yapılması sağlanır.
+3. **Backend Sipariş Engeli ([`SalesOrders.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesOrders.cs)):**
+   - `SalesOrders.CreateAsync` metodu `CheckRecipeStockAvailabilityAsync` kontrolü yapar.
+   - İstemci arayüzü atlansa veya doğrudan API çağrısı yapılsa dahi, tükenen ürün siparişleri HTTP 409 `PRODUCT_OUT_OF_STOCK` hatasıyla mutfağa veya adisyona iletilmeden anında durdurulur.
+4. **SSE Canlı İletim:**
+   - Kasa satışı, zayi/fire veya sayım onayı gerçekleştiğinde `inventory.stock_updated` SSE yayını yapılır.
+   - Sayfa yenilemeye (F5) gerek kalmaksızın tüm şube terminalleri anlık olarak güncellenir.

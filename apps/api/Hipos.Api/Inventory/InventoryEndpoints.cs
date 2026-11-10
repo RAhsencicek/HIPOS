@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Hipos.Api.Catalog;
 using Hipos.Api.Features;
+using Hipos.Api.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -280,7 +281,7 @@ public static class InventoryEndpoints
         });
 
         group.MapPost("/waste", async (string firmId, string branchId, CreateInventoryWaste command,
-            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate) =>
+            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate, IRestaurantEventHub? eventHub = null) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -326,11 +327,12 @@ public static class InventoryEndpoints
                 $"{ingredient.Name}: {command.Quantity} {ingredient.Unit} · {reasonType} · {description}", now, warehouse.Id, command.RequestId);
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+            eventHub?.Publish("inventory.stock_updated", firmId, branchId, new { reason = "waste", ingredientId = ingredient.Id });
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/inventory/waste/{waste.Id}", WasteView(waste, ingredient.Name));
         });
 
         group.MapPost("/movements", async (string firmId, string branchId, AddInventoryMovement command,
-            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate) =>
+            HttpContext context, InventoryDbContext db, FeatureNewWorkGate gate, IRestaurantEventHub? eventHub = null) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -368,6 +370,7 @@ public static class InventoryEndpoints
             Audit(db, firmId, branchId, row.Id, "movement_added", row.Actor, $"{ingredient.Name}: {row.Delta} {ingredient.Unit} · {description}", now, warehouse.Id, row.Id);
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+            eventHub?.Publish("inventory.stock_updated", firmId, branchId, new { reason = "movement", ingredientId = ingredient.Id });
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/inventory/movements/{row.Id}", MovementView(row, ingredient));
         });
 

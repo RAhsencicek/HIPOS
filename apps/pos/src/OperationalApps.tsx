@@ -13,11 +13,11 @@ type ApiProblem = { code?: string; detail?: string; message?: string };
 type ApiRequestError = Error & { status?: number; code?: string };
 type ProductOption = { groupName: string; optionName: string };
 type CartLine = { cartId: string; productId: string; quantity: number; note: string; options: SelectedOption[] };
-type Product = { id: string; name: string; sku?: string; category: { id: string; name: string }; image: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; price: { amountMinor: number; currency: string } };
+type Product = { id: string; name: string; sku?: string; category: { id: string; name: string }; image: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; price: { amountMinor: number; currency: string }; isOutOfStock?: boolean; isCriticalStock?: boolean; availablePortions?: number | null; limitingIngredientName?: string | null };
 type MenuSection = { sectionId: string; name: string; productIds: string[] };
 type RestaurantMenu = { id: string; name: string; isActive: boolean; sections: MenuSection[] };
 type MenuWorkspace = { items: RestaurantMenu[]; categories: Array<{ id: string; name: string; isActive: boolean }>;
-  products: Array<{ id: string; name: string; sku?: string; categoryId: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; image: string; price: { amountMinor: number; currency: string } }> };
+  products: Array<{ id: string; name: string; sku?: string; categoryId: string; status: string; isActive: boolean; channels: string[]; desiredChannels: string[]; image: string; price: { amountMinor: number; currency: string }; isOutOfStock?: boolean; isCriticalStock?: boolean; availablePortions?: number | null; limitingIngredientName?: string | null }> };
 type Waiter = { id: string; name: string; isActive: boolean };
 type TableGroup = { id: string; primaryTableId: string; tableIds: string[]; tableNames: string[]; guestCount: number; version: number; closedAt: string | null };
 type CheckAdjustment = { requestId?: string; action: "discount" | "comp" | "void"; valueType?: "percentage" | "fixed" | null; value?: number | null; orderLineId?: number | null; quantity: number; amountMinor: number; reason: string; actor?: string; approvalMode?: string; createdAt?: string };
@@ -228,7 +228,7 @@ type ZReport = {
 };
 
 type CashierCustomer = { id: string; name: string; phone: string | null; isActive: boolean; customerBalanceMinor: number };
-type CashierCheck = Omit<OpenCheck, "orders" | "payments"> & { createdAt: string; paymentStatus: "unpaid" | "partially_paid" | "paid" | "pending" | "unknown"; payments: Array<{ id: string; amountMinor: number; method: string; status: string; createdAt: string }>; paidMinor: number; remainingMinor: number; orders: Array<{ id: string; version: number; remainingMinor: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number; note?: string | null; options?: ProductOption[] }> }> };
+type CashierCheck = Omit<OpenCheck, "orders" | "payments"> & { createdAt: string; paymentStatus: "unpaid" | "partially_paid" | "paid" | "pending" | "unknown"; payments: Array<{ id: string; amountMinor: number; method: string; provider?: string; status: string; createdAt: string }>; paidMinor: number; remainingMinor: number; orders: Array<{ id: string; version: number; remainingMinor: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number; note?: string | null; options?: ProductOption[] }> }> };
 type AccountReceipt = { check: CashierCheck; location: string; printedAt: string };
 type QuickCreate = { requestId: string; firstOrderId: string; items: Array<{ productId: string; quantity: number; note?: string | null; options: Array<{ groupId: string; optionId: string; quantity: number }> }>; customerId: null; tableId: null; waiterId: null };
 const quickRequestKey = `hipos.quick-create.${firmId}.${branchId}`;
@@ -904,6 +904,9 @@ export function CashierApp() {
       (evt) => {
         console.log("⚡ [CashierApp] Anlık LAN bildirimi alındı:", evt.type);
         triggerSync();
+        if (evt.type === "inventory.stock_updated" || evt.type === "check.closed") {
+          setCatalogRevision((v) => v + 1);
+        }
       },
       [triggerSync]
     )
@@ -1013,8 +1016,8 @@ export function CashierApp() {
   }
   // Tahsilat: ödeme simülatörü kaydı + seçili kasanın açık vardiyasına kasa hareketi (postToCash) aynı transaction'da yazılır.
   const isZeroBalance = Boolean(activeCheck && activeCheck.remainingMinor <= 0);
-  const demoPayable = paymentMethod === "cash" || paymentMethod === "card";
-  const payBlocker = !activeCheck ? "Açık adisyon seçin." : isZeroBalance ? "" : !paymentMethod ? "Ödeme yöntemi seçin." : !demoPayable ? "Bu yöntem demo tahsilatta desteklenmiyor (yalnız nakit ve kart)." : amountMinor <= 0 ? "Tutar girin." : "";
+  const demoPayable = Boolean(paymentMethod);
+  const payBlocker = !activeCheck ? "Açık adisyon seçin." : isZeroBalance ? "" : !paymentMethod ? "Ödeme yöntemi seçin." : (paymentMethod === "cari" && !customerSelected) ? "Cariye yazmak için lütfen müşteri seçin." : amountMinor <= 0 ? "Tutar girin." : "";
   async function submitPayment() {
     if (!activeCheck || !paymentMethod || !demoPayable || payBusy || payBlocker || error) return;
     if (!isShiftOpen) {
@@ -1023,6 +1026,7 @@ export function CashierApp() {
       return;
     }
     const method = paymentMethod;
+    const providerName = paymentSubMethod || (method === "card" ? "Ziraat POS" : method === "meal" ? "Sodexo" : method === "transfer" ? "Havale/EFT" : method === "cari" && customerSelected ? `Cari: ${customerSelected.name}` : undefined);
     let left = Math.min(amountMinor, activeCheck.remainingMinor);
     const parts: Array<{ orderId: string; version: number; amountMinor: number }> = [];
     for (const order of activeCheck.orders) {
@@ -1031,7 +1035,7 @@ export function CashierApp() {
       if (part > 0) { parts.push({ orderId: order.id, version: order.version, amountMinor: part }); left -= part; }
     }
     if (!parts.length || left > 0) { setPayError("Tutar siparişlere dağıtılamadı. Ekranı yenileyip tekrar deneyin."); return; }
-    const key = JSON.stringify([activeCheck.id, method, parts]);
+    const key = JSON.stringify([activeCheck.id, method, providerName, parts]);
     if (payRequest.current?.key !== key) payRequest.current = { key, ids: parts.map(() => createRequestId()) };
     setPayBusy(true); setPayError("");
     try {
@@ -1039,22 +1043,27 @@ export function CashierApp() {
       for (const [index, part] of parts.entries()) {
         const res = await request<{ attempt: unknown; check: CashierCheck }>(`${checksPath}/${encodeURIComponent(activeCheck.id)}/payment-attempts`, "pos-single", {
           orderId: part.orderId, attemptId: payRequest.current.ids[index], amountMinor: part.amountMinor, method,
+          provider: providerName,
+          customerId: method === "cari" ? customerSelected?.id : undefined,
           simulatedOutcome: "succeeded", expectedOrderVersion: part.version, postToCash: true, registerId: mainRegister?.id,
         });
         latestCheck = res.check;
       }
-      payRequest.current = null; setAmountInput("0"); setPaymentMethod(null); setPaymentSubMethod("");
+      payRequest.current = null; setAmountInput("0"); setPaymentMethod(null); setPaymentSubMethod(""); setCustomerSelected(null);
       const isPaidComplete = latestCheck.status === "closed" || latestCheck.remainingMinor <= 0;
+      const tenderTitle = method === "cash" ? "NAKIT" : (providerName || method.toUpperCase());
+      const methodDisplay = method === "cash" ? "Nakit" : (providerName || method);
+
       if (isPaidComplete) {
         const receipt = { check: latestCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() };
         setLastCompletedReceipt(receipt);
-        printAccountReceipt(receipt, method === "cash", method === "cash" ? "NAKIT" : (paymentSubMethod || "KREDI_KARTI"));
+        printAccountReceipt(receipt, method === "cash", tenderTitle);
       } else {
         // Parçalı ara ödeme fişi termal yazıcıya anında gönderilir!
         void printThermalCashierBill(
           latestCheck.id,
           method === "cash",
-          method === "cash" ? "NAKIT" : (paymentSubMethod ? `KART - ${paymentSubMethod}` : "KREDI_KARTI")
+          tenderTitle
         );
       }
       if (isQuickPayment) {
@@ -1063,20 +1072,20 @@ export function CashierApp() {
             changeMinor: method === "cash" && amountMinor > activeCheck.remainingMinor ? amountMinor - activeCheck.remainingMinor : 0,
             paidMinor: latestCheck.totalMinor,
             totalMinor: latestCheck.totalMinor,
-            method: method === "cash" ? "Nakit" : (paymentSubMethod || "Kredi Kartı"),
+            method: methodDisplay,
             payments: latestCheck.payments,
           });
           setQuickActiveCheck(null);
           setQuickCart([]);
-          setSplitNotice(`Satış tamamlandı: ${money(latestCheck.totalMinor)} ${mainRegister?.name ?? "kasa"} kasasına kaydedildi.`);
+          setSplitNotice(`Satış tamamlandı: ${money(latestCheck.totalMinor)} (${methodDisplay}) ${mainRegister?.name ?? "kasa"} kasasına kaydedildi.`);
         } else {
           setQuickActiveCheck(latestCheck);
           setAmountInput(`${Math.floor(latestCheck.remainingMinor / 100)},${String(latestCheck.remainingMinor % 100).padStart(2, "0")}`);
           setPaymentMethod("cash");
-          setSplitNotice(`Kısmi tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${method === "cash" ? "Nakit" : paymentSubMethod || "Kart"}). Kalan tutar: ${money(latestCheck.remainingMinor)}.`);
+          setSplitNotice(`Kısmi tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${methodDisplay}). Kalan tutar: ${money(latestCheck.remainingMinor)}.`);
         }
       } else {
-        setSplitNotice(`Tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${method === "cash" ? "Nakit" : "Kart"}) · ${mainRegister?.name ?? "Kasa"}.`);
+        setSplitNotice(`Tahsilat kaydedildi: ${money(Math.min(amountMinor, activeCheck.remainingMinor))} (${methodDisplay}) · ${mainRegister?.name ?? "Kasa"}.`);
       }
       setCashRefresh((v) => v + 1);
       await reload();
@@ -1894,8 +1903,12 @@ export function CashierApp() {
                 return (
                   <div
                     key={product.id}
-                    className={`cashier-quick-product-card ${inCart ? "has-cart" : ""}`}
+                    className={`cashier-quick-product-card ${inCart ? "has-cart" : ""} ${product.isOutOfStock ? "out-of-stock" : ""}`}
                     onClick={() => {
+                      if (product.isOutOfStock) {
+                        setQuickError(`${product.name} tükendi. Mutfak stoğunda ${product.limitingIngredientName || "hammadde"} bulunmuyor.`);
+                        return;
+                      }
                       if (!pendingQuick) {
                         setQuickOptionSelection(null);
                         setQuickOptionProduct(product);
@@ -1909,7 +1922,13 @@ export function CashierApp() {
                         </span>
                       )}
                       <span className="cashier-quick-product-name">{product.name}</span>
-                      {inCart && <span className="cashier-quick-product-badge">Sepette ({inCart.quantity})</span>}
+                      {product.isOutOfStock ? (
+                        <span className="cashier-stock-badge out-of-stock">🚫 Tükendi</span>
+                      ) : product.isCriticalStock ? (
+                        <span className="cashier-stock-badge critical-stock">⚠️ Kritik ({product.availablePortions ?? 0})</span>
+                      ) : inCart ? (
+                        <span className="cashier-quick-product-badge">Sepette ({inCart.quantity})</span>
+                      ) : null}
                     </div>
                     <strong className="cashier-quick-product-price">{money(product.price.amountMinor)}</strong>
                   </div>
@@ -2241,8 +2260,20 @@ export function CashierApp() {
                 )}
                 {paymentMethod === "cari" && customerSelected && (
                   <div className="quick-customer-badge">
-                    <span>Müşteri: <strong>{customerSelected.name}</strong></span>
+                    <span>Müşteri: <strong>{customerSelected.name}</strong> ({money(customerSelected.customerBalanceMinor)})</span>
                     <button type="button" onClick={() => { setCustomerSearch(""); setCustomerOpen(true); }}>Değiştir</button>
+                  </div>
+                )}
+                {paymentMethod === "cari" && !customerSelected && (
+                  <div className="quick-submethods-row">
+                    <button
+                      type="button"
+                      className="quick-submethod-btn active"
+                      style={{ background: "#fef3c7", color: "#92400e", borderColor: "#f59e0b", fontWeight: 700 }}
+                      onClick={() => { setCustomerSearch(""); setCustomerOpen(true); }}
+                    >
+                      👤 Müşteri Seçin (Cariye Yazmak İçin Tıklayın)
+                    </button>
                   </div>
                 )}
               </div>
@@ -2307,7 +2338,7 @@ export function CashierApp() {
                   ? "İşleniyor & Yazdırılıyor…"
                   : isZeroBalance
                   ? "Adisyonu Kapat (0,00 ₺)"
-                  : `⚡ ${paymentMethod === "cash" ? "💵" : "💳"} ${money(Math.min(amountMinor, quickActiveCheck.remainingMinor))} Tahsil Et & Yazdır`}
+                  : `⚡ ${paymentMethod === "cash" ? "💵" : paymentMethod === "cari" ? "👤" : paymentMethod === "meal" ? "🍱" : paymentMethod === "transfer" ? "🏦" : "💳"} ${money(Math.min(amountMinor, quickActiveCheck.remainingMinor))} Tahsil Et & Yazdır`}
               </button>
 
               {payError && <p className="ops-error" role="alert" style={{ margin: "6px 0 0" }}>{payError}</p>}
@@ -2456,18 +2487,18 @@ export function CashierApp() {
             <button className="cashier-split-button" disabled={loading} onClick={() => void reload()}>Yenile</button>
           </div>
         </article>
-        <article className="cashier-detail-panel cashier-methods"><div className="cashier-panel-heading"><h2>ÖDEME YÖNTEMİ</h2><span>Seçim önizlemesi</span></div><p className="cashier-preview-note">Yöntem seçimi yapılabilir; gerçek tahsilat henüz bağlı değildir.</p><div className="cashier-method-list">{([
-          { key: "cash", icon: "₺", name: "Nakit Ödeme", detail: "Nakit tahsilat" },
-          { key: "card", icon: "▣", name: "Kredi Kartı / POS", detail: "Banka terminali seçin" },
-          { key: "meal", icon: "♜", name: "Yemek Kartı", detail: "Yemek kartı seçin" },
-          { key: "cari", icon: "♙", name: "Cariye Yaz (Veresiye)", detail: customerSelected ? customerSelected.name : "Müşteri arayın" },
-          { key: "transfer", icon: "⇄", name: "Banka Havalesi / EFT", detail: "Banka hesabı bağlantısı bekleniyor" },
-        ] as const).map((method) => <div className={`cashier-method-group ${paymentMethod === method.key ? "selected" : ""}`} key={method.key}><button type="button" className="cashier-method-button" disabled={!activeCheck} aria-pressed={paymentMethod === method.key} onClick={() => { setPaymentMethod(method.key); setPaymentSubMethod(""); if (method.key === "cari") { setCustomerSearch(""); setCustomerOpen(true); } }}><span className="cashier-method-icon">{method.icon}</span><span className="cashier-method-text"><strong>{method.name}</strong><small>{method.detail}</small></span><span className="cashier-method-arrow">›</span></button>{paymentMethod === method.key && (method.key === "card" || method.key === "meal") && <div className="cashier-submethods" aria-label={method.key === "card" ? "Banka POS seçimi" : "Yemek kartı seçimi"}>{(method.key === "card" ? ["Ziraat POS", "VakıfBank POS", "Garanti POS"] : ["Sodexo", "Multinet", "Ticket", "Setcard", "Metropol"]).map((name) => <button type="button" className={paymentSubMethod === name ? "selected" : ""} aria-pressed={paymentSubMethod === name} key={name} onClick={() => setPaymentSubMethod(name)}>{name}</button>)}</div>}</div>)}</div><div className="cashier-payment-history"><div className="cashier-panel-heading"><h2>SİMÜLE ÖDEME GEÇMİŞİ</h2><span>{activeCheck?.payments.length ?? 0} işlem</span></div>{activeCheck?.payments.length ? activeCheck.payments.map((payment) => <div className="cashier-payment-row" key={payment.id}><strong>{money(payment.amountMinor)} · {payment.method === "cash" ? "Nakit" : payment.method === "card" ? "Kart" : payment.method}</strong><small>{payment.createdAt ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(payment.createdAt)) : "Saat bilgisi yok"} · Simülasyon · {payment.status}</small><small>Kasiyer bilgisi bu yanıtta bulunmuyor.</small><button type="button" disabled title="Gerçek ödeme iptali henüz bağlı değil">İptal et</button></div>) : <p>Bu adisyonda simüle ödeme kaydı yok.</p>}</div></article>
+        <article className="cashier-detail-panel cashier-methods"><div className="cashier-panel-heading"><h2>ÖDEME YÖNTEMİ</h2><span>Tahsilat Seçimi</span></div><div className="cashier-method-list">{([
+          { key: "cash", icon: "💵", name: "Nakit Ödeme", detail: "Nakit tahsilat" },
+          { key: "card", icon: "💳", name: "Kredi Kartı / POS", detail: paymentSubMethod && paymentMethod === "card" ? paymentSubMethod : "Banka terminali seçin" },
+          { key: "meal", icon: "🍱", name: "Yemek Kartı", detail: paymentSubMethod && paymentMethod === "meal" ? paymentSubMethod : "Yemek kartı seçin" },
+          { key: "cari", icon: "👤", name: "Cariye Yaz (Veresiye)", detail: customerSelected ? `${customerSelected.name} (${money(customerSelected.customerBalanceMinor)})` : "Müşteri seçin" },
+          { key: "transfer", icon: "🏦", name: "Banka Havalesi / EFT", detail: "Havale/EFT tahsilatı" },
+        ] as const).map((method) => <div className={`cashier-method-group ${paymentMethod === method.key ? "selected" : ""}`} key={method.key}><button type="button" className="cashier-method-button" disabled={!activeCheck} aria-pressed={paymentMethod === method.key} onClick={() => { setPaymentMethod(method.key); setPaymentSubMethod(method.key === "card" ? "Ziraat POS" : method.key === "meal" ? "Sodexo" : ""); if (method.key === "cari") { setCustomerSearch(""); setCustomerOpen(true); } }}><span className="cashier-method-icon">{method.icon}</span><span className="cashier-method-text"><strong>{method.name}</strong><small>{method.detail}</small></span><span className="cashier-method-arrow">›</span></button>{paymentMethod === method.key && (method.key === "card" || method.key === "meal") && <div className="cashier-submethods" aria-label={method.key === "card" ? "Banka POS seçimi" : "Yemek kartı seçimi"}>{(method.key === "card" ? ["Ziraat POS", "VakıfBank POS", "Garanti POS"] : ["Sodexo", "Multinet", "Ticket", "Setcard", "Metropol"]).map((name) => <button type="button" className={paymentSubMethod === name ? "selected" : ""} aria-pressed={paymentSubMethod === name} key={name} onClick={() => setPaymentSubMethod(name)}>{name}</button>)}</div>}{paymentMethod === method.key && method.key === "cari" && <div className="cashier-submethods" aria-label="Cari müşteri seçimi"><button type="button" className="selected" onClick={() => { setCustomerSearch(""); setCustomerOpen(true); }}>{customerSelected ? `👤 Seçili: ${customerSelected.name} (Bakiye: ${money(customerSelected.customerBalanceMinor)}) · Değiştir` : "🔍 Müşteri Seçin (Listeyi Aç)"}</button></div>}</div>)}</div><div className="cashier-payment-history"><div className="cashier-panel-heading"><h2>ÖDEME GEÇMİŞİ</h2><span>{activeCheck?.payments.length ?? 0} işlem</span></div>{activeCheck?.payments.length ? activeCheck.payments.map((payment) => <div className="cashier-payment-row" key={payment.id}><strong>{money(payment.amountMinor)} · {payment.provider || (payment.method === "cash" ? "Nakit" : payment.method === "card" ? "Kredi Kartı" : payment.method === "meal" ? "Yemek Kartı" : payment.method === "transfer" ? "Havale/EFT" : payment.method === "cari" ? "Cari" : payment.method)}</strong><small>{payment.createdAt ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(payment.createdAt)) : "Saat bilgisi yok"} · {payment.status === "succeeded" ? "Tahsil Edildi" : payment.status}</small><small>Yöntem: {(payment.provider || payment.method).toUpperCase()}</small></div>) : <p>Bu adisyonda ödeme kaydı yok.</p>}</div></article>
         <article className="cashier-detail-panel cashier-keypad-panel"><div className="cashier-amount"><span>{paymentMethod === "cash" ? "ALINAN NAKİT · ÖNİZLEME" : "GİRİLEN TUTAR"}</span><strong aria-live="polite">{activeCheck ? money(amountMinor) : "—"}</strong><small>{activeCheck ? `Adisyonda kalan: ${money(activeCheck.remainingMinor)}` : "Tutar girmek için açık adisyon seçin"}</small></div>{paymentMethod === "cash" && activeCheck && <div className="cashier-change" aria-live="polite"><span>PARA ÜSTÜ <small>Önizleme · tahsilat kaydedilmez</small></span><strong>{money(Math.max(0, amountMinor - activeCheck.remainingMinor))}</strong></div>}<div className="cashier-quick-amounts" aria-label="Hızlı tutarlar">{[{ label: "TAM KALAN", minor: activeCheck?.remainingMinor ?? 0 }, { label: "100 ₺", minor: 10000 }, { label: "200 ₺", minor: 20000 }, { label: "500 ₺", minor: 50000 }, { label: "1.000 ₺", minor: 100000 }].map((item) => <button type="button" disabled={!activeCheck} key={item.label} onClick={() => setAmountInput(`${Math.floor(item.minor / 100)},${String(item.minor % 100).padStart(2, "0")}`)}>{item.label}</button>)}<button type="button" className="cashier-clear-amount" disabled={!activeCheck} onClick={() => enterAmountKey("C")}>Temizle</button></div><div className="cashier-keypad" aria-label="Tutar tuş takımı">{["1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "0", "⌫"].map((key) => <button type="button" disabled={!activeCheck} key={key} aria-label={key === "C" ? "Tutarı temizle" : key === "⌫" ? "Son karakteri sil" : key === "," ? "Kuruş için virgül" : key} onClick={() => enterAmountKey(key)}>{key}</button>)}</div><button className="cashier-complete" disabled={Boolean(payBlocker) || payBusy || Boolean(error)} onClick={() => { if (isZeroBalance) void closeZeroCheck(); else void submitPayment(); }}>{payBusy ? (isZeroBalance ? "Kapatılıyor…" : "Kaydediliyor…") : isZeroBalance ? "Adisyonu Kapat (0,00 ₺)" : "Tahsilatı tamamla"}</button>{payError && <p className="ops-error" role="alert">{payError}</p>}<p className="cashier-disabled-hint">{isZeroBalance ? "Ödenecek tutar bulunmuyor. Adisyonu kapatıp masayı boşaltmak için butona tıklayın." : (payBlocker || (paymentMethod === "card" && activeCheck && amountMinor > activeCheck.remainingMinor ? `Kart çekimi kalan tutar kadar yapılır: ${money(activeCheck.remainingMinor)}.` : `Tahsilat ${mainRegister?.name ?? "seçili kasa"} vardiyasına kaydedilir.`))}</p></article>
       </div><div className="cashier-detail-footer"><span>Geliştirme ekranı · Gerçek tahsilat yapılmaz</span><button type="button" disabled={!activeCheck || Boolean(error)} onClick={() => { if (activeCheck) printAccountReceipt({ check: activeCheck, location: isQuickPayment ? "Hızlı satış" : selected?.name ?? "Masa", printedAt: new Date().toISOString() }, false, "BILGI"); }}>🧾 Hesap fişi yazdır</button><button disabled={!activeCheck || activeCheck.totalMinor > 0 || payBusy || Boolean(error)} title={activeCheck && activeCheck.totalMinor > 0 ? "Önce tahsilatı tamamlayın" : undefined} onClick={() => void closeZeroCheck()}>{payBusy ? "Kaydediliyor…" : "Adisyonu kapat"}</button></div>
     </section>}
     <dialog ref={customerDialog} className="waiter-reservation-dialog" aria-labelledby="cashier-customer-title" onCancel={() => setCustomerOpen(false)} onClose={() => setCustomerOpen(false)}>
-      {customerOpen && <section className="waiter-custom-modal"><header><div><span className="ops-eyebrow">CARİYE YAZ · ÖNİZLEME</span><h2 id="cashier-customer-title">Müşteri ara</h2></div><button type="button" className="waiter-modal-close" onClick={() => setCustomerOpen(false)} aria-label="Kapat">×</button></header><label className="waiter-note-field">Ad veya telefon<input autoFocus type="search" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Müşteri adı veya telefonu" /></label><p className="cashier-preview-note">Cari limit kontrolü ve hesaba yazma henüz bağlı değildir.</p>{customerLoading && <p className="ops-message">Müşteriler yükleniyor…</p>}{customerError && <p className="ops-error" role="alert">{customerError}</p>}
+      {customerOpen && <section className="waiter-custom-modal"><header><div><span className="ops-eyebrow">CARİYE YAZ (VERESİYE)</span><h2 id="cashier-customer-title">Müşteri Seçimi</h2></div><button type="button" className="waiter-modal-close" onClick={() => setCustomerOpen(false)} aria-label="Kapat">×</button></header><label className="waiter-note-field">Ad veya telefon<input autoFocus type="search" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Müşteri adı veya telefonu ara…" /></label><p className="cashier-preview-note" style={{ color: "#059669", fontWeight: 600 }}>✅ Seçilen müşterinin cari kartına borç kaydı (customer_charge) işlenir.</p>{customerLoading && <p className="ops-message">Müşteriler yükleniyor…</p>}{customerError && <p className="ops-error" role="alert">{customerError}</p>}
       {!customerLoading && !customerError && <div className="cashier-customer-list">{customers.filter((customer) => { const query = customerSearch.trim().toLocaleLowerCase("tr-TR"); const digits = query.replace(/\D/g, ""); return !query || customer.name.toLocaleLowerCase("tr-TR").includes(query) || (digits.length > 0 && (customer.phone ?? "").replace(/\D/g, "").includes(digits)); }).map((customer) => <button type="button" key={customer.id} onClick={() => { setCustomerSelected(customer); setCustomerOpen(false); }}><span><strong>{customer.name}</strong><small>{customer.phone ?? "Telefon yok"}</small></span><span><strong>{customer.customerBalanceMinor > 0 ? "Borç" : customer.customerBalanceMinor < 0 ? "Alacak" : "Bakiye"}: {money(Math.abs(customer.customerBalanceMinor))}</strong><small>Limit bilgisi yok</small></span></button>)}{customers.filter((customer) => { const query = customerSearch.trim().toLocaleLowerCase("tr-TR"); const digits = query.replace(/\D/g, ""); return !query || customer.name.toLocaleLowerCase("tr-TR").includes(query) || (digits.length > 0 && (customer.phone ?? "").replace(/\D/g, "").includes(digits)); }).length === 0 && <p className="ops-message">Eşleşen aktif müşteri bulunamadı.</p>}</div>}<footer><button type="button" className="waiter-cancel-custom" onClick={() => setCustomerOpen(false)}>Kapat</button></footer></section>}
     </dialog>
     <dialog ref={actionDialog} className="waiter-reservation-dialog" aria-labelledby="cashier-action-title" onCancel={(event) => { if (actionBusy) event.preventDefault(); else setCashierAction(null); }} onClose={() => setCashierAction(null)}>
@@ -3229,6 +3260,10 @@ export function WaiterApp() {
   }
   function openCustomization(product: Product, line?: CartLine) {
     if (saving) return;
+    if (product.isOutOfStock) {
+      setError(`${product.name} tükendi. Mutfak stoğunda ${product.limitingIngredientName || "hammadde"} bulunmuyor.`);
+      return;
+    }
     setCustomizingProduct(product); setEditingCartId(line?.cartId ?? null);
     setOptionSelection(null);
     setCustomNote(line?.note ?? "");
@@ -4006,9 +4041,9 @@ export function WaiterApp() {
           </h3>}
           <div className="waiter-category-panel" id={panelId} hidden={!expanded}>{expanded && (group.products.length === 0
             ? <p className="ops-message">{normalizedSearch ? "Aramanızla eşleşen ürün bulunamadı." : "Bu kategoride ürün bulunamadı."}</p>
-            : <section className="ops-product-grid waiter-menu-grid" aria-label={`${group.name} ürünleri`}>{group.products.map((product) => <article className="ops-product waiter-product" key={product.id}>
-              <div className="waiter-product-main"><span className="waiter-product-image" aria-hidden="true"><PosProductImage image={product.image} productId={product.id} name={product.name} /></span><div><strong>{product.name}</strong><span>{demoDescriptions[product.id] ?? product.category.name}</span></div></div>
-              <div className="waiter-product-bottom"><strong>{money(product.price.amountMinor)}</strong><button className="waiter-add-product" disabled={saving} onClick={() => openCustomization(product)}>＋ <span>Ekle</span></button></div>
+            : <section className="ops-product-grid waiter-menu-grid" aria-label={`${group.name} ürünleri`}>{group.products.map((product) => <article className={`ops-product waiter-product ${product.isOutOfStock ? "out-of-stock" : ""}`} key={product.id}>
+              <div className="waiter-product-main"><span className="waiter-product-image" aria-hidden="true"><PosProductImage image={product.image} productId={product.id} name={product.name} /></span><div><strong>{product.name}{product.isOutOfStock && <span className="waiter-stock-badge out-of-stock">🚫 Tükendi</span>}{!product.isOutOfStock && product.isCriticalStock && <span className="waiter-stock-badge critical-stock">⚠️ Kritik ({product.availablePortions ?? 0})</span>}</strong><span>{demoDescriptions[product.id] ?? product.category.name}</span></div></div>
+              <div className="waiter-product-bottom"><strong>{money(product.price.amountMinor)}</strong>{product.isOutOfStock ? <button className="waiter-add-product out-of-stock" disabled={true} title={`${product.name} tükendi`}>Tükendi</button> : <button className="waiter-add-product" disabled={saving} onClick={() => openCustomization(product)}>＋ <span>Ekle</span></button>}</div>
             </article>)}</section>)}</div>
         </section>;
       })}</div>

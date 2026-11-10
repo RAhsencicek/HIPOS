@@ -230,7 +230,7 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
     <PageHeading eyebrow="STOK VE TEDARİK" title={pageTitle}
       description={`${ctx.selectedBranch?.name ?? "Seçili şube"} · hammadde, reçete ve stok hareketlerini birlikte takip edin.`}
       action={<StatusPill tone={loading ? "neutral" : error ? "orange" : "green"}>{loading ? "Yükleniyor" : error ? "Bağlantı/kurulum gerekli" : "Stok yönetimi"}</StatusPill>} />
-    <DemoNotice>Stok giriş ve çıkışlarını elle kaydedebilirsiniz. Satışlar stoğu otomatik değiştirmez; sayım farkları onayınızdan sonra uygulanır.</DemoNotice>
+    <DemoNotice>🟢 Canlı Stok Entegrasyonu: Satışlardan reçete hammadde tüketimi anlık olarak otomatik düşülmektedir. Manuel giriş/çıkış, zayi/fire ve sayım farkları onayınızla uygulanır.</DemoNotice>
     <div className="inventory-toolbar"><label>Fiziksel depo<select aria-label="Fiziksel depo" value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label><span>Depo, stok miktarlarının tutulduğu fiziksel konumdur.</span></div>
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}

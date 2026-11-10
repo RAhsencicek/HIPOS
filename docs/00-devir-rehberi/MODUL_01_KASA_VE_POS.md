@@ -21,6 +21,7 @@
 | **Gün Sonu Z-Raporu ve X-Raporu** | **Çalışıyor** | Kupür sayımı (200 TL, 100 TL...), kasa farkı hesabı, yarına devreden bozuk para avansı (`retained_float`) ve kasadan çekilen net ciro (`safe_drop`) tutanağı mevcuttur. |
 | **Termal Ağ Yazıcısı Entegrasyonu** | **Çalışıyor** | Kasa tahsilatı bittiğinde ESC/POS ağ yazıcısına (`192.168.1.200:9100`) otomatik adisyon fişi basılır. |
 | **Hızlı Satış (Gel-Al / Tezgâh)** | **Çalışıyor** | Sipariş askıya alma (Park Order / Bekletme), bekleyen paket satışlar paneli ve tek tıkla tahsil etme aktiftir. |
+| **Çoklu Ödeme & POS / Yemek Kartı (Faz 6)** | **Çalışıyor** | Nakit, Kredi Kartı (Ziraat/Garanti/VakıfBank POS), Yemek Kartı (Sodexo/Multinet/Ticket/Setcard/Metropol), Havale ve Cari ödeme alt tipleri veritabanına ve Z-Raporuna tam kayıtlıdır. Parçalı (Split) tahsilat adisyon fişine dökülür. |
 | **Yönetici Raporları & Canlı Ciro Analitiği** | **Çalışıyor** | Mock/demo veri tamamen kaldırıldı. `GET /reports/sales-analytics` üzerinden anlık brüt/net ciro, nakit/kart dağılımı, masa/paket kanalları, en çok satan 10 ürün ve saatlik restoran satış nabzı canlı gösterilir. |
 
 ---
@@ -66,3 +67,21 @@ Header: X-Demo-Actor: manager-single
 - `topProducts`: En çok satan ilk 10 ürün (adet, ciro, kategori, yüzde pay).
 - `hourlyTrends`: 08:00 - 23:00 saatlik adisyon ve ciro histogramı.
 - `branchComparison`: Şubelerin toplam cirodaki payları ve performansları.
+
+---
+
+## 4. Çoklu Ödeme Yöntemleri & Banka POS Slip / Yemek Kartı Entegrasyonu (Faz 6)
+
+### A. Mimari ve Veritabanı Modeli
+* **`sales.payment_attempts`:**
+  - `method`: `cash`, `card`, `meal`, `transfer`, `cari`
+  - `provider`: `Garanti POS`, `Ziraat POS`, `VakıfBank POS`, `Sodexo`, `Multinet`, `Ticket`, `Setcard`, `Metropol`
+* **`cash.movements`:**
+  - `tender_method`: `cash`, `card`, `meal`, `transfer`, `cari`
+  - `provider`: Banka POS adı veya yemek kartı firması
+  - `description`: `Kasa tahsilatı · {sağlayıcı} · Adisyon {adisyon_id}`
+* **Parçalı Tahsilat (Split Payment):**
+  - Müşteri hesabın bir kısmını Kredi Kartı (örn. Garanti POS ₺100), kalan kısmını Yemek Kartı (örn. Sodexo ₺160) ile ödeyebilir.
+  - Her parçalı ödeme atomik olarak adisyon kalan bakiyesinden düşülür ve açık kasa vardiyasına işlenir.
+  - Termal yazıcıdan çıkan adisyon fişinde tahsilat dökümü `Garanti POS: 100.00 TL | Sodexo: 160.00 TL` şeklinde basılır.
+  - Gün sonu Z-Raporu ve X-Raporunda `tenders` listesi banka kartı ve yemek kartı cirolarını ayrı kalemler olarak sunar.

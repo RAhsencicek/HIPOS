@@ -312,13 +312,13 @@ export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: K
   return <>
     <PageHeading eyebrow={view === "history" ? "MÜŞTERİLER" : "CARİ VE MÜŞTERİLER"} title={title}
       description={view === "customers" ? "Tek şubenizdeki müşteri kartlarını ve iletişim bilgilerini yönetin. Hesap hareketleri Cari Hesaplar bölümünde ayrı tutulur."
-        : view === "history" ? "Seçilen tarih aralığındaki müşteri cari hareketlerini inceleyin. Sipariş ve adisyon geçmişi henüz bu kaynağa bağlı değil."
+        : view === "history" ? "Seçilen tarih aralığındaki müşteri cari hareketlerini inceleyin. Kasadan yapılan 'Cariye Yaz' (veresiye) satışları ve cari tahsilatlar anlık listelenir."
         : view === "suppliers" ? "Tedarikçi kartlarını ve bu şubeyle olan işletme bağlantılarını yönetin."
         : "Müşteri alacaklarını ve tedarikçi borçlarını ayrı bakiyeler ve izlenebilir hesap hareketleriyle takip edin."}
       action={<StatusPill tone={!scope ? "orange" : loading ? "neutral" : hasLoaded ? "green" : "orange"}>
         {!scope ? "Bu senaryoda etkin değil" : loading ? "Yükleniyor" : hasLoaded ? "Cari yönetimi" : "Kurulum gerekiyor"}
       </StatusPill>} />
-    <DemoNotice>Başlangıç kayıtları örnektir. Tahsilat ve ödemeler bu ekranda elle takip edilir; banka işlemi, fatura veya muhasebe fişi oluşturulmaz.</DemoNotice>
+    <DemoNotice>🟢 Canlı Cari Entegrasyonu: Kasadan yapılan 'Cariye Yaz' (veresiye) satışları otomatik olarak adisyon referansıyla müşteri hesabına borç kaydedilir. Tahsilat ve cari işlemler bu ekrandan yönetilir.</DemoNotice>
     {!scope && <div className="card generic-empty">Kalıcı cari görünümü yalnız Mahalle Fırını · Kadıköy Şubesi için açıldı.</div>}
     {error && <div className="notice" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}

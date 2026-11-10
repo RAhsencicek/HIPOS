@@ -170,8 +170,8 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
                 table.HasCheckConstraint("ck_cash_movement_amount_positive", "amount_minor > 0 OR (kind = 'opening_float' AND amount_minor = 0)");
                 table.HasCheckConstraint("ck_cash_movement_currency", "currency = 'TRY'");
                 table.HasCheckConstraint("ck_cash_movement_source", "source IN ('manual', 'pos')");
-                table.HasCheckConstraint("ck_cash_movement_tender_method", "tender_method IS NULL OR tender_method IN ('cash', 'card')");
-                table.HasCheckConstraint("ck_cash_movement_pos_sale", "kind <> 'pos_sale' OR (source = 'pos' AND category = 'cash_sale' AND tender_method IN ('cash', 'card'))");
+                table.HasCheckConstraint("ck_cash_movement_tender_method", "tender_method IS NULL OR tender_method IN ('cash', 'card', 'meal', 'transfer', 'cari')");
+                table.HasCheckConstraint("ck_cash_movement_pos_sale", "kind <> 'pos_sale' OR (source = 'pos' AND category = 'cash_sale' AND tender_method IN ('cash', 'card', 'meal', 'transfer', 'cari'))");
                 table.HasCheckConstraint("ck_cash_movement_external_identity",
                     "(source = 'manual' AND provider IS NULL AND external_reference IS NULL AND provider_event_id IS NULL) OR (source = 'pos' AND provider IS NOT NULL AND provider_event_id IS NOT NULL)");
                 table.HasCheckConstraint("ck_cash_movement_correction",

@@ -26,7 +26,7 @@
 | :--- | :--- | :--- |
 | **Cari kartı / hareketi** | **Kalıcı** | `cari.parties` ve `cari.movements` üzerinde manuel borç/alacak/bakiye çalışır |
 | **Gider kaydı** | **Kalıcı** | `finance.expenses` üzerinde kategorili şube gider girişi çalışır |
-| **Satıştan cari hareketi** | **Yok** | Kasada veresiye/açık hesap ile adisyondan otomatik cariye yazma henüz yoktur |
+| **Satıştan cari hareketi** | **Kalıcı (Faz 7)** | Kasada 'Cariye Yaz' ile adisyondan `cari.movements` (`customer_charge`, `source: sales`) borç kaydı ve ekstre entegrasyonu tamamlandı |
 | **Satın almadan tedarikçi borcu** | **Yok** | Toptancı irsaliyesinden otomatik tedarikçi borçlandırma henüz yoktur |
 | **Giderden kasa hareketi** | **Yok** | Kasadan nakit gider çıktığında `cash.movements` atomik yazılmaz |
 | **Giderden cari hareketi** | **Yok** | Giderin cari hesaba/tedarikçiye borç/tediye bağlanması henüz yoktur |
@@ -78,11 +78,18 @@ Sizin çalışma alanınız temel olarak şuralardır (ilgili kod satırına git
 * **Hesap Ekstresi:** Tarih aralıklı tüm borçlandırma ve tahsilat hareketleri dökümü.
 * Veresiye limiti tanımlama/uygulama bu kalıcı cari MVP'sinde henüz yoktur; sonraki açık hesap iş akışında ele alınmalıdır.
 
-### 💳 EKRAN 2: Kasa Adisyonundan Otomatik Veresiye Kaydı (Hedef Entegrasyon — Geliştirilecek)
+### 💳 EKRAN 2: Kasa Adisyonundan Otomatik Veresiye Kaydı (✅ Kalıcı / Tamamlandı — Faz 7, 9 Kasım 2026)
 * Kasiyer adisyon ekranında (`Modül 1`) `[ Cariye Yaz (Veresiye) ]` butonuna bastığında:
-  * Müşteri seçilir: `Dr. Serdar Tuncer`.
-  * Tutar: `450,00 TL`.
-  * Adisyon kapanır, Serdar Tuncer'in cari bakiyesine otomatik olarak `+450 TL` borç hareketi yazılır.
+  * Aktif müşteriler listelenir veya isim/telefonla aranır (örn. `Ahmet Yılmaz`).
+  * Müşteri seçilir ve güncel bakiye kartı görüntülenir.
+  * Tutar girilir (tam bakiye veya parçalı veresiye tutarı).
+  * Tahsilat tamamlandığında (`PaymentSimulator.AddCariChargeAsync`):
+    - `sales.checks.customer_id` müşteriye mühürlenir.
+    - `cari.movements` tablosuna `entry_type: 'customer_charge'`, `kind: 'customer'`, `source: 'sales'`, `reference: checkId` ve pozitif `delta_minor` hareketi atomik yazılır.
+    - Müşterinin cari bakiyesi anında artar (`cari.parties.version++`).
+    - `cash.movements` tablosuna `tender_method: 'cari'` yazılır (kasa açığı yaratmaz).
+    - ESC/POS termal yazıcıya *"Tahsilat Türü: Cari: Ahmet Yılmaz"* ibareli adisyon fişi basılır.
+    - Yönetici panelinde (`CarilerHttpPage.tsx`) Son Hareketlerde `Veresiye satış / alacak · Satış · +₺...` ve müşteri ekstresinde görünür.
 
 ### 🥩 EKRAN 3: Kasadan Toptancıya Nakit Tediye (Hedef Entegrasyon — Geliştirilecek)
 * Toptancı dükkana geldiğinde yönetici kasadan nakit ödeme yapar:

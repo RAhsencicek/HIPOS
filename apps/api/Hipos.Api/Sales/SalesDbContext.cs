@@ -32,6 +32,7 @@ public sealed class PaymentAttemptRow
     public long AmountMinor { get; set; }
     public string Currency { get; set; } = "TRY";
     public string Method { get; set; } = "card";
+    public string? Provider { get; set; }
     public string Status { get; set; } = "pending";
     public string RequestedOutcome { get; set; } = "pending";
     public int Version { get; set; } = 1;
@@ -257,7 +258,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             {
                 table.HasCheckConstraint("ck_payment_amount_positive", "amount_minor > 0");
                 table.HasCheckConstraint("ck_payment_version_positive", "version > 0");
-                table.HasCheckConstraint("ck_payment_method", "method IN ('cash', 'card')");
+                table.HasCheckConstraint("ck_payment_method", "method IN ('cash', 'card', 'meal', 'transfer', 'cari')");
                 table.HasCheckConstraint("ck_payment_status", "status IN ('succeeded', 'failed', 'pending', 'unknown', 'cancelled')");
                 table.HasCheckConstraint("ck_payment_requested_outcome", "requested_outcome IN ('succeeded', 'failed', 'pending', 'unknown')");
             });
@@ -270,6 +271,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.AmountMinor).HasColumnName("amount_minor");
             entity.Property(row => row.Currency).HasColumnName("currency").HasMaxLength(3);
             entity.Property(row => row.Method).HasColumnName("method").HasMaxLength(16);
+            entity.Property(row => row.Provider).HasColumnName("provider").HasMaxLength(80);
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
             entity.Property(row => row.RequestedOutcome).HasColumnName("requested_outcome").HasMaxLength(16);
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();

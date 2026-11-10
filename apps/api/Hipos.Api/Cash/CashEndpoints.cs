@@ -998,8 +998,11 @@ public static class CashEndpoints
         var cashSales = posSales.Where(m => m.TenderMethod == "cash").Sum(m => m.AmountMinor) +
                         manualSales.Sum(m => m.AmountMinor);
         var cardSales = posSales.Where(m => m.TenderMethod == "card").Sum(m => m.AmountMinor);
-        var otherSales = posSales.Where(m => m.TenderMethod != "cash" && m.TenderMethod != "card").Sum(m => m.AmountMinor);
-        var totalSales = cashSales + cardSales + otherSales;
+        var mealSales = posSales.Where(m => m.TenderMethod == "meal").Sum(m => m.AmountMinor);
+        var transferSales = posSales.Where(m => m.TenderMethod == "transfer").Sum(m => m.AmountMinor);
+        var cariSales = posSales.Where(m => m.TenderMethod == "cari").Sum(m => m.AmountMinor);
+        var otherSales = posSales.Where(m => m.TenderMethod is not ("cash" or "card" or "meal" or "transfer" or "cari")).Sum(m => m.AmountMinor);
+        var totalSales = cashSales + cardSales + mealSales + transferSales + cariSales + otherSales;
 
         var cashIn = activeMovements.Where(m => m.Kind == "manual_in" && m.Category != "cash_sale").Sum(m => m.AmountMinor);
         var cashOut = activeMovements.Where(m => m.Kind == "manual_out").Sum(m => m.AmountMinor);
@@ -1021,8 +1024,14 @@ public static class CashEndpoints
             tenders.Add(new ZReportTenderBreakdown("cash", "Nakit", cashSales, cashTxCount));
         if (cardSales > 0)
             tenders.Add(new ZReportTenderBreakdown("card", "Kredi / Banka Kartı", cardSales, posSales.Count(m => m.TenderMethod == "card")));
+        if (mealSales > 0)
+            tenders.Add(new ZReportTenderBreakdown("meal", "Yemek Kartı (Sodexo/Multinet)", mealSales, posSales.Count(m => m.TenderMethod == "meal")));
+        if (transferSales > 0)
+            tenders.Add(new ZReportTenderBreakdown("transfer", "Havale / EFT", transferSales, posSales.Count(m => m.TenderMethod == "transfer")));
+        if (cariSales > 0)
+            tenders.Add(new ZReportTenderBreakdown("cari", "Cari / Veresiye", cariSales, posSales.Count(m => m.TenderMethod == "cari")));
         if (otherSales > 0)
-            tenders.Add(new ZReportTenderBreakdown("other", "Diğer Ödemeler", otherSales, posSales.Count(m => m.TenderMethod != "cash" && m.TenderMethod != "card")));
+            tenders.Add(new ZReportTenderBreakdown("other", "Diğer Ödemeler", otherSales, posSales.Count(m => m.TenderMethod is not ("cash" or "card" or "meal" or "transfer" or "cari"))));
 
         var taxes = new List<ZReportTaxBreakdown>();
         if (totalSales > 0)

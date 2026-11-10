@@ -207,6 +207,9 @@ public static class ReportsEndpoints
         long grossRevenueMinor = payments.Sum(p => p.AmountMinor);
         long cashRevenueMinor = payments.Where(p => p.Method == "cash").Sum(p => p.AmountMinor);
         long cardRevenueMinor = payments.Where(p => p.Method == "card").Sum(p => p.AmountMinor);
+        long mealRevenueMinor = payments.Where(p => p.Method == "meal").Sum(p => p.AmountMinor);
+        long transferRevenueMinor = payments.Where(p => p.Method == "transfer").Sum(p => p.AmountMinor);
+        long cariRevenueMinor = payments.Where(p => p.Method == "cari").Sum(p => p.AmountMinor);
 
         // 2. İndirim ve Düzeltmeler (Adjustments)
         var adjustmentQuery = salesDb.CheckAdjustments.AsNoTracking()
@@ -300,6 +303,21 @@ public static class ReportsEndpoints
             new("card", "Kredi Kartı", payments.Count(p => p.Method == "card"), cardRevenueMinor,
                 grossRevenueMinor > 0 ? Math.Round((double)cardRevenueMinor * 100.0 / grossRevenueMinor, 1) : 0),
         };
+        if (mealRevenueMinor > 0)
+        {
+            paymentBreakdown.Add(new("meal", "Yemek Kartı", payments.Count(p => p.Method == "meal"), mealRevenueMinor,
+                grossRevenueMinor > 0 ? Math.Round((double)mealRevenueMinor * 100.0 / grossRevenueMinor, 1) : 0));
+        }
+        if (transferRevenueMinor > 0)
+        {
+            paymentBreakdown.Add(new("transfer", "Havale / EFT", payments.Count(p => p.Method == "transfer"), transferRevenueMinor,
+                grossRevenueMinor > 0 ? Math.Round((double)transferRevenueMinor * 100.0 / grossRevenueMinor, 1) : 0));
+        }
+        if (cariRevenueMinor > 0)
+        {
+            paymentBreakdown.Add(new("cari", "Cari / Veresiye", payments.Count(p => p.Method == "cari"), cariRevenueMinor,
+                grossRevenueMinor > 0 ? Math.Round((double)cariRevenueMinor * 100.0 / grossRevenueMinor, 1) : 0));
+        }
 
         // 7. Kanal Dağılımı (Masa vs Paket)
         int tableOrdersCount = ordersInRange.Count(o => o.Source == "waiter_web" || o.Source == "demo_service");

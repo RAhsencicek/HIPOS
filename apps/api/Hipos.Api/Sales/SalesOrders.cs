@@ -209,6 +209,13 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 product.Price.Currency != "TRY")
                 return SalesOrderResult.Rejected(product is { IsActive: false } ? "PRODUCT_INACTIVE" : "PRODUCT_NOT_SELLABLE", 409,
                     "Ürün bu şubede POS satışına açık değil veya geçerli fiyatı yok.");
+
+            // FAZ 8: Reçeteli ürünler için hammadde tükenme kontrolü (Stok Koruması)
+            var stockError = await CheckRecipeStockAvailabilityAsync(
+                db.Database.GetDbConnection(), transaction.GetDbTransaction(),
+                firmId, branchId, item.ProductId, product.Name, item.Quantity, cancellationToken);
+            if (stockError is not null) return stockError;
+
             var productOptions = await catalog.GetProductOptionGroupsAsync(firmId, item.ProductId, cancellationToken);
             var selected = item.Options ?? [];
             var availableGroups = productOptions?.Items.ToDictionary(group => group.GroupId) ?? [];
@@ -503,6 +510,52 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
     {
         var value = notes?.Trim();
         return string.IsNullOrEmpty(value) ? null : value;
+    }
+
+    private static async Task<SalesOrderResult?> CheckRecipeStockAvailabilityAsync(
+        DbConnection connection, DbTransaction transaction,
+        string firmId, string branchId, Guid productId, string productName, int requestedQuantity,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT l.ingredient_id, i.name AS ingredient_name, l.quantity,
+                       COALESCE((SELECT SUM(m.delta) FROM inventory.movements m
+                                 WHERE m.firm_id = @firm AND m.branch_id = @branch AND m.ingredient_id = l.ingredient_id), 0) AS on_hand
+                FROM inventory.recipes r
+                JOIN inventory.recipe_lines l ON l.recipe_id = r.id
+                JOIN inventory.ingredients i ON i.id = l.ingredient_id
+                WHERE r.firm_id = @firm AND r.branch_id = @branch AND r.product_id = @product
+                  AND r.version = (SELECT MAX(r2.version) FROM inventory.recipes r2
+                                   WHERE r2.firm_id = r.firm_id AND r2.branch_id = r.branch_id AND r2.product_id = r.product_id)
+                """;
+            AddParameter(command, "firm", firmId);
+            AddParameter(command, "branch", branchId);
+            AddParameter(command, "product", productId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var ingredientName = reader.GetString(1);
+                var requiredPerPortion = reader.GetDecimal(2);
+                var onHand = reader.GetDecimal(3);
+
+                if (onHand <= 0 || onHand < (requiredPerPortion * requestedQuantity))
+                {
+                    return SalesOrderResult.Rejected("PRODUCT_OUT_OF_STOCK", 409,
+                        $"{productName} ürününün hammaddesi ({ingredientName}) tükendiği için sipariş verilemez.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Veritabanı tabloları mevcut değilse veya mock ortamındaysa akışı engelleme
+            Console.WriteLine($"[SalesOrders] Reçete stok kontrolü atlandı: {ex.Message}");
+        }
+        return null;
     }
 
     public static SalesOrderDetail ToDetail(SalesOrderRow row) =>

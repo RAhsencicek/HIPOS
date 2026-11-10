@@ -16,7 +16,7 @@ namespace Hipos.Api.Sales;
 public sealed record CreateSalesCheck(Guid RequestId, Guid FirstOrderId, IReadOnlyList<PosOrderItem> Items,
     string? CustomerId, string? TableId, string? WaiterId);
 public sealed record StartCheckPayment(Guid OrderId, Guid AttemptId, long AmountMinor, string Method,
-    string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
+    string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null, string? Provider = null, string? CustomerId = null);
 public sealed record SplitCheckLine(long OrderLineId, int Quantity);
 public sealed record CloseZeroBalanceCheck(int ExpectedVersion);
 public sealed record CancelSalesCheck(int ExpectedVersion, string Reason, string? ManagerPin = null);
@@ -26,7 +26,7 @@ public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, 
 public sealed record CheckAdjustmentView(Guid RequestId, string Action, string? ValueType, int? Value,
     long? OrderLineId, int Quantity, long AmountMinor, string Reason, string Actor, string ApprovalMode, DateTimeOffset CreatedAt, Guid? OriginalCheckId = null);
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
-    string Method, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    string Method, string? Provider, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId, string Status,
     string? CustomerId, string? TableId, string? WaiterId, string? MergedIntoCheckId, string Currency, long TotalMinor,
     long PaidMinor, long RemainingMinor, string PaymentStatus, DateTimeOffset CreatedAt, int Version,
@@ -500,7 +500,7 @@ public static class SalesCheckEndpoints
             if (!orderExists) return Fail(context, "ORDER_NOT_FOUND", 404, "Sipariş bu adisyona bağlı değil.");
             var payment = await payments.StartAsync(firmId, branchId, command.OrderId,
                 new StartSimulatedPayment(command.AttemptId, command.AmountMinor, command.Method,
-                    command.SimulatedOutcome, command.ExpectedOrderVersion, command.PostToCash, command.RegisterId), DemoAccess.Resolve(context)!.Name,
+                    command.SimulatedOutcome, command.ExpectedOrderVersion, command.PostToCash, command.RegisterId, command.Provider, command.CustomerId), DemoAccess.Resolve(context)!.Name,
                 context.RequestAborted, requireCheckCapability: true);
             if (payment.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
@@ -702,7 +702,7 @@ public static class SalesCheckEndpoints
                 return detail with { RemainingMinor = Math.Max(0, payableByOrder.GetValueOrDefault(order.Id) - detail.PaidMinor) };
             }).ToArray(),
             attempts.Select(row => new CheckPaymentView(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor,
-                row.Currency, row.Method, row.Status, row.Version, row.CreatedAt, row.UpdatedAt)).ToArray(),
+                row.Currency, row.Method, row.Provider, row.Status, row.Version, row.CreatedAt, row.UpdatedAt)).ToArray(),
             gross, adjustmentMinor, adjustments.Select(ToAdjustmentView).ToArray());
     }
 
