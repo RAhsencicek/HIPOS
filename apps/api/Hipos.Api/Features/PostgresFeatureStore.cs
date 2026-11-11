@@ -171,6 +171,29 @@ public sealed class PostgresFeatureStore(FeatureDbContext db, InventoryDbContext
 
 public static class FeatureDbInitializer
 {
+    public static async Task PromoteSalesAsync(FeatureDbContext db, CancellationToken cancellationToken)
+    {
+        var salesKeys = new[] { "sales.checks", "sales.pos_orders", "sales.cashier", "catalog.menus", "service.waiters" };
+        var rows = await db.BranchFeatureStates.Where(row =>
+            salesKeys.Contains(row.Key) &&
+            (!row.DesiredEnabled || row.Lifecycle != "ready" || !row.EffectiveForNewWork)).ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            row.DesiredEnabled = true;
+            row.Lifecycle = "ready";
+            row.EffectiveForNewWork = true;
+            row.Version++;
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+            db.FeatureAudit.Add(new FeatureAuditRow
+            {
+                FirmId = row.FirmId, BranchId = row.BranchId, FeatureKey = row.Key,
+                Actor = "system:sales-ready", DesiredEnabled = true,
+                Version = row.Version, OccurredAt = row.UpdatedAt,
+            });
+        }
+        if (rows.Count > 0) await db.SaveChangesAsync(cancellationToken);
+    }
+
     public static async Task PromoteCariAsync(FeatureDbContext db, CancellationToken cancellationToken)
     {
         var rows = await db.BranchFeatureStates.Where(row =>

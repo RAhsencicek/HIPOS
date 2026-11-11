@@ -148,6 +148,7 @@ if (storage == "postgres")
         }
     }
     if (cariReady) await FeatureDbInitializer.PromoteCariAsync(db, CancellationToken.None);
+    if (salesReady) await FeatureDbInitializer.PromoteSalesAsync(db, CancellationToken.None);
     if (inventoryReady) await FeatureDbInitializer.PromoteInventoryAsync(db, CancellationToken.None);
     featureRuntime.CatalogDraftsReady = catalogReady;
     featureRuntime.SalesOrdersReady = catalogReady && salesReady;

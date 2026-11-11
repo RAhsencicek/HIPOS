@@ -29,8 +29,9 @@ public sealed class InMemoryFeatureStore : IFeatureStore
 
     private static readonly HashSet<string> InitiallyDesired =
     [
-        "catalog.products", "catalog.pricing", "sales.monitoring",
-        "branches.tables", "staff.records", "kitchen.monitoring", "reports.sales",
+        "catalog.products", "catalog.pricing", "catalog.menus", "sales.monitoring",
+        "sales.checks", "sales.pos_orders", "sales.cashier",
+        "branches.tables", "staff.records", "service.waiters", "kitchen.monitoring", "reports.sales",
         "cari.management",
     ];
 
