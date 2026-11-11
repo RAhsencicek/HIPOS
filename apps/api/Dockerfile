@@ -18,7 +18,7 @@ RUN dotnet restore
 WORKDIR /src
 COPY apps/api/Hipos.Api/ ./Hipos.Api/
 WORKDIR /src/Hipos.Api
-RUN dotnet publish -c Release -o /app --no-restore
+RUN dotnet publish Hipos.Api.csproj -c Release -o /app --no-restore
 
 # Çalışma aşaması — sadece derlenmiş dosyalar
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
