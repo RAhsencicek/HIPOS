@@ -6,8 +6,9 @@ WORKDIR /src
 COPY .config/dotnet-tools.json /src/.config/dotnet-tools.json
 RUN dotnet tool restore
 
-# Proje dosyasındaki ../../../contracts göreli yolu konteynerde /contracts'e çözülür.
+# Proje dosyasındaki ../../../contracts ve ../../../scripts göreli yolları konteynerde kök altına çözülür.
 COPY contracts/ /contracts/
+COPY scripts/hipos-print-bridge.mjs /scripts/hipos-print-bridge.mjs
 
 # Proje dosyasını kopyala ve bağımlılıkları indir
 COPY apps/api/Hipos.Api/Hipos.Api.csproj ./Hipos.Api/

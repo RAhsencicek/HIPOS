@@ -33,7 +33,9 @@ public static class EscPosBuilder
         string orderNumber,
         DateTimeOffset orderTime,
         IReadOnlyList<KitchenTicketItem> items,
-        bool isReprint = false)
+        bool isReprint = false,
+        string stationHeader = "HIPOS MUTFAK",
+        string? branchTitle = null)
     {
         var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -55,8 +57,12 @@ public static class EscPosBuilder
             WriteText(bw, "================================================\n");
         }
         SetDoubleSize(bw, true);
-        WriteText(bw, "HIPOS MUTFAK\n");
+        WriteText(bw, $"{stationHeader}\n");
         SetDoubleSize(bw, false);
+        if (!string.IsNullOrWhiteSpace(branchTitle))
+        {
+            WriteText(bw, $"{branchTitle}\n");
+        }
         SetBold(bw, true);
         WriteText(bw, isReprint ? "SIPARIS BILETI (KOPYA)\n" : "SIPARIS BILETI\n");
         SetBold(bw, false);

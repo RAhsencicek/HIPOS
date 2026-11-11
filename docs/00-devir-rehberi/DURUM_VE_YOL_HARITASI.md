@@ -529,9 +529,35 @@ Reçetesindeki hammaddelerden biri tükenen (örneğin ekmek bitti veya mozzarel
 
 ---
 
+### 🔷 FAZ 11 TEKNİK SÖZLEŞMESİ: Çoklu Yazıcı, Şube/İstasyon Yönlendirmesi, USB + Kolay Print Bridge Kurulumu (✅ TAMAMLANDI - 11 KASIM 2026)
+
+#### A. İşletme ve Üretim İhtiyacı:
+Her şubenin Kasa, Mutfak ve opsiyonel Bar / İçecek yazıcı ayarlarının ortak `printer_settings.json` yerine şube bazlı PostgreSQL veritabanında tutulması, içecek kalemlerinin mutfak yerine Bar yazıcısına ayrıştırılabilmesi, buluttan yerel yazıcı IP'sine TCP 9100 blokajı yaşanmadan Print Bridge v2'ye canlı SSE aktarımı yapılması ve şube kurulumunun tek klasörde indirilebilir config + `.bat`/`.command` başlatıcılarıyla sağlanması gerekir.
+
+#### B. Uygulanan Mimari ve Bileşenler:
+1. **Şube Bazlı PostgreSQL Yazıcı Profili ([`PrintingDbContext.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingDbContext.cs), [`PrinterModels.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrinterModels.cs)):**
+   - `20261111180814_AddPrintingProfiles` migration'ı ile `printing.printer_profiles` tablosu (`deliveryMode`: `Auto` | `CloudBridge` | `DirectLan`, `cashierPrinter`, `kitchenPrinter`, `barPrinter`, `autoPrintKitchenOnOrder`, `autoSplitKitchenByStation`) eklendi; yeni şube/tenant provisioning sırasında varsayılan profil otomatik oluşturulur ([`TenantProvisioningService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Auth/TenantProvisioningService.cs)).
+2. **İstasyon Bazlı Fiş Ayrıştırma ve Gerçek Firma/Şube Başlıkları ([`PrintingService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingService.cs), [`EscPosBuilder.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/EscPosBuilder.cs)):**
+   - `BarPrinter.Enabled=true` ve `AutoSplitKitchenByStation=true` olduğunda `CatalogDbContext.Products` + `KitchenDbContext.StationCategories` eşleşmesiyle `drink` istasyonundaki kalemler `target="bar"` (`BAR / ICECEK`), diğer kalemler `target="kitchen"` (`HIPOS MUTFAK`) fişlerine ayrılır; Bar kapalıyken tüm sipariş tek mutfak fişinde basılır.
+   - Print Bridge çevrimiçiyken (`BridgePresenceRegistry.HasActiveStream`) veya `DeliveryMode == "CloudBridge"` seçiliyken bulut API özel LAN IP'lerine 4 saniyelik TCP beklemesine girmeden işi doğrudan SSE (`print.job`) üzerinden iletir. Kasa ve mutfak fiş başlıkları `AuthDbContext` üzerinden ilgili şube/firma adıyla basılır.
+3. **Canlı Köprü Varlığı, USB Envanteri ve Print Bridge v2 ([`BridgePresenceRegistry.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/BridgePresenceRegistry.cs), [`PrintingEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingEndpoints.cs), [`hipos-print-bridge.mjs`](file:///Users/mac/HIPOS/scripts/hipos-print-bridge.mjs)):**
+   - `GET /printing/bridge-status`, `POST /printing/bridge-heartbeat` ve gömülü betiği sunan `GET /api/v1/printing/bridge-script` eklendi; `POST /printing/config` değiştiğinde `printer.config.updated` SSE olayı yayınlanarak açık Print Bridge yeniden başlatılmadan güncellenir.
+   - `hipos-print-bridge.mjs` `--config <dosya>` ve `--list-printers` CLI seçenekleri, `kitchen`/`bar`/`cashier` 3 hedefli yönlendirme, TCP 9100 ağ baskısı ile macOS/Linux (`lp -d ... -o raw`, CUPS `usb://`) ve Windows (`winspool.Drv` PowerShell raw yazdırma) desteğini sunar.
+4. **POS ve Admin Kurulum Deneyimi ([`PrinterSettingsModal.tsx`](file:///Users/mac/HIPOS/apps/pos/src/components/PrinterSettingsModal.tsx), [`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`BranchesPage.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/branches/BranchesPage.tsx)):**
+   - Hem Garson (`⚙️ Yazıcı Ayarları`) hem Kasa (`🖨️ Yazıcılar`) ekranlarına 3 cihazlı (Mutfak + Bar + Kasa), canlı Print Bridge durumu ve algılanan USB yazıcı önerileri gösteren ortak `PrinterSettingsModal` bağlandı.
+   - Admin Şubeler sayfasına canlı Print Bridge çevrimiçi/çevrimdışı göstergesi, şube içi yazıcı düzenleyici ve tek tıkla indirilen `hipos-bridge.config.json`, `HIPOS-Yazici-Koprusu.bat` (Windows) ve `HIPOS-Yazici-Koprusu.command` (macOS) başlatıcıları eklendi.
+
+#### C. Doğrulama Kanıtları (11 Kasım 2026):
+* **Otomatik Çoklu Yazıcı & Print Bridge E2E ([`test_faz11_multiprinter_bridge.mjs`](file:///Users/mac/HIPOS/scripts/test_faz11_multiprinter_bridge.mjs)):**
+  - Şube A ve Şube B için bağımsız `printing.printer_profiles` kalıcılığı, `bridge` rol kapsam sınırı (kendi şubesi `200`, farklı şube/kiracı `403`) ve `/api/v1/printing/bridge-script` doğrulandı.
+  - Print Bridge v2 `--config` ile bağlandıktan sonra eşzamanlı yemek+içecek siparişinde `Izgara Adana` yalnızca Mutfak yazıcısına (`HIPOS MUTFAK`), `Taze Limonata` yalnızca Bar yazıcısına (`BAR / ICECEK`), masa ödemesinde ise Kasa fişi Tenant 2 şube başlığıyla Kasa yazıcısına teslim edildi; yeniden başlatma olmadan canlı `printer.config.updated` sonrası mutfak test fişi yeni TCP porta yönlendi.
+  - Playwright ile Admin Şubeler (canlı köprü rozeti + 3 indirme butonu + kaydet), POS Kasa (`Yazıcılar` modalı) ve POS Garson (`Yazıcı Ayarları` modalı) ekranları doğrulandı.
+
+---
+
 ## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ
 
-Faz 1–10 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
-1. `DURUM_VE_YOL_HARITASI.md`: Faz 1–10 durumu ve doğrulama sonuçları güncellenmiştir.
-2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_YAZICI.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`, `MODUL_07_KIMLIK_VE_AUTH.md`: Yeni endpoint'ler, veri sözleşmeleri ve güvenlik/izolasyon kurallarıyla senkronize edilmiştir.
-3. Production güvenlik kilidi (`HIPOS_ALLOW_DEMO_ACTOR=false` varsayılanı ve güçlü `HIPOS_JWT_SECRET` zorunluluğu), çok kiracılı izolasyon ve Print Bridge JWT akışı doğrulanmıştır. Sıradaki adım Faz 11+ (yerel yazdırma köprüsü ve çevrimdışı/LAN hibrit dayanıklılık adımları) ile devam eder.
+Faz 1–11 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
+1. `DURUM_VE_YOL_HARITASI.md`: Faz 1–11 durumu ve doğrulama sonuçları güncellenmiştir.
+2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_KDS.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`, `MODUL_07_KIMLIK_VE_AUTH.md`: Yeni endpoint'ler, veri sözleşmeleri, şube yazıcı profilleri ve güvenlik/izolasyon kurallarıyla senkronize edilmiştir.
+3. Production güvenlik kilidi (`HIPOS_ALLOW_DEMO_ACTOR=false` varsayılanı ve güçlü `HIPOS_JWT_SECRET` zorunluluğu), çok kiracılı izolasyon ve Faz 11 çoklu yazıcı + Print Bridge v2 kurulum paketi doğrulanmıştır. Sıradaki adım Faz 12+ (çevrimdışı LAN / yerel senkronizasyon dayanıklılık adımları) ile devam eder.

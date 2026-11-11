@@ -139,8 +139,10 @@ graph TD
    * `/kitchen` ekranına dokunmatik büyük butonlar ve geçen süre sayaçları ekleme.
 3. **3. Adım: İstasyon Filtreleme:**
    * Ürün kategorisine göre istasyon eşleşmesi (`Fırın`, `Bar`, `Sıcak Mutfak`).
-4. **4. Adım: ESC/POS Ağ Yazıcısı Entegrasyonu:**
-   * Yerel ağdaki termal yazıcıya socket ile bilet basan arka plan servisi.
+4. **4. Adım: Şubeye Özel ESC/POS Çoklu Yazıcı ve Print Bridge Entegrasyonu (`PrintingDbContext`, `PrintingService`, `BridgePresenceRegistry`):**
+   * Şubeye özel Kasa (`cashier`), Mutfak (`kitchen`) ve opsiyonel Bar / İçecek (`bar`) hedefleri PostgreSQL `printing.printer_profiles` tablosunda saklanır (`GET/POST /api/v1/firms/{f}/branches/{b}/printing/config`).
+   * `BarPrinter.Enabled` açık ve `AutoSplitKitchenByStation=true` iken `CatalogDbContext.Products` + `KitchenDbContext.StationCategories` eşleşmesiyle içecek kalemleri `target="bar"` (`BAR / ICECEK`), yemek kalemleri `target="kitchen"` (`HIPOS MUTFAK`) fişlerine otomatik ayrıştırılır.
+   * Yerel ağdaki Windows/macOS kasalara kurulan `scripts/hipos-print-bridge.mjs` (`GET /api/v1/printing/bridge-script`, `POST /printing/bridge-token`) SSE (`print.job` ve canlı ayar yenilemesi `printer.config.updated`) + heartbeat (`POST /printing/bridge-heartbeat`, `GET /printing/bridge-status`) üzerinden hem TCP 9100 ağ yazıcılarına hem de OS USB ham yazıcı kuyruklarına basar.
 
 ---
 
@@ -150,11 +152,27 @@ graph TD
 -- Mutfak İstasyonları
 CREATE TABLE kitchen.stations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    branch_id UUID NOT NULL,
-    name VARCHAR(50) NOT NULL,            -- "Taş Fırın", "Bar", "Sıcak Mutfak"
-    printer_ip VARCHAR(50) NULL,          -- "192.168.1.200"
-    printer_port INT NOT NULL DEFAULT 9100,
+    firm_id VARCHAR(64) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL,
+    code VARCHAR(40) NOT NULL,
+    name VARCHAR(50) NOT NULL,            -- "Mutfak", "Bar / İçecek"
     is_active BOOLEAN NOT NULL DEFAULT true
+);
+
+-- Şube Bazlı Yazıcı Profili (PrintingDbContext)
+CREATE TABLE printing.printer_profiles (
+    firm_id VARCHAR(64) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL,
+    delivery_mode VARCHAR(32) NOT NULL DEFAULT 'Auto', -- Auto | CloudBridge | DirectLan
+    cashier_printer_json JSONB NOT NULL,
+    kitchen_printer_json JSONB NOT NULL,
+    bar_printer_json JSONB NOT NULL,
+    auto_print_kitchen_on_order BOOLEAN NOT NULL DEFAULT true,
+    auto_split_kitchen_by_station BOOLEAN NOT NULL DEFAULT true,
+    version INT NOT NULL DEFAULT 1,
+    updated_by VARCHAR(120) NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (firm_id, branch_id)
 );
 
 -- Hazırlık durumu sales.order_lines'a eklenmez.

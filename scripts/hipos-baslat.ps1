@@ -137,7 +137,7 @@ Write-Host "`n[3/5] Veritabani migration'lari kontrol ediliyor..."
 $contexts = @(
     "FeatureDbContext", "CatalogDbContext", "SalesDbContext", "CariDbContext",
     "ServiceDbContext", "InventoryDbContext", "CashDbContext", "ExpenseDbContext",
-    "KitchenDbContext", "AuthDbContext", "OverviewDbContext"
+    "KitchenDbContext", "AuthDbContext", "OverviewDbContext", "PrintingDbContext"
 )
 foreach ($context in $contexts) {
     Write-Host "  - $context... " -NoNewline

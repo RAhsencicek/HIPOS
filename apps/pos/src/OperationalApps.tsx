@@ -4,6 +4,7 @@ import { createRequestId } from "./requestId";
 import { ProductOptionPicker, type SelectedOption, type OptionSelection } from "./ProductOptionPicker";
 import "./operational.css";
 import { PinPadModal } from "./components/PinPadModal";
+import { PrinterSettingsModal } from "./components/PrinterSettingsModal";
 import {
   POS_API_BASE,
   POS_AUTH_CHANGED_EVENT,
@@ -270,6 +271,7 @@ export function CashierApp() {
   const [stationManagerPin, setStationManagerPin] = useState("");
   const [stationError, setStationError] = useState("");
   const initialStationChecked = useRef(false);
+  const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (!cashierSession) return;
@@ -1375,6 +1377,15 @@ export function CashierApp() {
               🧾 Son Fiş
             </button>
           )}
+
+          <button
+            type="button"
+            className="cashier-header-btn"
+            onClick={() => setPrinterSettingsOpen(true)}
+            title="Şube yazıcıları (Kasa, Mutfak, Bar) ve Print Bridge durumu"
+          >
+            🖨️ Yazıcılar
+          </button>
 
           {/* Detay ekranındayken Geri Dön */}
           {selected && cashierMode === "tables" && (
@@ -2924,6 +2935,14 @@ export function CashierApp() {
         </div>
       </div>
     )}
+    <PrinterSettingsModal
+      open={printerSettingsOpen}
+      firmId={firmId}
+      branchId={branchId}
+      appKind="cashier"
+      onClose={() => setPrinterSettingsOpen(false)}
+      onSaved={(msg) => setCashNotice(msg)}
+    />
     {printToast && (
       <div className="pos-smooth-toast" role="status">
         <span className="toast-icon">{printToast.icon ?? "🧾"}</span>
@@ -3378,96 +3397,7 @@ export function WaiterApp() {
   }
 
   const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
-  const [printerConfig, setPrinterConfig] = useState({
-    kitchenIp: "192.168.1.116",
-    kitchenPort: 9100,
-    kitchenType: "Network",
-    cashierType: "Usb"
-  });
-  const [printerSaving, setPrinterSaving] = useState(false);
-  const [ipTesting, setIpTesting] = useState(false);
-  const [ipTestResult, setIpTestResult] = useState<{ reachable: boolean; latencyMs: number; error?: string } | null>(null);
   const [reprintingKitchen, setReprintingKitchen] = useState(false);
-
-  async function openPrinterSettings() {
-    setPrinterSettingsOpen(true);
-    setIpTestResult(null);
-    try {
-      const res = await request<{
-        kitchenPrinter: { ipAddress: string; port: number; type: string };
-        cashierPrinter: { type: string };
-      }>(`/api/v1/firms/${firmId}/branches/${branchId}/printing/config`, "pos-single");
-      if (res?.kitchenPrinter) {
-        setPrinterConfig({
-          kitchenIp: res.kitchenPrinter.ipAddress ?? "192.168.1.116",
-          kitchenPort: res.kitchenPrinter.port ?? 9100,
-          kitchenType: res.kitchenPrinter.type ?? "Network",
-          cashierType: res.cashierPrinter?.type ?? "Usb"
-        });
-      }
-    } catch {}
-  }
-
-  function applyPrinterPreset(mode: "single" | "live") {
-    if (mode === "single") {
-      setPrinterConfig({
-        kitchenIp: "127.0.0.1",
-        kitchenPort: 9100,
-        kitchenType: "Usb",
-        cashierType: "Usb"
-      });
-      setIpTestResult(null);
-    } else {
-      setPrinterConfig(c => ({
-        kitchenIp: c.kitchenIp && c.kitchenIp !== "127.0.0.1" ? c.kitchenIp : "192.168.1.201",
-        kitchenPort: 9100,
-        kitchenType: "Network",
-        cashierType: "Usb"
-      }));
-      setIpTestResult(null);
-    }
-  }
-
-  async function testKitchenIp() {
-    if (ipTesting || !printerConfig.kitchenIp) return;
-    setIpTesting(true);
-    setIpTestResult(null);
-    try {
-      const res = await request<{ reachable: boolean; latencyMs: number; error?: string }>(
-        `/api/v1/firms/${firmId}/branches/${branchId}/printing/check-connection?ip=${encodeURIComponent(printerConfig.kitchenIp)}&port=${printerConfig.kitchenPort}`,
-        "pos-single"
-      );
-      setIpTestResult(res);
-    } catch (err) {
-      setIpTestResult({ reachable: false, latencyMs: -1, error: err instanceof Error ? err.message : "Bağlantı hatası" });
-    } finally {
-      setIpTesting(false);
-    }
-  }
-
-  async function savePrinterConfig() {
-    setPrinterSaving(true); setError("");
-    try {
-      await request(
-        `/api/v1/firms/${firmId}/branches/${branchId}/printing/config`,
-        "pos-single",
-        {
-          kitchenIp: printerConfig.kitchenIp,
-          kitchenPort: Number(printerConfig.kitchenPort) || 9100,
-          kitchenType: printerConfig.kitchenType,
-          cashierType: printerConfig.cashierType,
-          kitchenFallbackToUsb: printerConfig.kitchenType === "Usb",
-          cashierFallbackToUsb: true
-        }
-      );
-      setNotice("✅ Yazıcı ayarları başarıyla kaydedildi!");
-      setPrinterSettingsOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Yazıcı ayarları kaydedilemedi.");
-    } finally {
-      setPrinterSaving(false);
-    }
-  }
 
   async function reprintKitchenTicket() {
     if (!selectedTable || reprintingKitchen) return;
@@ -3768,7 +3698,7 @@ export function WaiterApp() {
         </button>
         <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button>
         <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>
-        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => void openPrinterSettings()}>⚙️ Yazıcı Ayarları</button>
+        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => setPrinterSettingsOpen(true)}>⚙️ Yazıcı Ayarları</button>
         {selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}
         <span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span>
       </div>
@@ -3810,168 +3740,14 @@ export function WaiterApp() {
         <footer><button type="button" className="waiter-cancel-custom" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={tableActionsBlocked || !reservationGuestName.trim() || !reservationDate}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaydet"}</button></footer>
       </form>}
     </dialog>
-    <dialog open={printerSettingsOpen} className="waiter-reservation-dialog" aria-labelledby="printer-settings-title" onClose={() => setPrinterSettingsOpen(false)}>
-      {printerSettingsOpen && <form className="waiter-custom-modal" onSubmit={(e) => { e.preventDefault(); void savePrinterConfig(); }}>
-        <header>
-          <div>
-            <span className="ops-eyebrow">DONANIM & YAZICI MİMARİSİ</span>
-            <h2 id="printer-settings-title">Yazıcı Yapılandırması</h2>
-          </div>
-          <button type="button" className="waiter-modal-close" onClick={() => setPrinterSettingsOpen(false)} aria-label="Kapat">×</button>
-        </header>
-
-        {/* Hızlı Hazır Profil Seçimi */}
-        <div style={{ display: "flex", gap: "8px", margin: "14px 0 10px" }}>
-          <button
-            type="button"
-            className="waiter-quiet-action"
-            style={{
-              flex: 1,
-              padding: "8px 10px",
-              fontSize: "12px",
-              borderRadius: "6px",
-              background: printerConfig.kitchenType === "Usb" ? "#e0e7ff" : "#f8fafc",
-              borderColor: printerConfig.kitchenType === "Usb" ? "#6366f1" : "#cbd5e1",
-              color: printerConfig.kitchenType === "Usb" ? "#3730a3" : "#475569",
-              fontWeight: printerConfig.kitchenType === "Usb" ? "bold" : "normal"
-            }}
-            onClick={() => applyPrinterPreset("single")}
-          >
-            🏠 Tek Cihaz Test Modu (USB)
-          </button>
-          <button
-            type="button"
-            className="waiter-quiet-action"
-            style={{
-              flex: 1,
-              padding: "8px 10px",
-              fontSize: "12px",
-              borderRadius: "6px",
-              background: printerConfig.kitchenType === "Network" ? "#dcfce7" : "#f8fafc",
-              borderColor: printerConfig.kitchenType === "Network" ? "#22c55e" : "#cbd5e1",
-              color: printerConfig.kitchenType === "Network" ? "#166534" : "#475569",
-              fontWeight: printerConfig.kitchenType === "Network" ? "bold" : "normal"
-            }}
-            onClick={() => applyPrinterPreset("live")}
-          >
-            🏢 Restoran Canlı Modu (2 Ayrı Cihaz)
-          </button>
-        </div>
-
-        <section style={{ margin: "14px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <h3 style={{ fontSize: "14px", margin: "0 0 6px", color: "#1e293b" }}>🍳 Mutfak Yazıcısı (Ağ / Ethernet / Windows)</h3>
-          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>
-            Mutfaktaki termal yazıcı. Doğrudan Ethernet/Wi-Fi kablosuyla veya Windows bilgisayara bağlı çalışabilir.
-          </p>
-          <label className="waiter-select" style={{ marginBottom: "8px" }}>Bağlantı Türü
-            <select
-              value={printerConfig.kitchenType}
-              onChange={(e) => { setPrinterConfig(c => ({ ...c, kitchenType: e.target.value })); setIpTestResult(null); }}
-            >
-              <option value="Network">Ağ / TCP Soket (Doğrudan Ethernet / Wi-Fi - Port 9100)</option>
-              <option value="Usb">Yerel USB (Gprinter / KodPOS - Tek Bilgisayar Modu)</option>
-            </select>
-          </label>
-          {printerConfig.kitchenType === "Network" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "8px" }}>
-                <label className="waiter-note-field">IP Adresi
-                  <input
-                    value={printerConfig.kitchenIp}
-                    onChange={(e) => { setPrinterConfig(c => ({ ...c, kitchenIp: e.target.value })); setIpTestResult(null); }}
-                    placeholder="192.168.1.201"
-                  />
-                </label>
-                <label className="waiter-note-field">Port
-                  <input
-                    type="number"
-                    value={printerConfig.kitchenPort}
-                    onChange={(e) => { setPrinterConfig(c => ({ ...c, kitchenPort: Number(e.target.value) || 9100 })); setIpTestResult(null); }}
-                    placeholder="9100"
-                  />
-                </label>
-              </div>
-              <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="waiter-quiet-action"
-                  style={{ fontSize: "12px", background: "#f0fdf4", borderColor: "#86efac", color: "#166534", fontWeight: "bold" }}
-                  disabled={ipTesting || !printerConfig.kitchenIp}
-                  onClick={() => void testKitchenIp()}
-                >
-                  {ipTesting ? "🔍 Kontrol Ediliyor…" : "🔍 IP Test Et (Hızlı Ping)"}
-                </button>
-                <button
-                  type="button"
-                  className="waiter-quiet-action"
-                  style={{ fontSize: "12px", background: "#e0f2fe", borderColor: "#bae6fd" }}
-                  disabled={Boolean(testPrinting)}
-                  onClick={() => void triggerTestPrint("kitchen")}
-                >
-                  {testPrinting === "kitchen" ? "Deneniyor…" : "🧪 Mutfak Test Fişi Gönder"}
-                </button>
-              </div>
-              {ipTestResult && (
-                <div style={{
-                  marginTop: "10px",
-                  fontSize: "12px",
-                  padding: "8px 12px",
-                  borderRadius: "6px",
-                  background: ipTestResult.reachable ? "#f0fdf4" : "#fef2f2",
-                  border: `1px solid ${ipTestResult.reachable ? "#bbf7d0" : "#fecaca"}`,
-                  color: ipTestResult.reachable ? "#166534" : "#991b1b"
-                }}>
-                  {ipTestResult.reachable
-                    ? `🟢 Bağlantı Başarılı! (${ipTestResult.latencyMs} ms) — Yazıcı hatta ve istek almaya hazır.`
-                    : `🔴 Ulaşılamadı: ${ipTestResult.error ?? "Bağlantı zaman aşımına uğradı."}`}
-                </div>
-              )}
-              <div style={{ marginTop: "10px", padding: "10px", background: "#eff6ff", borderRadius: "6px", border: "1px solid #bfdbfe", fontSize: "11px", color: "#1e40af", lineHeight: "1.5" }}>
-                <strong>💡 KodPOS Yazıcı IP'sini Öğrenme / Yazdırma:</strong><br />
-                1. Yazıcının güç anahtarını kapatın.<br />
-                2. Ön paneldeki <strong>FEED</strong> tuşuna basılı tutarken güç anahtarını açın.<br />
-                3. 3 saniye sonra (bip sesi gelince) FEED tuşunu bırakın. Yazıcı kendi IP adresini otomatik kağıda basacaktır.
-              </div>
-            </>
-          )}
-          {printerConfig.kitchenType === "Usb" && (
-            <div style={{ marginTop: "8px" }}>
-              <p style={{ fontSize: "12px", color: "#475569", margin: "0 0 8px" }}>
-                Mutfak fişleri de kasaya bağlı USB yazıcıdan basılacaktır (Geliştirme / Test amaçlı).
-              </p>
-              <button
-                type="button"
-                className="waiter-quiet-action"
-                style={{ fontSize: "12px", background: "#e0f2fe", borderColor: "#bae6fd" }}
-                disabled={Boolean(testPrinting)}
-                onClick={() => void triggerTestPrint("kitchen")}
-              >
-                {testPrinting === "kitchen" ? "Deneniyor…" : "🧪 Mutfak Test Fişi Gönder (USB)"}
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section style={{ margin: "14px 0", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <h3 style={{ fontSize: "14px", margin: "0 0 6px", color: "#1e293b" }}>🧾 Kasa / Adisyon Yazıcısı (Mac)</h3>
-          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 10px" }}>Kasa bilgisayarına (Mac) USB veya ağ ile bağlı termal fiş yazıcısı.</p>
-          <label className="waiter-select">Bağlantı Türü
-            <select value={printerConfig.cashierType} onChange={(e) => setPrinterConfig(c => ({ ...c, cashierType: e.target.value }))}>
-              <option value="Usb">Yerel USB (Gprinter / KodPOS)</option>
-              <option value="Network">Ağ / TCP Soket (Port 9100)</option>
-            </select>
-          </label>
-          <button type="button" className="waiter-quiet-action" style={{ marginTop: "8px", fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>
-            {testPrinting === "cashier" ? "Deneniyor…" : "🧪 Kasa Test Fişi Gönder"}
-          </button>
-        </section>
-
-        <footer>
-          <button type="button" className="waiter-cancel-custom" onClick={() => setPrinterSettingsOpen(false)}>Kapat</button>
-          <button type="submit" className="ops-primary" disabled={printerSaving}>{printerSaving ? "Kaydediliyor…" : "Ayarları Kaydet"}</button>
-        </footer>
-      </form>}
-    </dialog>
+    <PrinterSettingsModal
+      open={printerSettingsOpen}
+      firmId={firmId}
+      branchId={branchId}
+      appKind="waiter"
+      onClose={() => setPrinterSettingsOpen(false)}
+      onSaved={(msg) => setNotice(msg)}
+    />
     {selectedTable && <section className="waiter-order-page" aria-live="polite">
       <div className="waiter-order-heading"><div><span className="ops-eyebrow">MASA DETAYI</span><h1>{selectedTable.group ? selectedTable.group.tableNames.join(" + ") : selectedTable.name}</h1>{selectedTable.group && <p className="waiter-group-info">{selectedTable.group.guestCount} kişi · Ana masa: {selectedTable.name} · Ortak adisyon</p>}</div><span className={`waiter-table-status ${getTableStatus(selectedTable) === "bill_requested" ? "bill-requested" : getTableStatus(selectedTable) === "reserved" ? "reserved" : selectedTable.assignment || selectedTable.group ? "occupied" : "empty"}`}>{getTableStatus(selectedTable) === "bill_requested" ? "Hesap istendi" : selectedTable.group ? "Masa grubu" : getTableStatus(selectedTable) === "reserved" ? "Rezerve" : selectedTable.assignment ? "Dolu" : "Boş"}</span></div>
       {notice && <p className="ops-success" role="status" style={{ margin: "10px 0", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}{lastOrderId && <small> · Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}

@@ -298,6 +298,7 @@ public static class PrintingEndpoints
             string ip,
             int? port,
             HttpContext context,
+            [FromServices] BridgePresenceRegistry bridgeRegistry,
             CancellationToken ct) =>
         {
             var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
@@ -305,39 +306,84 @@ public static class PrintingEndpoints
 
             var targetPort = port is > 0 ? port.Value : 9100;
             var (reachable, latencyMs, error) = await PrintingService.CheckConnectionAsync(ip, targetPort, ct);
+            var bridgeConnected = bridgeRegistry.HasActiveStream(firmId, branchId);
             return Results.Ok(new
             {
                 reachable,
                 latencyMs,
                 ip,
                 port = targetPort,
-                error
+                error = !reachable && bridgeConnected
+                    ? "Bulut sunucu yerel yazıcı IP'sine doğrudan erişemez; ancak şube Yazıcı Köprüsü çevrimiçi. 'Test Fişi Gönder' ile doğrulayabilirsiniz."
+                    : error,
+                bridgeConnected
             });
         });
 
-        // 5. Yazıcı Yapılandırması (Ağ IP'lerini dinamik ayarlama)
-        group.MapGet("/printing/config", (
+        // 5. Şubeye Özel Yazıcı Yapılandırması (Ağ IP + USB + Bar İstasyonu + Teslimat Modu)
+        group.MapGet("/printing/config", async (
             string firmId,
             string branchId,
             HttpContext context,
-            [FromServices] PrintingService printing) =>
+            [FromServices] PrintingService printing,
+            CancellationToken ct) =>
         {
             var (_, denied) = Guard(context, firmId, branchId, allowBridge: true);
-            return denied ?? Results.Ok(printing.GetConfig());
+            if (denied is not null) return denied;
+
+            return Results.Ok(await printing.GetConfigAsync(firmId, branchId, ct));
         });
 
-        group.MapPost("/printing/config", (
+        group.MapPost("/printing/config", async (
             string firmId,
             string branchId,
             UpdatePrinterConfigRequest request,
             HttpContext context,
-            [FromServices] PrintingService printing) =>
+            [FromServices] PrintingService printing,
+            [FromServices] IRestaurantEventHub eventHub,
+            CancellationToken ct) =>
         {
-            var (_, denied) = Guard(context, firmId, branchId, requireManage: true, allowCashierManage: true);
+            var (actor, denied) = Guard(context, firmId, branchId, requireManage: true, allowCashierManage: true);
             if (denied is not null) return denied;
 
-            printing.UpdateConfig(request);
-            return Results.Ok(printing.GetConfig());
+            var updated = await printing.UpdateConfigAsync(firmId, branchId, request, actor?.Name ?? "operator", ct);
+            eventHub.Publish("printer.config.updated", firmId, branchId, updated);
+            return Results.Ok(updated);
+        });
+
+        // 5.1 Şube Print Bridge Canlı Durumu ve Algılanan Yerel USB/OS Yazıcıları
+        group.MapGet("/printing/bridge-status", (
+            string firmId,
+            string branchId,
+            HttpContext context,
+            [FromServices] BridgePresenceRegistry bridgeRegistry) =>
+        {
+            var (_, denied) = Guard(context, firmId, branchId, allowBridge: true);
+            if (denied is not null) return denied;
+
+            return Results.Ok(bridgeRegistry.GetStatus(firmId, branchId));
+        });
+
+        // 5.2 Print Bridge İstemcisinden Kalp Atışı & Yerel Yazıcı Envanteri Bildirimi
+        group.MapPost("/printing/bridge-heartbeat", (
+            string firmId,
+            string branchId,
+            BridgeHeartbeatRequest heartbeat,
+            HttpContext context,
+            [FromServices] BridgePresenceRegistry bridgeRegistry) =>
+        {
+            var (actor, denied) = Guard(context, firmId, branchId, allowBridge: true);
+            if (denied is not null) return denied;
+
+            if (!actor!.IsBridge && !actor.CanManage)
+            {
+                return Results.Json(
+                    new { code = "FORBIDDEN", message = "Bu kalp atışı ucu yalnızca Yazıcı Köprüsü veya yönetici içindir." },
+                    statusCode: 403);
+            }
+
+            var node = bridgeRegistry.RecordHeartbeat(firmId, branchId, heartbeat);
+            return Results.Ok(new { ok = true, node });
         });
 
         // 6. Yerel Yazıcı Köprüsü (Print Bridge) İçin Uzun Ömürlü Şube Yetkili Token Üretme
@@ -370,6 +416,21 @@ public static class PrintingEndpoints
                 branchId,
                 role = "bridge"
             });
+        });
+
+        // 7. Şube Bilgisayarlarına Tek Tıkla İndirilebilen Bağımsız Print Bridge Betiği (sıfır bağımlılık)
+        app.MapGet("/api/v1/printing/bridge-script", () =>
+        {
+            var assembly = typeof(PrintingEndpoints).Assembly;
+            using var stream = assembly.GetManifestResourceStream("Hipos.PrintBridge.mjs");
+            if (stream is null)
+            {
+                return Results.NotFound(new { message = "Print Bridge betiği pakette bulunamadı." });
+            }
+
+            using var reader = new StreamReader(stream);
+            var content = reader.ReadToEnd();
+            return Results.Text(content, "application/javascript; charset=utf-8");
         });
     }
 

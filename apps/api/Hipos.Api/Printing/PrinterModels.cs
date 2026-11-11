@@ -19,33 +19,53 @@ public sealed record CashierReceiptItem(
 
 public sealed class PrinterConfig
 {
+    public string DeliveryMode { get; set; } = "Auto"; // "Auto", "CloudBridge", "DirectLan"
+    public string Mode => DeliveryMode;
+
     public PrinterTargetConfig CashierPrinter { get; set; } = new()
     {
-        Name = "Kasa Yazıcısı (Mac USB)",
+        Name = "Kasa Yazıcısı",
         Type = "Usb",
-        IpAddress = "127.0.0.1",
+        Enabled = true,
+        IpAddress = "192.168.1.100",
         Port = 9100,
         FallbackToUsb = true
     };
 
     public PrinterTargetConfig KitchenPrinter { get; set; } = new()
     {
-        Name = "Mutfak Yazıcısı (Windows PC)",
+        Name = "Mutfak Yazıcısı",
         Type = "Network",
+        Enabled = true,
         IpAddress = "192.168.1.116",
         Port = 9100,
-        FallbackToUsb = false // Mutfak fişi ASLA kasadaki Mac USB'sine düşmemeli
+        FallbackToUsb = false // Mutfak fişi varsayılanda kasadaki USB'ye düşmez
+    };
+
+    public PrinterTargetConfig BarPrinter { get; set; } = new()
+    {
+        Name = "Bar / İçecek Yazıcısı",
+        Type = "Disabled",
+        Enabled = false,
+        IpAddress = "192.168.1.117",
+        Port = 9100,
+        FallbackToUsb = false
     };
 
     public bool AutoPrintKitchenOnOrder { get; set; } = true;
+    public bool AutoSplitKitchenByStation { get; set; } = true;
+    public int Version { get; set; } = 1;
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public sealed class PrinterTargetConfig
 {
     public string Name { get; set; } = "Yazıcı";
     public string Type { get; set; } = "Network"; // "Network", "Usb", "Console", "Disabled"
+    public bool Enabled { get; set; } = true;
     public string IpAddress { get; set; } = "192.168.1.116";
     public int Port { get; set; } = 9100;
+    public string? SystemPrinterName { get; set; }
     public bool FallbackToUsb { get; set; } = false;
 }
 
@@ -57,7 +77,21 @@ public sealed record UpdatePrinterConfigRequest(
     int? CashierPort,
     string? CashierType,
     bool? KitchenFallbackToUsb,
-    bool? CashierFallbackToUsb);
+    bool? CashierFallbackToUsb,
+    string? KitchenSystemPrinterName = null,
+    bool? KitchenEnabled = null,
+    string? CashierSystemPrinterName = null,
+    bool? CashierEnabled = null,
+    string? BarIp = null,
+    int? BarPort = null,
+    string? BarType = null,
+    string? BarSystemPrinterName = null,
+    bool? BarFallbackToUsb = null,
+    bool? BarEnabled = null,
+    string? Mode = null,
+    string? DeliveryMode = null,
+    bool? AutoPrintKitchenOnOrder = null,
+    bool? AutoSplitKitchenByStation = null);
 
 public sealed record SettleTableRequest(string? PaymentMethod = "NAKIT", Guid? RegisterId = null, bool PostToCash = true);
 

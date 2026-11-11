@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Hipos.Api.Features;
+using Hipos.Api.Printing;
 
 namespace Hipos.Api.Realtime;
 
@@ -17,6 +18,7 @@ public static class RealtimeEndpoints
             string branchId,
             HttpContext context,
             IRestaurantEventHub eventHub,
+            BridgePresenceRegistry bridgeRegistry,
             CancellationToken ct) =>
         {
             var actor = DemoAccess.Resolve(context);
@@ -34,6 +36,10 @@ public static class RealtimeEndpoints
                 return;
             }
 
+            string? bridgeConnectionId = actor.IsBridge
+                ? bridgeRegistry.RegisterStream(firmId, branchId, actor.Name)
+                : null;
+
             context.Response.Headers.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-cache, no-transform";
             context.Response.Headers.Connection = "keep-alive";
@@ -45,6 +51,7 @@ public static class RealtimeEndpoints
                 message = "HIPOS LAN Eşzamanlılık SSE Akışı Bağlandı",
                 firmId,
                 branchId,
+                bridgeConnectionId,
                 timestamp = DateTimeOffset.UtcNow
             }, ct);
 
@@ -80,6 +87,11 @@ public static class RealtimeEndpoints
             }
             finally
             {
+                if (bridgeConnectionId is not null)
+                {
+                    bridgeRegistry.UnregisterStream(firmId, branchId, bridgeConnectionId);
+                }
+
                 pingCts.Cancel();
                 try
                 {

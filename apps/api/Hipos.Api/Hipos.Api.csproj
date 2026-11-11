@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="../../../contracts/feature-catalog.v1.json" LogicalName="Hipos.FeatureCatalog.v1.json" />
+    <EmbeddedResource Include="../../../scripts/hipos-print-bridge.mjs" LogicalName="Hipos.PrintBridge.mjs" />
   </ItemGroup>
 </Project>

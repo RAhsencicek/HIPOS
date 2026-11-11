@@ -575,7 +575,8 @@ public static class ServiceEndpoints
             eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, tableId });
 
             bool autoPrinted = false;
-            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            var branchPrintConfig = await printing.GetConfigAsync(firmId, branchId, context.RequestAborted);
+            if (branchPrintConfig.AutoPrintKitchenOnOrder)
             {
                 autoPrinted = true;
                 var orderGuid = command.OrderId;

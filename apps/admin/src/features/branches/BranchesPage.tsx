@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type * as React from "react";
-import { ArrowRight, Building2, Check, Copy, KeyRound, Plus, Printer, Store } from "lucide-react";
+import { ArrowRight, Building2, Check, Copy, Download, KeyRound, Plus, Printer, RefreshCw, Store, Wifi, WifiOff } from "lucide-react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
 import {
@@ -19,6 +19,67 @@ function getPosBaseUrl(): string {
     : window.location.origin;
 }
 
+function getBridgeApiBaseUrl(): string {
+  const envBase = import.meta.env.VITE_API_BASE_URL;
+  if (typeof envBase === "string" && /^https?:\/\//i.test(envBase)) {
+    return envBase.replace(/\/+$/, "");
+  }
+  if (typeof window === "undefined") return "";
+  return window.location.port === "5173"
+    ? `${window.location.protocol}//${window.location.hostname}:5180`
+    : window.location.origin;
+}
+
+function downloadBlobFile(filename: string, content: string, mime = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+interface BranchPrinterTarget {
+  name?: string;
+  type: string;
+  enabled?: boolean;
+  ipAddress: string;
+  port: number;
+  systemPrinterName?: string | null;
+  fallbackToUsb?: boolean;
+}
+
+interface BranchPrinterConfig {
+  deliveryMode: string;
+  autoPrintKitchenOnOrder: boolean;
+  autoSplitKitchenByStation: boolean;
+  cashierPrinter: BranchPrinterTarget;
+  kitchenPrinter: BranchPrinterTarget;
+  barPrinter?: BranchPrinterTarget;
+}
+
+interface BridgeStatusData {
+  connected: boolean;
+  activeStreamCount: number;
+  lastSeenAt?: string | null;
+  bridges?: Array<{
+    bridgeId: string;
+    hostname: string;
+    platform: string;
+    localIps: string[];
+    version?: string | null;
+  }>;
+  availablePrinters?: Array<{
+    name: string;
+    port?: string | null;
+    driver?: string | null;
+    isDefault: boolean;
+  }>;
+}
+
 export function BranchesPage({ ctx }: { ctx: ViewContext }) {
   const selected = ctx.selectedBranch;
   const activeBranchId = selected?.apiId ?? (ctx.branchId !== "all" ? ctx.branchId : null);
@@ -26,7 +87,7 @@ export function BranchesPage({ ctx }: { ctx: ViewContext }) {
   // Kopyalama durumu
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Print Bridge token
+  // Print Bridge token & Şube Yazıcı Durumu
   const [bridgeLoading, setBridgeLoading] = useState(false);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   const [bridgeTokenInfo, setBridgeTokenInfo] = useState<{
@@ -34,6 +95,12 @@ export function BranchesPage({ ctx }: { ctx: ViewContext }) {
     expiresAt: string;
     branchId: string;
   } | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatusData | null>(null);
+  const [bridgeStatusLoading, setBridgeStatusLoading] = useState(false);
+  const [printerConfig, setPrinterConfig] = useState<BranchPrinterConfig | null>(null);
+  const [printerSaving, setPrinterSaving] = useState(false);
+  const [printerFeedback, setPrinterFeedback] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const [testingTarget, setTestingTarget] = useState<string | null>(null);
 
   // Yeni Şube Oluşturma
   const [newBranchName, setNewBranchName] = useState("");
@@ -78,6 +145,134 @@ export function BranchesPage({ ctx }: { ctx: ViewContext }) {
       window.setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
     } catch {
       // Pano erişimi engellendiyse sessiz kal
+    }
+  };
+
+  const loadBranchPrinting = useCallback(async () => {
+    if (!activeBranchId) {
+      setBridgeStatus(null);
+      setPrinterConfig(null);
+      return;
+    }
+    setBridgeStatusLoading(true);
+    try {
+      const [statusRes, configRes] = await Promise.all([
+        adminFetch(
+          `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(activeBranchId)}/printing/bridge-status`,
+          { firmId: ctx.firmId },
+        ),
+        adminFetch(
+          `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(activeBranchId)}/printing/config`,
+          { firmId: ctx.firmId },
+        ),
+      ]);
+      if (statusRes.ok) {
+        setBridgeStatus((await statusRes.json()) as BridgeStatusData);
+      }
+      if (configRes.ok) {
+        const cfg = (await configRes.json()) as BranchPrinterConfig;
+        setPrinterConfig({
+          deliveryMode: cfg.deliveryMode ?? "Auto",
+          autoPrintKitchenOnOrder: cfg.autoPrintKitchenOnOrder ?? true,
+          autoSplitKitchenByStation: cfg.autoSplitKitchenByStation ?? true,
+          cashierPrinter: cfg.cashierPrinter ?? { type: "Usb", enabled: true, ipAddress: "192.168.1.100", port: 9100, fallbackToUsb: true },
+          kitchenPrinter: cfg.kitchenPrinter ?? { type: "Network", enabled: true, ipAddress: "192.168.1.116", port: 9100, fallbackToUsb: false },
+          barPrinter: cfg.barPrinter ?? { type: "Disabled", enabled: false, ipAddress: "192.168.1.117", port: 9100, fallbackToUsb: false },
+        });
+      }
+    } catch {
+      // Şube yazıcı önizlemesi sessizce geçilir
+    } finally {
+      setBridgeStatusLoading(false);
+    }
+  }, [activeBranchId, ctx.firmId]);
+
+  useEffect(() => {
+    setPrinterFeedback(null);
+    void loadBranchPrinting();
+  }, [loadBranchPrinting]);
+
+  const handleSaveBranchPrinters = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeBranchId || !printerConfig) return;
+    setPrinterSaving(true);
+    setPrinterFeedback(null);
+    try {
+      const bar = printerConfig.barPrinter ?? { type: "Disabled", enabled: false, ipAddress: "192.168.1.117", port: 9100, fallbackToUsb: false };
+      const res = await adminFetch(
+        `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(activeBranchId)}/printing/config`,
+        {
+          method: "POST",
+          firmId: ctx.firmId,
+          body: JSON.stringify({
+            deliveryMode: printerConfig.deliveryMode,
+            autoPrintKitchenOnOrder: printerConfig.autoPrintKitchenOnOrder,
+            autoSplitKitchenByStation: printerConfig.autoSplitKitchenByStation,
+            cashierIp: printerConfig.cashierPrinter.ipAddress,
+            cashierPort: Number(printerConfig.cashierPrinter.port) || 9100,
+            cashierType: printerConfig.cashierPrinter.type,
+            cashierSystemPrinterName: printerConfig.cashierPrinter.systemPrinterName?.trim() || null,
+            cashierFallbackToUsb: printerConfig.cashierPrinter.fallbackToUsb ?? true,
+            cashierEnabled: printerConfig.cashierPrinter.enabled ?? true,
+            kitchenIp: printerConfig.kitchenPrinter.ipAddress,
+            kitchenPort: Number(printerConfig.kitchenPrinter.port) || 9100,
+            kitchenType: printerConfig.kitchenPrinter.type,
+            kitchenSystemPrinterName: printerConfig.kitchenPrinter.systemPrinterName?.trim() || null,
+            kitchenFallbackToUsb: printerConfig.kitchenPrinter.fallbackToUsb ?? false,
+            kitchenEnabled: printerConfig.kitchenPrinter.enabled ?? true,
+            barEnabled: Boolean(bar.enabled),
+            barIp: bar.ipAddress,
+            barPort: Number(bar.port) || 9100,
+            barType: bar.enabled ? (bar.type === "Disabled" ? "Network" : bar.type) : "Disabled",
+            barSystemPrinterName: bar.systemPrinterName?.trim() || null,
+            barFallbackToUsb: Boolean(bar.fallbackToUsb),
+          }),
+        },
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(err.message ?? `Kaydedilemedi (${res.status}).`);
+      }
+      const saved = (await res.json()) as BranchPrinterConfig;
+      setPrinterConfig(saved);
+      setPrinterFeedback({
+        tone: "ok",
+        text: "Şube yazıcı ayarları kaydedildi; Print Bridge açıksa ayarlar anında güncellendi.",
+      });
+    } catch (err) {
+      setPrinterFeedback({
+        tone: "err",
+        text: err instanceof Error ? err.message : "Yazıcı ayarları kaydedilemedi.",
+      });
+    } finally {
+      setPrinterSaving(false);
+    }
+  };
+
+  const handleTestBranchPrinter = async (target: "kitchen" | "bar" | "cashier") => {
+    if (!activeBranchId || testingTarget) return;
+    setTestingTarget(target);
+    setPrinterFeedback(null);
+    try {
+      const res = await adminFetch(
+        `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(activeBranchId)}/printing/test?target=${target}`,
+        { method: "POST", firmId: ctx.firmId },
+      );
+      const body = (await res.json().catch(() => ({}))) as { success?: boolean; transportUsed?: string; error?: string; message?: string };
+      if (!res.ok || !body.success) {
+        throw new Error(body.error ?? body.message ?? `Test yazdırma başarısız (${res.status}).`);
+      }
+      setPrinterFeedback({
+        tone: "ok",
+        text: `${target.toUpperCase()} test fişi gönderildi (${body.transportUsed ?? "OK"}).`,
+      });
+    } catch (err) {
+      setPrinterFeedback({
+        tone: "err",
+        text: err instanceof Error ? err.message : "Test fişi gönderilemedi.",
+      });
+    } finally {
+      setTestingTarget(null);
     }
   };
 
@@ -351,48 +546,447 @@ export function BranchesPage({ ctx }: { ctx: ViewContext }) {
                 </div>
               )}
 
-              {bridgeTokenInfo && bridgeTokenInfo.branchId === activeBranchId && (
-                <div
-                  style={{
-                    padding: "0.85rem",
-                    borderRadius: "8px",
-                    backgroundColor: "#0f172a",
-                    color: "#e2e8f0",
-                    display: "grid",
-                    gap: "0.5rem",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong style={{ fontSize: "0.85rem", color: "#93c5fd" }}>
-                      <KeyRound size={14} style={{ verticalAlign: "middle", marginRight: "0.35rem" }} />
-                      Şube Yazıcı Köprüsü Çalıştırma Komutu (365 Gün Geçerli)
-                    </strong>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void copyText(
-                          "bridge-cmd",
-                          `HIPOS_API_URL="${window.location.origin}" node scripts/hipos-print-bridge.mjs --firm "${ctx.firmId}" --branch "${activeBranchId}" --token "${bridgeTokenInfo.token}"`,
-                        )
-                      }
-                      style={{
-                        border: "1px solid #334155",
-                        background: "#1e293b",
-                        color: "#f8fafc",
-                        borderRadius: "6px",
-                        padding: "0.25rem 0.65rem",
-                        fontSize: "0.75rem",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {copiedKey === "bridge-cmd" ? "Komut Kopyalandı ✓" : "Komutu Kopyala"}
-                    </button>
+              {bridgeTokenInfo && bridgeTokenInfo.branchId === activeBranchId && (() => {
+                const bridgeApiBase = getBridgeApiBaseUrl();
+                const bridgeConfigJson = JSON.stringify(
+                  {
+                    apiUrl: bridgeApiBase,
+                    firmId: ctx.firmId,
+                    branchId: activeBranchId,
+                    token: bridgeTokenInfo.token,
+                    heartbeatIntervalMs: 20000,
+                  },
+                  null,
+                  2,
+                );
+                const windowsBat = [
+                  "@echo off",
+                  "setlocal",
+                  "cd /d %~dp0",
+                  "echo HIPOS Yazici Koprusu Baslatiliyor...",
+                  "where node >nul 2>nul",
+                  "if errorlevel 1 (",
+                  "  echo HATA: Node.js 18+ kurulu degil. https://nodejs.org uzerinden LTS kurun.",
+                  "  pause",
+                  "  exit /b 1",
+                  ")",
+                  `powershell -NoProfile -Command "Invoke-WebRequest -UseBasicParsing -Uri '${bridgeApiBase}/api/v1/printing/bridge-script' -OutFile 'hipos-print-bridge.mjs'"`,
+                  "if errorlevel 1 (",
+                  "  echo UYARI: Betik indirilemedi, mevcut yerel kopya ile devam ediliyor...",
+                  ")",
+                  'node "%~dp0hipos-print-bridge.mjs" --config "%~dp0hipos-bridge.config.json"',
+                  "pause",
+                ].join("\r\n");
+                const macCommand = [
+                  "#!/bin/bash",
+                  'DIR="$(cd "$(dirname "$0")" && pwd)"',
+                  'export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"',
+                  'if ! command -v node >/dev/null 2>&1; then',
+                  '  echo "HATA: Node.js 18+ kurulu degil. https://nodejs.org adresinden kurun."',
+                  "  read -n 1 -s -r -p 'Devam etmek icin bir tusa basin...'",
+                  "  exit 1",
+                  "fi",
+                  `curl -fsSL "${bridgeApiBase}/api/v1/printing/bridge-script" -o "$DIR/hipos-print-bridge.mjs" || echo "Yerel betik kullaniliyor..."`,
+                  'exec node "$DIR/hipos-print-bridge.mjs" --config "$DIR/hipos-bridge.config.json"',
+                ].join("\n");
+
+                return (
+                  <div
+                    style={{
+                      padding: "0.95rem",
+                      borderRadius: "10px",
+                      backgroundColor: "#0f172a",
+                      color: "#e2e8f0",
+                      display: "grid",
+                      gap: "0.65rem",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                      <strong style={{ fontSize: "0.85rem", color: "#93c5fd" }}>
+                        <KeyRound size={14} style={{ verticalAlign: "middle", marginRight: "0.35rem" }} />
+                        Şube Yazıcı Köprüsü Kurulum Paketi (365 Gün Geçerli)
+                      </strong>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                        <button
+                          type="button"
+                          onClick={() => downloadBlobFile("hipos-bridge.config.json", bridgeConfigJson, "application/json;charset=utf-8")}
+                          style={{
+                            border: "1px solid #3b82f6",
+                            background: "#1d4ed8",
+                            color: "#ffffff",
+                            borderRadius: "6px",
+                            padding: "0.3rem 0.65rem",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          <Download size={13} /> hipos-bridge.config.json
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadBlobFile("HIPOS-Yazici-Koprusu.bat", windowsBat)}
+                          style={{
+                            border: "1px solid #475569",
+                            background: "#1e293b",
+                            color: "#f8fafc",
+                            borderRadius: "6px",
+                            padding: "0.3rem 0.65rem",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                          }}
+                        >
+                          <Download size={13} /> Windows (.bat)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadBlobFile("HIPOS-Yazici-Koprusu.command", macCommand)}
+                          style={{
+                            border: "1px solid #475569",
+                            background: "#1e293b",
+                            color: "#f8fafc",
+                            borderRadius: "6px",
+                            padding: "0.3rem 0.65rem",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                          }}
+                        >
+                          <Download size={13} /> macOS (.command)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void copyText(
+                              "bridge-cmd",
+                              `HIPOS_API_URL="${bridgeApiBase}" node scripts/hipos-print-bridge.mjs --firm "${ctx.firmId}" --branch "${activeBranchId}" --token "${bridgeTokenInfo.token}"`,
+                            )
+                          }
+                          style={{
+                            border: "1px solid #334155",
+                            background: "#1e293b",
+                            color: "#f8fafc",
+                            borderRadius: "6px",
+                            padding: "0.3rem 0.65rem",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {copiedKey === "bridge-cmd" ? "Komut Kopyalandı ✓" : "CLI Komutunu Kopyala"}
+                        </button>
+                      </div>
+                    </div>
+                    <p style={{ margin: 0, fontSize: "0.76rem", color: "#94a3b8" }}>
+                      Kasa PC&apos;sinde yeni bir klasöre <code>hipos-bridge.config.json</code> ile birlikte Windows için <code>.bat</code> veya macOS için <code>.command</code> dosyasını indirin (Mac&apos;te ilk sefer <code>chmod +x HIPOS-Yazici-Koprusu.command</code>), ardından çift tıklayın.
+                    </p>
+                    <code style={{ fontSize: "0.73rem", wordBreak: "break-all", color: "#cbd5e1" }}>
+                      HIPOS_API_URL="{bridgeApiBase}" node scripts/hipos-print-bridge.mjs --firm "{ctx.firmId}" --branch "{activeBranchId}" --token "{bridgeTokenInfo.token}"
+                    </code>
                   </div>
-                  <code style={{ fontSize: "0.75rem", wordBreak: "break-all", color: "#cbd5e1" }}>
-                    HIPOS_API_URL="{window.location.origin}" node scripts/hipos-print-bridge.mjs --firm "{ctx.firmId}" --branch "{activeBranchId}" --token "{bridgeTokenInfo.token}"
-                  </code>
+                );
+              })()}
+
+              {/* Canlı Print Bridge Durumu & Şube Yazıcı Profili */}
+              <div
+                style={{
+                  borderTop: "1px solid #e2e8f0",
+                  paddingTop: "0.9rem",
+                  display: "grid",
+                  gap: "0.85rem",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.6rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flexWrap: "wrap" }}>
+                    {bridgeStatus?.connected ? (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                          padding: "0.28rem 0.7rem",
+                          borderRadius: "999px",
+                          background: "#dcfce7",
+                          color: "#166534",
+                          fontWeight: 600,
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        <Wifi size={14} /> Print Bridge Çevrimiçi
+                        {bridgeStatus.bridges?.[0]?.hostname ? ` (${bridgeStatus.bridges[0].hostname})` : ""}
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                          padding: "0.28rem 0.7rem",
+                          borderRadius: "999px",
+                          background: "#fee2e2",
+                          color: "#991b1b",
+                          fontWeight: 600,
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        <WifiOff size={14} /> Print Bridge Bağlı Değil
+                      </span>
+                    )}
+                    {bridgeStatus?.bridges?.[0]?.localIps?.length ? (
+                      <span style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                        LAN: {bridgeStatus.bridges[0].localIps.join(", ")}
+                      </span>
+                    ) : null}
+                    {(bridgeStatus?.availablePrinters?.length ?? 0) > 0 && (
+                      <span style={{ fontSize: "0.78rem", color: "#0f766e" }}>
+                        Algılanan USB/OS yazıcılar:{" "}
+                        <strong>{bridgeStatus?.availablePrinters?.map((p) => p.name).join(", ")}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadBranchPrinting()}
+                    disabled={bridgeStatusLoading}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      padding: "0.32rem 0.7rem",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      background: "#fff",
+                      fontSize: "0.78rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <RefreshCw size={13} /> {bridgeStatusLoading ? "Yenileniyor..." : "Durumu Yenile"}
+                  </button>
                 </div>
-              )}
+
+                {printerConfig && (
+                  <form onSubmit={(e) => void handleSaveBranchPrinters(e)} style={{ display: "grid", gap: "0.75rem" }}>
+                    <datalist id={`branch-printers-${activeBranchId}`}>
+                      {bridgeStatus?.availablePrinters?.map((p) => (
+                        <option key={p.name} value={p.name}>
+                          {p.isDefault ? `${p.name} (Varsayılan)` : p.name}
+                        </option>
+                      ))}
+                    </datalist>
+
+                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center", fontSize: "0.82rem" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
+                        <span>Teslimat Modu:</span>
+                        <select
+                          value={printerConfig.deliveryMode}
+                          onChange={(e) => setPrinterConfig({ ...printerConfig, deliveryMode: e.target.value })}
+                          style={{ padding: "0.3rem 0.5rem", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                        >
+                          <option value="Auto">Otomatik (Bridge varsa Köprü, yoksa Direkt LAN)</option>
+                          <option value="CloudBridge">Yalnızca Bulut -&gt; Print Bridge (SSE)</option>
+                          <option value="DirectLan">Doğrudan LAN (Yerel Sunucu)</option>
+                        </select>
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={printerConfig.autoPrintKitchenOnOrder}
+                          onChange={(e) => setPrinterConfig({ ...printerConfig, autoPrintKitchenOnOrder: e.target.checked })}
+                        />
+                        Siparişte otomatik mutfak/bar fişi
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={printerConfig.autoSplitKitchenByStation}
+                          onChange={(e) => setPrinterConfig({ ...printerConfig, autoSplitKitchenByStation: e.target.checked })}
+                        />
+                        İstasyonlara göre fişi ayır (Yemek / İçecek)
+                      </label>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "0.65rem" }}>
+                      {/* Mutfak */}
+                      <div style={{ padding: "0.7rem", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#f8fafc", display: "grid", gap: "0.45rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <strong style={{ fontSize: "0.84rem" }}>🍳 Mutfak Yazıcısı</strong>
+                          <button type="button" disabled={Boolean(testingTarget)} onClick={() => void handleTestBranchPrinter("kitchen")} style={{ fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "5px", border: "1px solid #bae6fd", background: "#e0f2fe", cursor: "pointer" }}>
+                            {testingTarget === "kitchen" ? "..." : "Test"}
+                          </button>
+                        </div>
+                        <select
+                          value={printerConfig.kitchenPrinter.type}
+                          onChange={(e) => setPrinterConfig({ ...printerConfig, kitchenPrinter: { ...printerConfig.kitchenPrinter, type: e.target.value } })}
+                          style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                        >
+                          <option value="Network">Ağ / TCP 9100</option>
+                          <option value="Usb">USB / İşletim Sistemi Kuyruğu</option>
+                          <option value="Console">Sadece Konsol (Test)</option>
+                          <option value="Disabled">Devre Dışı</option>
+                        </select>
+                        {printerConfig.kitchenPrinter.type === "Network" && (
+                          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.35rem" }}>
+                            <input
+                              value={printerConfig.kitchenPrinter.ipAddress}
+                              onChange={(e) => setPrinterConfig({ ...printerConfig, kitchenPrinter: { ...printerConfig.kitchenPrinter, ipAddress: e.target.value } })}
+                              placeholder="192.168.1.201"
+                              style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            />
+                            <input
+                              type="number"
+                              value={printerConfig.kitchenPrinter.port}
+                              onChange={(e) => setPrinterConfig({ ...printerConfig, kitchenPrinter: { ...printerConfig.kitchenPrinter, port: Number(e.target.value) || 9100 } })}
+                              placeholder="9100"
+                              style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            />
+                          </div>
+                        )}
+                        {printerConfig.kitchenPrinter.type === "Usb" && (
+                          <input
+                            list={`branch-printers-${activeBranchId}`}
+                            value={printerConfig.kitchenPrinter.systemPrinterName ?? ""}
+                            onChange={(e) => setPrinterConfig({ ...printerConfig, kitchenPrinter: { ...printerConfig.kitchenPrinter, systemPrinterName: e.target.value } })}
+                            placeholder="USB Yazıcı Adı (boş=otomatik)"
+                            style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                          />
+                        )}
+                      </div>
+
+                      {/* Bar / İçecek */}
+                      <div style={{ padding: "0.7rem", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#f8fafc", display: "grid", gap: "0.45rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.84rem", fontWeight: 700, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(printerConfig.barPrinter?.enabled)}
+                              onChange={(e) => {
+                                const prevBar = printerConfig.barPrinter ?? { type: "Network", ipAddress: "192.168.1.117", port: 9100, fallbackToUsb: false };
+                                setPrinterConfig({
+                                  ...printerConfig,
+                                  barPrinter: {
+                                    ...prevBar,
+                                    enabled: e.target.checked,
+                                    type: e.target.checked && prevBar.type === "Disabled" ? "Network" : prevBar.type,
+                                  },
+                                });
+                              }}
+                            />
+                            🍹 Bar / İçecek Yazıcısı
+                          </label>
+                          <button type="button" disabled={Boolean(testingTarget) || !printerConfig.barPrinter?.enabled} onClick={() => void handleTestBranchPrinter("bar")} style={{ fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "5px", border: "1px solid #ddd6fe", background: "#ede9fe", cursor: "pointer" }}>
+                            {testingTarget === "bar" ? "..." : "Test"}
+                          </button>
+                        </div>
+                        {printerConfig.barPrinter?.enabled ? (
+                          <>
+                            <select
+                              value={printerConfig.barPrinter.type}
+                              onChange={(e) => setPrinterConfig({ ...printerConfig, barPrinter: { ...printerConfig.barPrinter!, type: e.target.value } })}
+                              style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            >
+                              <option value="Network">Ağ / TCP 9100</option>
+                              <option value="Usb">USB / İşletim Sistemi Kuyruğu</option>
+                              <option value="Console">Sadece Konsol (Test)</option>
+                            </select>
+                            {printerConfig.barPrinter.type === "Network" && (
+                              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.35rem" }}>
+                                <input
+                                  value={printerConfig.barPrinter.ipAddress}
+                                  onChange={(e) => setPrinterConfig({ ...printerConfig, barPrinter: { ...printerConfig.barPrinter!, ipAddress: e.target.value } })}
+                                  placeholder="192.168.1.117"
+                                  style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                                />
+                                <input
+                                  type="number"
+                                  value={printerConfig.barPrinter.port}
+                                  onChange={(e) => setPrinterConfig({ ...printerConfig, barPrinter: { ...printerConfig.barPrinter!, port: Number(e.target.value) || 9100 } })}
+                                  placeholder="9100"
+                                  style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                                />
+                              </div>
+                            )}
+                            {printerConfig.barPrinter.type === "Usb" && (
+                              <input
+                                list={`branch-printers-${activeBranchId}`}
+                                value={printerConfig.barPrinter.systemPrinterName ?? ""}
+                                onChange={(e) => setPrinterConfig({ ...printerConfig, barPrinter: { ...printerConfig.barPrinter!, systemPrinterName: e.target.value } })}
+                                placeholder="USB Yazıcı Adı (boş=otomatik)"
+                                style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <p style={{ margin: 0, fontSize: "0.76rem", color: "#64748b" }}>
+                            Kapalı — İçecek ürünleri mutfak fişiyle birlikte basılır. Ayrı bar yazıcısı için kutuyu işaretleyin.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Kasa */}
+                      <div style={{ padding: "0.7rem", borderRadius: "8px", border: "1px solid #e2e8f0", background: "#f8fafc", display: "grid", gap: "0.45rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <strong style={{ fontSize: "0.84rem" }}>🧾 Kasa / Adisyon Yazıcısı</strong>
+                          <button type="button" disabled={Boolean(testingTarget)} onClick={() => void handleTestBranchPrinter("cashier")} style={{ fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "5px", border: "1px solid #fde68a", background: "#fef3c7", cursor: "pointer" }}>
+                            {testingTarget === "cashier" ? "..." : "Test"}
+                          </button>
+                        </div>
+                        <select
+                          value={printerConfig.cashierPrinter.type}
+                          onChange={(e) => setPrinterConfig({ ...printerConfig, cashierPrinter: { ...printerConfig.cashierPrinter, type: e.target.value } })}
+                          style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                        >
+                          <option value="Usb">USB / İşletim Sistemi Kuyruğu</option>
+                          <option value="Network">Ağ / TCP 9100</option>
+                          <option value="Console">Sadece Konsol (Test)</option>
+                          <option value="Disabled">Devre Dışı</option>
+                        </select>
+                        {printerConfig.cashierPrinter.type === "Network" && (
+                          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "0.35rem" }}>
+                            <input
+                              value={printerConfig.cashierPrinter.ipAddress}
+                              onChange={(e) => setPrinterConfig({ ...printerConfig, cashierPrinter: { ...printerConfig.cashierPrinter, ipAddress: e.target.value } })}
+                              placeholder="192.168.1.100"
+                              style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            />
+                            <input
+                              type="number"
+                              value={printerConfig.cashierPrinter.port}
+                              onChange={(e) => setPrinterConfig({ ...printerConfig, cashierPrinter: { ...printerConfig.cashierPrinter, port: Number(e.target.value) || 9100 } })}
+                              placeholder="9100"
+                              style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            />
+                          </div>
+                        )}
+                        {printerConfig.cashierPrinter.type === "Usb" && (
+                          <input
+                            list={`branch-printers-${activeBranchId}`}
+                            value={printerConfig.cashierPrinter.systemPrinterName ?? ""}
+                            onChange={(e) => setPrinterConfig({ ...printerConfig, cashierPrinter: { ...printerConfig.cashierPrinter, systemPrinterName: e.target.value } })}
+                            placeholder="USB Yazıcı Adı (boş=otomatik)"
+                            style={{ padding: "0.35rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                      <div style={{ fontSize: "0.8rem", color: printerFeedback?.tone === "err" ? "#b91c1c" : "#15803d" }}>
+                        {printerFeedback?.text ?? ""}
+                      </div>
+                      <button type="submit" className="primary-button" disabled={printerSaving}>
+                        {printerSaving ? "Kaydediliyor..." : "Şube Yazıcı Ayarlarını Kaydet"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             </div>
           )}
         </section>

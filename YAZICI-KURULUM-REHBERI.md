@@ -1,96 +1,73 @@
-# 🖨️ HIPOS Termal Yazıcı Kurulum ve Entegrasyon Rehberi
+# 🖨️ HIPOS Çoklu Termal Yazıcı ve Print Bridge v2 Kurulum Rehberi
 
-Bu rehber, restoranda **Kasa** ve **Mutfak** yazıcılarının kurulması, test edilmesi ve canlıya alınması süreçlerini en kolay ve hatasız şekilde tamamlamanız için hazırlanmıştır.
-
----
-
-## 📌 Genel Mimari Özeti
-
-HIPOS, esnek ve modern restoran donanım mimarisine sahiptir:
-
-1. **Kasa / Adisyon Yazıcısı (Mac / POS Terminali)**:
-   - Kasa terminaline doğrudan **USB** veya **Ağ** (Ethernet) üzerinden bağlanır.
-   - Müşteri ara hesap fişi, adisyon özeti basar ve nakit ödemelerde **para çekmecesini otomatik açar**.
-2. **Mutfak Yazıcısı (Ağ / Ethernet / Windows)**:
-   - Mutfak, ocak başı veya bar bölümünde konumlanır.
-   - Doğrudan ağ kablosuyla (Ethernet) modeme/switch'e bağlıdır ve TCP Soket (Port 9100) üzerinden çalışır.
-   - Garson masadan sipariş gönderdiğinde veya **Tekrar Bas** dediğinde anında mutfak fişi basar.
-3. **Tek Cihaz Geliştirme & Test Modu**:
-   - Kurulum öncesinde veya tek bir USB yazıcı olan işletmelerde, her iki fiş de tek bir USB yazıcı üzerinden simüle edilerek test edilebilir.
+Bu rehber, restoran veya kafenizdeki **Kasa**, **Mutfak (Yiyecek)** ve isteğe bağlı **Bar (İçecek)** yazıcılarını her şube için ayrı ayrı tanımlamanız, USB veya ağ (Ethernet/Wi-Fi) üzerinden bağlamanız ve bulut sunucudan yerel donanımlara kesintisiz fiş basmanız için hazırlanmıştır.
 
 ---
 
-## 🚀 Canlı Restoranda 2. Yazıcıyı Takma (3 Adımda Hızlı Kurulum)
+## 📌 Genel Mimari (Bulut + Şube İçi Print Bridge v2)
 
-### 1. Adım: Donanım ve Kablolama
-1. Mutfak yazıcısını (örneğin KodPOS / Gprinter 80mm) mutfaktaki uygun yerine yerleştirin.
-2. Güç adaptörünü takın.
-3. Yazıcının arkasındaki **LAN (Ethernet)** portuna standart bir ağ kablosu takıp diğer ucunu restoranın modemine veya ağ anahtarına (switch) bağlayın.
-4. 80mm termal rulosunu hazneye yerleştirip kapağı kapatın.
+HIPOS yazıcı ayarlarını şubeye özel olarak PostgreSQL (`printing.printer_profiles`) veritabanında tutar. Bir işletmenin birden fazla şubesi varsa her şubenin yazıcı IP'leri, USB kuyruk adları ve teslimat modları birbirinden tamamen bağımsızdır.
 
----
-
-### 2. Adım: Yazıcının IP Adresini Öğrenme (Self-Test Fişi)
-KodPOS ve standart ESC/POS termal yazıcılar kendi IP adresini otomatik olarak fişe basabilir:
-1. Yazıcının güç anahtarını kapatın (**OFF** konuma getirin).
-2. Ön paneldeki **`FEED`** (Kağıt İlerletme) tuşuna **parmağınızı basılı tutun**.
-3. FEED tuşunu bırakmadan güç anahtarını açın (**ON**).
-4. 3-4 saniye bekleyin (yazıcıdan "bip" sesi gelip mekanizma harekete geçince) FEED tuşunu bırakın.
-5. Yazıcı otomatik olarak bir **Sistem Bilgi Fişi** basacaktır.
-6. Fişin altındaki **`IP Address:`** alanını okuyun (Örnek: `192.168.1.201`).
+1. **🍳 Mutfak Yazıcısı (`kitchen`)**:
+   - Yiyecek kategorisindeki ürünleri **HIPOS MUTFAK** başlığıyla basar. Bar yazıcısı kapalıysa tüm sipariş tek fişte buraya gelir.
+2. **🍸 Bar / İçecek Yazıcısı (`bar` — İsteğe Bağlı)**:
+   - Etkinleştirildiğinde, `cat-drink` / `drink` istasyonuna bağlı içecek kalemlerini otomatik olarak ayrı bir **BAR / ICECEK** fişine yönlendirir; mutfak fişine yalnızca yiyecekler gider.
+3. **🧾 Kasa / Adisyon Yazıcısı (`cashier`)**:
+   - Müşteri ara hesap ve ödeme fişlerini basar (şubenin gerçek marka/şube adıyla); nakit tahsilatlarda para çekmecesini açar (`ESC/POS` drawer kick).
 
 ---
 
-### 3. Adım: HIPOS Ekranından Tanımlama ve Anında Test
-1. Garson ekranının sağ üstündeki **`⚙️ Yazıcı Ayarları`** butonuna tıklayın.
-2. Pencerenin üstündeki **`🏢 Restoran Canlı Modu (2 Ayrı Cihaz)`** butonuna tıklayın.
-3. **IP Adresi** alanına 2. adımda fişten okuduğunuz IP adresini (örn: `192.168.1.201`) yazın. Port olarak `9100` kalmalıdır.
-4. **`🔍 IP Test Et (Hızlı Ping)`** butonuna tıklayın:
-   - **🟢 Başarılı (`12 ms`)**: Yazıcı hatta, IP doğru ve haberleşme hazır demektir.
-   - **🔴 Başarısız**: Kabloyu veya IP adresini kontrol edin (Bkz: Sorun Giderme).
-5. **`🧪 Mutfak Test Fişi Gönder`** butonuna basın. Mutfak yazıcısından örnek test fişi çıkmalıdır.
-6. **"Ayarları Kaydet"** butonuna basarak işlemi tamamlayın. Artık tüm garson siparişleri otomatik olarak bu yazıcıya düşecektir!
+## 🚀 Şubede Sıfırdan Kurulum (Windows / macOS Kasa Bilgisayarı)
 
----
+Bulut sunucu (`https://hipos.hayatisleri.com.tr`) restoranınızın yerel ağındaki yazıcı IP'lerine doğrudan erişemez. Bunun yerine şubedeki kasa bilgisayarına sıfır bağımlılıklı **Print Bridge** kurulur:
 
-## 🔁 Mutfak Fişini Tekrar Basma (Reprint) Özelliği
+### 1. Adım: Ön Koşul (Yalnızca Node.js 18+)
+- Kasa bilgisayarında **Node.js 18+** (önerilen LTS) kurulu olmalıdır (`node -v`).
 
-Aşçının fişi kaybetmesi, üzerine su/yağ dökülmesi veya kağıt bitmesi durumlarında:
-- Garson, ilgili masaya tıkladığında ekranda iki farklı noktadan tekrar basım yapabilir:
-  1. Masa üst buton çubuğundaki **`🔁 Mutfak Fişi Tekrar`** butonu.
-  2. Mutfak sipariş dökümü başlığındaki **`🖨️ Mutfak Fişini Tekrar Bas`** butonu.
-- Tekrar basılan fişte çift boyut ve kalın font ile:
+### 2. Adım: Admin Panelden Tek Tıkla Kurulum Paketini İndirme
+1. Yönetici panelinde **Şubeler ve Canlı Durum** sayfasını açın ve ilgili şubenin kartına tıklayın.
+2. **Yazıcı Köprüsü (Print Bridge) Tokenı Üret** butonuna tıklayın (365 gün geçerli, yalnızca o şubenin yazıcı kuyruğuna sınırlı `role="bridge"` token üretilir).
+3. Açılan kurulum kutusundan kasa bilgisayarında yeni bir klasöre şu iki dosyayı indirin:
+   - **`hipos-bridge.config.json`** (Şube kimliği, API adresi ve şifreli token otomatik gömülüdür)
+   - İşletim sisteminize göre başlatıcı:
+     - Windows için **`HIPOS-Yazici-Koprusu.bat`**
+     - macOS için **`HIPOS-Yazici-Koprusu.command`** (İlk çalıştırmadan önce Terminal'de `chmod +x HIPOS-Yazici-Koprusu.command` çalıştırın)
+
+### 3. Adım: Köprüyü Başlatma
+- İndirdiğiniz `.bat` veya `.command` dosyasına çift tıklayın.
+- Betik ilk açılışta sunucudan (`/api/v1/printing/bridge-script`) güncel `hipos-print-bridge.mjs` istemcisini çeker, bilgisayardaki yerel/USB yazıcıları tarar ve SSE akışını açar:
   ```text
-  ********************************
-        *** TEKRAR BASIM ***
-  ================================
-            HIPOS MUTFAK
-        SIPARIS BILETI (KOPYA)
-  ================================
-  Masa: Masa 01
-  Garson: Ayşe Demir
-  ...
+  [OK] Bağlantı aktif — {firmId}/{branchId} için SSE dinleniyor.
   ```
-  ibaresi basılır. Böylece mutfak personeli siparişi mükerrer (iki kez) hazırlamaz.
+- Köprü bağlandığı anda Admin Paneli ve POS ekranlarındaki **Print Bridge** durumu **🟢 Çevrimiçi** olarak görünür ve bilgisayarınıza bağlı USB/sistem yazıcıları listede belirir.
+
+---
+
+## ⚙️ Yazıcıları Tanımlama ve Canlı Ayar Senkronizasyonu
+
+Admin **Şubeler** ekranından veya POS (**Garson -> ⚙️ Yazıcı Ayarları** / **Kasa -> 🖨️ Yazıcılar**) modalından hedefleri kaydedin:
+
+- **Teslimat Modu**:
+  - **Otomatik (`Auto`, Önerilen)**: Print Bridge çevrimiçiyse işi anında SSE ile yerel köprüye yollar; yoksa doğrudan LAN IP'sine bağlanmayı dener.
+  - **Bulut Köprüsü (`CloudBridge`)**: Her zaman bağlı Print Bridge'e yönlendirir.
+  - **Doğrudan LAN (`DirectLan`)**: Yalnız yerel sunucu kurulumlarında API sunucusundan doğrudan TCP/USB basar.
+- **Ağ Yazıcısı (Ethernet / Wi-Fi, Port 9100)**: Yazıcı Self-Test çıktısındaki yerel IP'yi (`192.168.1.201` vb.) girin.
+- **USB / İşletim Sistemi Yazıcı Kuyruğu**:
+  - Windows Denetim Masası veya macOS CUPS üzerinden ekli USB termal yazıcının adını girin (veya köprünün otomatik tespit ettiği yazıcılar listesinde görünenden seçin).
+  - Yerel PC'deki USB kuyruk adlarını listelemek için terminalde `node scripts/hipos-print-bridge.mjs --list-printers` komutunu kullanabilirsiniz.
+- **Canlı Güncelleme (`printer.config.updated`)**: Panelden yazıcı IP'si veya Bar seçeneği değiştirilip kaydedildiğinde, açık Print Bridge uygulaması yeniden başlatmaya gerek duymadan yeni hedefleri anında alır.
+
+---
+
+## 💡 KodPOS / Ethernet Yazıcı IP Adresini Öğrenme (Self-Test)
+1. Yazıcının güç anahtarını kapatın (**OFF**).
+2. Ön paneldeki **`FEED`** tuşuna basılı tutarken güç anahtarını açın (**ON**).
+3. 3-4 saniye bekleyip bip sesi gelince bırakın; yazıcı kendi **IP Address** bilgisini kağıda basacaktır.
 
 ---
 
 ## 🛠️ Sorun Giderme (Troubleshooting)
 
-### Soru 1: "🔍 IP Test Et" dediğimde "Zaman aşımı / Ulaşılamadı" hatası alıyorum.
-- **Kablo Kontrolü**: Yazıcının arkasındaki ağ portunun sarı/yeşil LED'leri yanıp sönüyor mu? Sönüyorsa kabloyu veya switch portunu kontrol edin.
-- **Aynı Ağda Olma**: POS bilgisayarı veya tablet ile yazıcı **aynı yerel ağda** olmalıdır. Örneğin POS `192.168.1.100` alıyorsa, yazıcı da `192.168.1.xxx` havuzunda olmalıdır. Farklı bir misafir Wi-Fi ağına bağlı olmadığınızdan emin olun.
-
-### Soru 2: Yazıcı Self-Test fişinde `192.168.123.100` gibi farklı bir IP yazıyor.
-- Bazı üreticiler fabrika çıkışında sabit `192.168.123.100` IP'si tanımlar.
-- Modemin dağıttığı havuz `192.168.1.x` ise yazıcının IP'sini modemin havuzuna taşımak gerekir:
-  1. Bilgisayarınızın Ethernet ayarlarından geçici olarak sabit IP verin (`192.168.123.50`, Ağ maskesi: `255.255.255.0`).
-  2. Tarayıcıdan `http://192.168.123.100` adresine girin (Kullanıcı: `admin`, Şifre: `admin` veya boş).
-  3. Network sekmesinden IP adresini restoranın IP bloğuna uygun boş bir IP'ye (örneğin `192.168.1.201`) ayarlayıp kaydedin.
-  4. Bilgisayarınızı tekrar eski otomatik IP moduna döndürün.
-
-### Soru 3: Mutfakta hazırda bir Windows PC var ve yazıcı ona USB ile bağlı. Ağ kablosu çekmeden kullanabilir miyiz?
-- Evet! Windows PC üzerinde yazıcıyı paylaşıma açabilir veya küçük bir RAW TCP proxy (Port 9100 dinleyip USB'ye yönlendiren basit bir servis) çalıştırarak Windows PC'nin IP adresini HIPOS Mutfak IP alanına girebilirsiniz.
-
-### Soru 4: Yazıcı ayarları nerede saklanıyor?
-- Ayarlar sunucu tarafında `printer_settings.json` dosyasında güvenle saklanır. Uygulama veya sunucu yeniden başlatılsa bile IP ve port ayarları korunur.
+- **"Print Bridge Bağlı Değil" uyarısı görünüyor:** Kasa PC'deki `.bat`/`.command` penceresinin açık olduğundan ve doğru şube klasöründeki `hipos-bridge.config.json` ile başlatıldığından emin olun.
+- **Bulut sunucudan "IP Test Et" başarısız ama köprü çevrimiçi:** Bulut sunucu şubenin `192.168.x.x` iç ağına ping atamaz; köprü çevrimiçiyken **🧪 Test Fişi Gönder** butonunu kullanın — fiş Print Bridge üzerinden yerel ağdaki yazıcıya ulaşacaktır.
+- **Yazıcı ayarları nerede saklanıyor?** Ayarlar şube bazlı olarak veritabanındaki `printing.printer_profiles` tablosunda saklanır; sunucu veya köprü yeniden başlasa da kaybolmaz.

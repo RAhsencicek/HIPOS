@@ -54,6 +54,8 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
     builder.Services.AddDbContext<OverviewDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "overview")));
+    builder.Services.AddDbContext<PrintingDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "printing")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -71,6 +73,7 @@ if (storage == "postgres")
     var printerConfig = new PrinterConfig();
     builder.Configuration.GetSection("Printers").Bind(printerConfig);
     builder.Services.AddSingleton(printerConfig);
+    builder.Services.AddSingleton<BridgePresenceRegistry>();
     builder.Services.AddSingleton<PrinterTransport>();
     builder.Services.AddScoped<PrintingService>();
 }
@@ -102,6 +105,7 @@ var expensesReady = false;
 var kitchenReady = false;
 var authReady = false;
 var overviewReady = false;
+var printingReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -141,6 +145,8 @@ if (storage == "postgres")
     if (authReady) await AuthDbInitializer.SeedDemoUsersAsync(authDb, CancellationToken.None);
     var overviewDb = scope.ServiceProvider.GetRequiredService<OverviewDbContext>();
     overviewReady = !(await overviewDb.Database.GetPendingMigrationsAsync()).Any();
+    var printingDb = scope.ServiceProvider.GetRequiredService<PrintingDbContext>();
+    printingReady = !(await printingDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady)
     {
@@ -162,6 +168,7 @@ if (storage == "postgres")
     featureRuntime.CashReady = cashReady;
     featureRuntime.ExpensesReady = expensesReady;
     featureRuntime.KitchenReady = kitchenReady;
+    featureRuntime.PrintingReady = printingReady;
     if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");

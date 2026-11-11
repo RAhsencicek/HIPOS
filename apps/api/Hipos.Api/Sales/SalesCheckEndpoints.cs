@@ -100,7 +100,7 @@ public static class SalesCheckEndpoints
                 eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "occupied" });
             }
 
-            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            if ((await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
             {
                 var orderGuid = command.FirstOrderId;
                 _ = Task.Run(async () =>
@@ -136,7 +136,7 @@ public static class SalesCheckEndpoints
             eventHub.Publish("check.updated", firmId, branchId, new { checkId, orderId = command.OrderId });
             eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, checkId });
 
-            if (printing.GetConfig().AutoPrintKitchenOnOrder)
+            if ((await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
             {
                 var orderGuid = command.OrderId;
                 _ = Task.Run(async () =>

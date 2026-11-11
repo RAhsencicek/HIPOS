@@ -12,6 +12,11 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
         byte[] data,
         CancellationToken ct = default)
     {
+        if (!config.Enabled || config.Type.Equals("Disabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PrintResult(false, config.Name, "Disabled", $"{config.Name} devre dışı bırakılmış.");
+        }
+
         // 1. Try Network if configured as Network
         if (config.Type.Equals("Network", StringComparison.OrdinalIgnoreCase))
         {
@@ -44,11 +49,23 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
             }
         }
 
-        // 2. Try USB (directly or as fallback)
-        if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+        // 2. Try USB / System queue (directly or as fallback)
+        if ((config.Type.Equals("Usb", StringComparison.OrdinalIgnoreCase) || config.FallbackToUsb) &&
+            (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()))
         {
             try
             {
+                if (!string.IsNullOrWhiteSpace(config.SystemPrinterName))
+                {
+                    var queueSuccess = await SendToSystemQueueAsync(config.SystemPrinterName, data, ct);
+                    if (queueSuccess)
+                    {
+                        logger.LogInformation("Yazdırma başarılı (CUPS Kuyruğu): {Name} -> {Queue} ({Length} bayt)",
+                            config.Name, config.SystemPrinterName, data.Length);
+                        return new PrintResult(true, config.Name, $"USB / CUPS ({config.SystemPrinterName})");
+                    }
+                }
+
                 var usbSuccess = await SendToCupsUsbAsync(data, ct);
                 if (usbSuccess)
                 {
@@ -66,6 +83,36 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
         logger.LogInformation("[SİMÜLE YAZICI] {Name} için {Length} bayt ESC/POS verisi hazırlandı (Yazıcı bağlı değilse simülasyon).",
             config.Name, data.Length);
         return new PrintResult(true, config.Name, "Console / Virtual", "Fiziksel aygıta ulaşılamadı, konsola simüle edildi.");
+    }
+
+    private static async Task<bool> SendToSystemQueueAsync(string printerName, byte[] data, CancellationToken ct)
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"hipos_queue_{Guid.NewGuid():N}.bin");
+        try
+        {
+            await File.WriteAllBytesAsync(tempFile, data, ct);
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "lp",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add("-d");
+            startInfo.ArgumentList.Add(printerName.Trim());
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add("raw");
+            startInfo.ArgumentList.Add(tempFile);
+
+            using var proc = Process.Start(startInfo);
+            if (proc is null) return false;
+            await proc.WaitForExitAsync(ct);
+            return proc.ExitCode == 0;
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
     }
 
     private async Task SendToNetworkAsync(string ip, int port, byte[] data, CancellationToken ct)

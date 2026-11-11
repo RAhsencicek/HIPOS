@@ -10,12 +10,11 @@
 Şu anki HIPOS mutfak arayüzü ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx)):
 * `GET /kitchen/tasks` endpoint'ini 3 saniyede bir çağırır ve PostgreSQL'deki kalıcı mutfak görevlerini gösterir.
 * Mutfak personeli `Hazırlanıyor`, `Hazır` ve `Servis Edildi` geçişlerini dokunmatik butonlarla kaydedebilir.
-* **İki İstasyon ve Bölünmüş Ekran (KDS Split Screen):** İstasyonlar 2 ana gruba indirilmiştir: **Yiyecek** (`food` - pizza, sandwich, dessert) ve **İçecek** (`drink` - drinks). KDS ekranı iki sütunlu bölünmüş görünümde bir tarafta yiyecek siparişlerini, diğer tarafta içecek siparişlerini canlı sunar; eşleşmeyenler için `Atanmamış` güvenli kuyruğu korunur; yönetim ekranı henüz yoktur.
-* **Garson ve İptal Bağları Eksiktir:** Hazır bildirimi garson ekranına gitmez; satış/adisyon kalem iptali ve müdür PIN onayı mutfağa bağlı değildir.
-* **Gerçek Auth ve Offline Kuyruk Eksiktir:** Demo aktör kullanılır; cihaz bağlantısı kesildiğinde işlemleri saklayıp tekrar gönderen kuyruk yoktur.
-* **Yazıcı Altyapısı Yoktur:** Garson sipariş girdiğinde mutfaktaki termal bilet yazıcısından (ESC/POS) otomatik kağıt fiş basılamaz.
-* **Sipariş Notu Veri Altyapısı Vardır:** Satış kalemi isteğe bağlı `notes` kabul eder; not satış ve mutfak kayıtlarında korunur, mutfak API'sinde döner ve 80 mm fiş önizlemesinde gösterilir. Garson ekranındaki not giriş alanı henüz bağlı değildir.
-<!-- 23 Ekim 2026: Problem tanımındaki eksik mevcut-kod bilgisi eklendi; çözülmemiş bildirim, iptal, auth, offline ve yazıcı sorunları korundu. -->
+* **İki İstasyon ve Bölünmüş Ekran / Fiş Ayrımı (KDS + Yazıcı Split):** İstasyonlar 2 ana gruba ayrılır: **Yiyecek** (`food`) ve **İçecek** (`drink`). KDS iki sütunda gösterir; yazıcı profilinde `BarPrinter.Enabled=true` ve `AutoSplitKitchenByStation=true` seçiliyse içecekler ayrı `BAR / ICECEK` fişine, diğer kalemler `HIPOS MUTFAK` fişine otomatik bölünür; Bar kapalıyken tüm sipariş tek mutfak fişinde birleştirilir.
+* **Gerçek JWT Auth Tamamlandı, Offline Kuyruk Planlı:** Terminaller artık imzalı JWT kapsamıyla çalışır (`DemoAccess` production kilidi); internet kesintisinde yerel SQLite/IndexedDB kuyruğu sonraki fazlarda ele alınacaktır.
+* **Şubeye Özel Çoklu Yazıcı & Print Bridge v2 Çalışır:** `PrintingDbContext` (`printing.printer_profiles`), `PrintingService`, `EscPosBuilder`, `PrinterTransport` ve `BridgePresenceRegistry` üzerinden Kasa/Mutfak/Bar yazıcı profilleri PostgreSQL'de saklanır; yerel `hipos-print-bridge.mjs` TCP 9100 ve USB/OS ham kuyruklarına fiş basar (`Auto`/`CloudBridge`/`DirectLan`).
+* **Sipariş Notu Desteği:** Satış kalemi `note`/`notes` alanları hem KDS'te hem ESC/POS 80mm mutfak/bar fişlerinde gösterilir; Garson ekranındaki kalem not alanı bağlıdır.
+<!-- 11 Kasım 2026: Faz 10 JWT kapsamı ve Faz 11 per-branch yazıcı + station-split + Print Bridge v2 gerçek kod durumu ile eşitlendi. -->
 
 ---
 

@@ -7,6 +7,7 @@ using Hipos.Api.Expenses;
 using Hipos.Api.Features;
 using Hipos.Api.Inventory;
 using Hipos.Api.Kitchen;
+using Hipos.Api.Printing;
 using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -37,6 +38,7 @@ public sealed partial class TenantProvisioningService(
     InventoryDbContext inventoryDb,
     ExpenseDbContext expenseDb,
     CatalogDbContext catalogDb,
+    PrintingDbContext printingDb,
     FeatureRuntimeCapabilities runtime,
     AuthTokenService tokenService)
 {
@@ -84,7 +86,7 @@ public sealed partial class TenantProvisioningService(
         var conn = authDb.Database.GetDbConnection();
         var dbTx = transaction.GetDbTransaction();
 
-        await EnlistAsync(conn, dbTx, ct, featureDb, serviceDb, cashDb, kitchenDb, inventoryDb, expenseDb, catalogDb);
+        await EnlistAsync(conn, dbTx, ct, featureDb, serviceDb, cashDb, kitchenDb, inventoryDb, expenseDb, catalogDb, printingDb);
 
         var firm = new FirmRow
         {
@@ -190,7 +192,7 @@ public sealed partial class TenantProvisioningService(
         await using var transaction = await authDb.Database.BeginTransactionAsync(ct);
         var conn = authDb.Database.GetDbConnection();
         var dbTx = transaction.GetDbTransaction();
-        await EnlistAsync(conn, dbTx, ct, featureDb, serviceDb, cashDb, kitchenDb, inventoryDb, expenseDb, catalogDb);
+        await EnlistAsync(conn, dbTx, ct, featureDb, serviceDb, cashDb, kitchenDb, inventoryDb, expenseDb, catalogDb, printingDb);
 
         var branch = new BranchRow
         {
@@ -427,6 +429,14 @@ public sealed partial class TenantProvisioningService(
                 UpdatedAt = now
             });
             await inventoryDb.SaveChangesAsync(ct);
+        }
+
+        // 6. Şube Varsayılan Yazıcı Profili
+        if (runtime.PrintingReady)
+        {
+            printingDb.PrinterProfiles.Add(PrinterProfileRow.CreateDefault(
+                firmId, branchId, actor: "system:tenant-onboarding"));
+            await printingDb.SaveChangesAsync(ct);
         }
     }
 
