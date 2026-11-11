@@ -110,6 +110,10 @@ if (storage == "postgres")
     var postApiSalesMigrations = new[] { "SalesChecksRequireLinks", "SalesCheckForeignKeys" };
     salesReady = pendingSalesMigrations.All(migration => postApiSalesMigrations.Any(suffix =>
         migration.EndsWith(suffix, StringComparison.Ordinal)));
+    if (salesReady)
+    {
+        await SalesDbContextFactory.EnsurePaymentSchemaAsync(salesDb, CancellationToken.None);
+    }
     var cariDb = scope.ServiceProvider.GetRequiredService<CariDbContext>();
     cariReady = !(await cariDb.Database.GetPendingMigrationsAsync()).Any();
     var serviceDb = scope.ServiceProvider.GetRequiredService<ServiceDbContext>();
@@ -120,6 +124,10 @@ if (storage == "postgres")
     inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
     var cashDb = scope.ServiceProvider.GetRequiredService<CashDbContext>();
     cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
+    if (cashReady)
+    {
+        await CashDbContextFactory.EnsureCashSchemaAsync(cashDb, CancellationToken.None);
+    }
     var expenseDb = scope.ServiceProvider.GetRequiredService<ExpenseDbContext>();
     expensesReady = !(await expenseDb.Database.GetPendingMigrationsAsync()).Any();
     var kitchenDb = scope.ServiceProvider.GetRequiredService<KitchenDbContext>();

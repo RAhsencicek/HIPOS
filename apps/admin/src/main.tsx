@@ -9,7 +9,7 @@ import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/admin">
       <Routes>
         <Route path="/menu/:token" element={<PublicMenuPage />} />
         <Route path="*" element={<AppProviders><App /></AppProviders>} />

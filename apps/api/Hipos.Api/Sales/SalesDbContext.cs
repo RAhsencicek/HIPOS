@@ -148,6 +148,12 @@ public sealed class SalesOrderAuditRow
 
 public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<SalesCheckRow> Checks => Set<SalesCheckRow>();
     public DbSet<SalesCheckAuditRow> CheckAudit => Set<SalesCheckAuditRow>();
     public DbSet<SalesCheckSplitRow> CheckSplits => Set<SalesCheckSplitRow>();
@@ -367,12 +373,22 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
 
 public sealed class SalesDbContextFactory : IDesignTimeDbContextFactory<SalesDbContext>
 {
+    public static async Task EnsurePaymentSchemaAsync(SalesDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE sales.payment_attempts ADD COLUMN IF NOT EXISTS provider character varying(80);
+            ALTER TABLE sales.payment_attempts DROP CONSTRAINT IF EXISTS ck_payment_method;
+            ALTER TABLE sales.payment_attempts ADD CONSTRAINT ck_payment_method CHECK (method::text = ANY (ARRAY['cash'::text, 'card'::text, 'meal'::text, 'transfer'::text, 'cari'::text]));
+            """, cancellationToken);
+    }
+
     public SalesDbContext CreateDbContext(string[] args)
     {
         var connection = Environment.GetEnvironmentVariable("HIPOS_FEATURES_CONNECTION")
             ?? "Host=127.0.0.1;Database=hipos_features;Username=postgres";
         return new SalesDbContext(new DbContextOptionsBuilder<SalesDbContext>()
             .UseNpgsql(connection, npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sales"))
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
             .Options);
     }
 }

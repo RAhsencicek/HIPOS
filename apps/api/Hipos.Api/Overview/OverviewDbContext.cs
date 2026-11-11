@@ -18,6 +18,12 @@ public sealed class AlertAcknowledgmentRow
 
 public sealed class OverviewDbContext(DbContextOptions<OverviewDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<AlertAcknowledgmentRow> AlertAcknowledgments => Set<AlertAcknowledgmentRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

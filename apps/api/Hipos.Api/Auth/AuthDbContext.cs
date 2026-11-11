@@ -5,6 +5,12 @@ namespace Hipos.Api.Auth;
 
 public sealed class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<UserRow> Users => Set<UserRow>();
     public DbSet<MembershipRow> Memberships => Set<MembershipRow>();
     public DbSet<PinCodeRow> PinCodes => Set<PinCodeRow>();

@@ -50,6 +50,12 @@ public sealed class CariAuditRow
 
 public sealed class CariDbContext(DbContextOptions<CariDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<CariPartyRow> Parties => Set<CariPartyRow>();
     public DbSet<CariMovementRow> Movements => Set<CariMovementRow>();
     public DbSet<CariAuditRow> Audit => Set<CariAuditRow>();

@@ -242,6 +242,12 @@ public sealed class CatalogOptionManagementAuditRow
 
 public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<CatalogProductRow> Products => Set<CatalogProductRow>();
     public DbSet<CatalogProductImageRow> ProductImages => Set<CatalogProductImageRow>();
     public DbSet<CatalogBranchPriceRow> BranchPrices => Set<CatalogBranchPriceRow>();

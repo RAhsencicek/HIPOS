@@ -5,6 +5,7 @@ export default defineConfig(({ mode }) => {
   const target = loadEnv(mode, '.', 'HIPOS_DEV_API_TARGET').HIPOS_DEV_API_TARGET
   const apiTarget = target || 'http://127.0.0.1:5180'
   return {
+    base: '/admin/',
     plugins: [react()],
     server: {
       host: '0.0.0.0',

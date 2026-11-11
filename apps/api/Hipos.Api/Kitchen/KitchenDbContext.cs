@@ -37,6 +37,12 @@ public sealed class KitchenStationCategory
 
 public sealed class KitchenDbContext(DbContextOptions<KitchenDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<KitchenTask> Tasks => Set<KitchenTask>();
     public DbSet<KitchenTaskAudit> Audit => Set<KitchenTaskAudit>();
     public DbSet<KitchenStation> Stations => Set<KitchenStation>();

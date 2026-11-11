@@ -146,7 +146,7 @@ if (serviceOnly) {
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM sales.orders WHERE id = ${sqlString(order.id)} AND firm_id = ${firm} AND branch_id = ${branch} AND source = 'demo_service' AND request_fingerprint = ${sqlString(fingerprint)}) THEN RAISE EXCEPTION 'Demo sipariş kimliği farklı içerikle kullanılıyor: ${order.id}'; END IF; END $$;`);
     for (const item of order.items) {
       const product = demo.products.find((entry) => entry.id === item.productId);
-      statements.push(`INSERT INTO sales.order_lines (order_id,product_id,product_name,sku,quantity,unit_price_minor,line_total_minor,currency) SELECT ${sqlString(order.id)},${sqlString(product.id)},${sqlString(product.name)},${sqlString(product.sku)},${item.quantity},${product.priceMinor},${product.priceMinor * item.quantity},'TRY' WHERE NOT EXISTS (SELECT 1 FROM sales.order_lines WHERE order_id = ${sqlString(order.id)} AND product_id = ${sqlString(product.id)});`);
+      statements.push(`INSERT INTO sales.order_lines (order_id,product_id,product_name,sku,quantity,base_unit_price_minor,unit_price_minor,line_total_minor,currency) SELECT ${sqlString(order.id)},${sqlString(product.id)},${sqlString(product.name)},${sqlString(product.sku)},${item.quantity},${product.priceMinor},${product.priceMinor},${product.priceMinor * item.quantity},'TRY' WHERE NOT EXISTS (SELECT 1 FROM sales.order_lines WHERE order_id = ${sqlString(order.id)} AND product_id = ${sqlString(product.id)});`);
     }
   }
   for (const assignment of demo.serviceDemo.assignments) {

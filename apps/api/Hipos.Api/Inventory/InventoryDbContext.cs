@@ -290,6 +290,12 @@ public sealed class InventoryAuditRow
 
 public sealed class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<InventoryWarehouseRow> Warehouses => Set<InventoryWarehouseRow>();
     public DbSet<InventoryIngredientRow> Ingredients => Set<InventoryIngredientRow>();
     public DbSet<InventoryRecipeRow> Recipes => Set<InventoryRecipeRow>();

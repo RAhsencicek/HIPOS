@@ -113,6 +113,12 @@ public sealed class ServiceFloorRow
 
 public sealed class ServiceDbContext(DbContextOptions<ServiceDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<ServiceTableRow> Tables => Set<ServiceTableRow>();
     public DbSet<ServiceFloorRow> Floors => Set<ServiceFloorRow>();
     public DbSet<ServiceTableGroupRow> TableGroups => Set<ServiceTableGroupRow>();

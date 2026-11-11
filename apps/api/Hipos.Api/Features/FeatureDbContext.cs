@@ -59,6 +59,12 @@ public sealed class FeatureAuditRow
 
 public sealed class FeatureDbContext(DbContextOptions<FeatureDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<BranchFeatureRow> BranchFeatureStates => Set<BranchFeatureRow>();
     public DbSet<FeatureAuditRow> FeatureAudit => Set<FeatureAuditRow>();
 

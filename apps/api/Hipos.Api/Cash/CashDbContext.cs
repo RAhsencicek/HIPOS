@@ -97,6 +97,12 @@ public sealed class CashAuditRow
 
 public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<CashRegisterRow> Registers => Set<CashRegisterRow>();
     public DbSet<CashShiftRow> Shifts => Set<CashShiftRow>();
     public DbSet<CashMovementRow> Movements => Set<CashMovementRow>();
@@ -256,6 +262,18 @@ public sealed class CashDbContext(DbContextOptions<CashDbContext> options) : DbC
 
 public sealed class CashDbContextFactory : IDesignTimeDbContextFactory<CashDbContext>
 {
+    public static async Task EnsureCashSchemaAsync(CashDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE cash.movements DROP CONSTRAINT IF EXISTS ck_cash_movement_tender_method;
+            ALTER TABLE cash.movements ADD CONSTRAINT ck_cash_movement_tender_method 
+                CHECK (tender_method IS NULL OR (tender_method::text = ANY (ARRAY['cash'::text, 'card'::text, 'meal'::text, 'transfer'::text, 'cari'::text])));
+            ALTER TABLE cash.movements DROP CONSTRAINT IF EXISTS ck_cash_movement_pos_sale;
+            ALTER TABLE cash.movements ADD CONSTRAINT ck_cash_movement_pos_sale 
+                CHECK (kind::text <> 'pos_sale'::text OR (source::text = 'pos'::text AND category::text = 'cash_sale'::text AND (tender_method::text = ANY (ARRAY['cash'::text, 'card'::text, 'meal'::text, 'transfer'::text, 'cari'::text]))));
+            """, cancellationToken);
+    }
+
     public CashDbContext CreateDbContext(string[] args)
     {
         var connection = Environment.GetEnvironmentVariable("HIPOS_FEATURES_CONNECTION")

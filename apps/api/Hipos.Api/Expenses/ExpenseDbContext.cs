@@ -45,6 +45,12 @@ public sealed class ExpenseAuditRow
 
 public sealed class ExpenseDbContext(DbContextOptions<ExpenseDbContext> options) : DbContext(options)
 {
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
     public DbSet<ExpenseCategoryRow> Categories => Set<ExpenseCategoryRow>();
     public DbSet<ExpenseRow> Expenses => Set<ExpenseRow>();
     public DbSet<ExpenseAuditRow> Audit => Set<ExpenseAuditRow>();
