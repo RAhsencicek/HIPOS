@@ -76,7 +76,7 @@ public sealed class PrinterTransport(ILogger<PrinterTransport> logger)
             try
             {
                 using var client = new TcpClient();
-                int timeoutSec = attempt == 1 ? 8 : 5;
+                int timeoutSec = 2;
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
 

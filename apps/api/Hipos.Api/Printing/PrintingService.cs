@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text.Json;
+using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,8 @@ public sealed class PrintingService(
     ServiceDbContext serviceDb,
     PrinterTransport transport,
     PrinterConfig config,
-    ILogger<PrintingService> logger)
+    ILogger<PrintingService> logger,
+    IRestaurantEventHub? eventHub = null)
 {
     private readonly PrinterConfig _config = config;
     private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "printer_settings.json");
@@ -188,6 +190,18 @@ public sealed class PrintingService(
             items: items,
             isReprint: isReprint);
 
+        eventHub?.Publish("print.job", firmId, branchId, new
+        {
+            target = "kitchen",
+            type = "kitchen_ticket",
+            orderId = order.Id,
+            tableName,
+            waiterName,
+            isReprint,
+            rawEscPosBase64 = Convert.ToBase64String(ticketBytes),
+            createdAt = DateTimeOffset.UtcNow
+        });
+
         return await transport.SendAsync(_config.KitchenPrinter, ticketBytes, ct);
     }
 
@@ -328,6 +342,18 @@ public sealed class PrintingService(
             items: items,
             isReprint: isReprint);
 
+        eventHub?.Publish("print.job", firmId, branchId, new
+        {
+            target = "kitchen",
+            type = "kitchen_ticket",
+            checkId = check.Id,
+            tableName,
+            waiterName,
+            isReprint,
+            rawEscPosBase64 = Convert.ToBase64String(ticketBytes),
+            createdAt = DateTimeOffset.UtcNow
+        });
+
         return await transport.SendAsync(_config.KitchenPrinter, ticketBytes, ct);
     }
 
@@ -454,10 +480,26 @@ public sealed class PrintingService(
             paidMinor: paidMinor,
             remainingMinor: remainingMinor);
 
+        eventHub?.Publish("print.job", firmId, branchId, new
+        {
+            target = "cashier",
+            type = "cashier_bill",
+            checkId = check.Id,
+            tableName,
+            openCashDrawer,
+            paymentMethod,
+            rawEscPosBase64 = Convert.ToBase64String(receiptBytes),
+            createdAt = DateTimeOffset.UtcNow
+        });
+
         return await transport.SendAsync(_config.CashierPrinter, receiptBytes, ct);
     }
 
-    public async Task<PrintResult> TestPrintAsync(string target, CancellationToken ct = default)
+    public async Task<PrintResult> TestPrintAsync(
+        string target,
+        string firmId = "11111111-1111-4111-8111-111111111111",
+        string branchId = "33333333-3333-4333-8333-333333333333",
+        CancellationToken ct = default)
     {
         EnsureLoaded();
 
@@ -476,6 +518,15 @@ public sealed class PrintingService(
                 orderNumber: "TEST-01",
                 orderTime: DateTimeOffset.UtcNow,
                 items: sampleItems);
+
+            eventHub?.Publish("print.job", firmId, branchId, new
+            {
+                target = "kitchen",
+                type = "test_print",
+                tableName = "MASA 5",
+                rawEscPosBase64 = Convert.ToBase64String(data),
+                createdAt = DateTimeOffset.UtcNow
+            });
 
             return await transport.SendAsync(_config.KitchenPrinter, data, ct);
         }
@@ -501,6 +552,16 @@ public sealed class PrintingService(
                 netTotalMinor: 90000,
                 paymentMethod: "NAKIT",
                 openCashDrawer: true);
+
+            eventHub?.Publish("print.job", firmId, branchId, new
+            {
+                target = "cashier",
+                type = "test_print",
+                tableName = "MASA 5",
+                openCashDrawer = true,
+                rawEscPosBase64 = Convert.ToBase64String(data),
+                createdAt = DateTimeOffset.UtcNow
+            });
 
             return await transport.SendAsync(_config.CashierPrinter, data, ct);
         }

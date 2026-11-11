@@ -259,7 +259,7 @@ public static class PrintingEndpoints
             CancellationToken ct) =>
         {
             var targetDevice = target ?? "kitchen";
-            var result = await printing.TestPrintAsync(targetDevice, ct);
+            var result = await printing.TestPrintAsync(targetDevice, firmId, branchId, ct);
             return Results.Ok(new { success = result.Success, target = targetDevice, result.TransportUsed, result.Error });
         });
 
