@@ -48,7 +48,7 @@ services:
     command:
       - >-
         for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext
-        ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext AuthDbContext;
+        ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext AuthDbContext KitchenDbContext;
         do
           echo "Migrating $$context";
           dotnet tool run dotnet-ef database update --project /src/Hipos.Api/Hipos.Api.csproj --context "$$context" --configuration Release --no-build || exit 1;
