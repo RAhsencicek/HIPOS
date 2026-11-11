@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Warehouse = { id: string; name: string; isActive: boolean };
@@ -39,8 +40,9 @@ export function WastePage({ ctx, canWrite }: { ctx: ViewContext; canWrite: boole
   const [notice, setNotice] = useState("");
 
   const api = useCallback(async <T,>(path: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<T> => {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
-      method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+    const response = await adminFetch(path, {
+      method,
+      demoActor: actor,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     if (!response.ok) {

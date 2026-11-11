@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Banknote, Clock3, CreditCard, Package, ReceiptText, Search, Store, TrendingUp, Users } from "lucide-react";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, MetricCard, PageHeading, StatusPill } from "../../shared/ui";
 
 export type SalesView = "summary" | "checks" | "open";
@@ -133,13 +134,12 @@ function LiveSalesPage({ ctx, view }: { ctx: ViewContext; view: SalesView }) {
   const branchId = ctx.selectedBranch?.apiId ?? null;
   useEffect(() => {
     let active = true;
-    const base = import.meta.env.VITE_API_BASE_URL ?? "";
     const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : "manager-multi";
     const path = `/api/v1/firms/${ctx.firmId}/sales/orders${branchId ? `?branchId=${branchId}` : ""}`;
     setState("loading");
     async function refresh() {
       try {
-        const response = await fetch(`${base}${path}`, { headers: { "X-Demo-Actor": actor } });
+        const response = await adminFetch(path, { firmId: ctx.firmId, demoActor: actor });
         if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; throw new Error(problem.detail ?? "Siparişler yüklenemedi."); }
         const data = await response.json() as { items: LiveOrder[] };
         if (active) { setOrders(data.items); setState("ready"); setError(""); }

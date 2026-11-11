@@ -13,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { checks } from "../../data/catalog";
 import { mockCriticalStock } from "./overview.fixtures";
 
@@ -82,10 +83,7 @@ type LoadState<T> =
 
 /* ── API helper ── */
 async function getApi<T>(path: string, actor: string): Promise<T> {
-  const base = import.meta.env.VITE_API_BASE_URL ?? "";
-  const response = await fetch(`${base}${path}`, {
-    headers: { "X-Demo-Actor": actor },
-  });
+  const response = await adminFetch(path, { demoActor: actor });
   if (!response.ok) throw new Error(`API ${response.status}`);
   return response.json() as Promise<T>;
 }

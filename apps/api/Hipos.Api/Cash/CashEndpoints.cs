@@ -206,7 +206,7 @@ public static class CashEndpoints
         group.MapPut("/registers/{registerId:guid}/responsible", async (string firmId, string branchId, Guid registerId,
             UpdateCashRegisterResponsible command, HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
             var responsible = command.Responsible?.Trim() ?? "";
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
@@ -278,7 +278,7 @@ public static class CashEndpoints
         group.MapPost("/responsibles", async (string firmId, string branchId, CreateCashResponsible command,
             HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
             var name = command.Name?.Trim() ?? "";
             var roleTitle = string.IsNullOrWhiteSpace(command.RoleTitle) ? null : command.RoleTitle.Trim();
@@ -534,7 +534,7 @@ public static class CashEndpoints
         group.MapPost("/shifts", async (string firmId, string branchId, OpenCashShift command, HttpContext context,
             CashDbContext db, FeatureNewWorkGate gate) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
                 !Guid.TryParse(command.RegisterId, out var registerId) || registerId == Guid.Empty ||
@@ -754,7 +754,7 @@ public static class CashEndpoints
         group.MapPost("/shifts/{shiftId:guid}/close", async (string firmId, string branchId, Guid shiftId,
             CloseCashShift command, HttpContext context, CashDbContext db, SalesDbContext salesDb) =>
         {
-            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts);
+            var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
             var note = command.Note?.Trim();
             if (!Guid.TryParse(command.RequestId, out var requestId) || requestId == Guid.Empty ||
@@ -1143,11 +1143,15 @@ public static class CashEndpoints
     private static bool Unique(DbUpdateException error) =>
         error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
-    private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write, bool allowDemoOperator = false)
+    private static IResult? Guard(HttpContext context, string firmId, string branchId, bool ready, bool write,
+        bool allowDemoOperator = false, bool allowCashierOperator = false)
     {
         var actor = DemoAccess.Resolve(context);
-        if (actor is null) return Fail(context, "UNAUTHENTICATED", 401, "Örnek kullanıcı belirtilmedi.");
-        if (!actor.CanRead(firmId, branchId) || write && !actor.CanManage && !(allowDemoOperator && actor.CanOperate))
+        if (actor is null) return Fail(context, "UNAUTHENTICATED", 401, "Oturum gerekli.");
+        var isCashierOperator = allowCashierOperator && actor.IsRealAuth &&
+            string.Equals(actor.Role, "cashier", StringComparison.OrdinalIgnoreCase);
+        var isAllowedDemoOperator = allowDemoOperator && !actor.IsRealAuth && actor.CanOperate;
+        if (!actor.CanRead(firmId, branchId) || (write && !actor.CanManage && !isCashierOperator && !isAllowedDemoOperator))
             return Fail(context, "UNAUTHORIZED_SCOPE", 403, "Bu şubede kasa erişim izni yok.");
         if (!ready) return Fail(context, "CASH_STORAGE_UNAVAILABLE", 503, "Kasa migration'ı uygulanmalı ve API yeniden başlatılmalı.");
         return null;

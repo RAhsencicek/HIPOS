@@ -541,7 +541,7 @@ public static class ServiceEndpoints
             if (table is null) return Fail(context, "TABLE_NOT_FOUND", 404, "Bu şubede aktif masa bulunamadı.");
             if (table.Status == "reserved") return Fail(context, "TABLE_RESERVED", 409, "Rezerve masaya sipariş eklenemez.");
             var waiter = await db.Employees.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.WaiterId &&
-                row.FirmId == firmId && row.BranchId == branchId && row.Department == "service" && row.IsActive,
+                row.FirmId == firmId && row.BranchId == branchId && row.IsActive,
                 context.RequestAborted);
             if (waiter is null) return Fail(context, "WAITER_NOT_FOUND", 404, "Bu şubede aktif garson bulunamadı.");
 
@@ -1191,7 +1191,7 @@ public static class ServiceEndpoints
             if (await db.Assignments.AnyAsync(row => row.TableId == table.Id && row.ClosedAt == null, context.RequestAborted))
                 return Fail(context, "TABLE_OCCUPIED", 409, "Masada zaten açık adisyon var.");
             if (command.WaiterId is not null && !await db.Employees.AnyAsync(row => row.Id == command.WaiterId &&
-                row.FirmId == firmId && row.BranchId == branchId && row.Department == "service" && row.IsActive, context.RequestAborted))
+                row.FirmId == firmId && row.BranchId == branchId && row.IsActive, context.RequestAborted))
                 return Fail(context, "WAITER_NOT_FOUND", 404, "Bu şubede aktif garson bulunamadı.");
             var order = await sales.Orders.AsNoTracking().SingleOrDefaultAsync(row => row.Id == command.OrderId &&
                 row.FirmId == firmId && row.BranchId == branchId, context.RequestAborted);

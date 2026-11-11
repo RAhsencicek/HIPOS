@@ -1,3 +1,4 @@
+import { adminFetch } from "../../shared/authFetch";
 import {
   AlertTriangle,
   ArrowRight,
@@ -78,8 +79,7 @@ type LoadState<T> = { status: "loading" } | { status: "ready"; data: T } | { sta
 
 /* ── API helper ── */
 async function getApi<T>(path: string, actor: string): Promise<T> {
-  const base = import.meta.env.VITE_API_BASE_URL ?? "";
-  const response = await fetch(`${base}${path}`, { headers: { "X-Demo-Actor": actor } });
+  const response = await adminFetch(path, { demoActor: actor });
   if (!response.ok) throw new Error(`API ${response.status}`);
   return response.json() as Promise<T>;
 }

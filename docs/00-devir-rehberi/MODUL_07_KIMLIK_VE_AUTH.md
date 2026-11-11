@@ -1,11 +1,12 @@
 # Modül 7 Devir Şartnamesi — Kimlik, Oturum ve Yetkilendirme (Auth & Security)
 
-> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.6 (9 Kasım 2026)
-> **Kapsam:** Güvenlik Mimarisi, RBAC Yetki Matrisi, PIN Doğrulama, JWT Oturumu ve Yönetici Personel PIN Yönetim Arayüzü
-> **Modül Durumu:** ✅ **Tamamlandı ve Canlı Tarayıcıda Doğrulandı (FAZ 2 TAMAM)**
-> **PostgreSQL Şeması:** `auth` (`auth.users`, `auth.memberships`, `auth.pin_codes`) ve `service.employees` Köprüsü
-> **Yönetim Paneli:** Login Var (`LoginPage.tsx`) · Personel Kartları & PIN Sıfırlama Var (`ServicePersonnelPage.tsx`)
-> **API:** Var (`AuthDbContext.cs`, `AuthEndpoints.cs`, `AuthDbInitializer.cs`, `ServiceEndpoints.cs`)
+> **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v4.0 (11 Kasım 2026)
+> **Kapsam:** Güvenlik Mimarisi, RBAC Yetki Matrisi, PIN Doğrulama, JWT Oturumu, Çok Kiracılı (Multi-Tenant) Firma/Şube İzolasyonu, Onboarding ve Print Bridge Yetkilendirmesi
+> **Modül Durumu:** ✅ **Tamamlandı ve Üretim Güvenlik Kilidi Doğrulandı (FAZ 2 + FAZ 10 TAMAM)**
+> **PostgreSQL Şeması:** `auth` (`auth.firms`, `auth.branches`, `auth.users`, `auth.memberships`, `auth.pin_codes`) ve `service.employees` Köprüsü
+> **Yönetim Paneli:** Login Var ([`LoginPage.tsx`](../../apps/admin/src/features/auth/LoginPage.tsx)) · JWT Koruması Var ([`AuthGuard.tsx`](../../apps/admin/src/features/auth/AuthGuard.tsx), [`authFetch.ts`](../../apps/admin/src/shared/authFetch.ts)) · Şube & Köprü Token / Yeni Restoran Kurulumu Var ([`BranchesPage.tsx`](../../apps/admin/src/features/branches/BranchesPage.tsx)) · Personel & PIN Var ([`ServicePersonnelPage.tsx`](../../apps/admin/src/features/branches/ServicePersonnelPage.tsx))
+> **POS Terminalleri:** Rota Bazlı JWT & Şube Bağlama Var ([`terminalScope.ts`](../../apps/pos/src/terminalScope.ts), [`PinPadModal.tsx`](../../apps/pos/src/components/PinPadModal.tsx), [`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx))
+> **API:** Var ([`AuthDbContext.cs`](../../apps/api/Hipos.Api/Auth/AuthDbContext.cs), [`AuthTokenService.cs`](../../apps/api/Hipos.Api/Auth/AuthTokenService.cs), [`AuthEndpoints.cs`](../../apps/api/Hipos.Api/Auth/AuthEndpoints.cs), [`TenantProvisioningService.cs`](../../apps/api/Hipos.Api/Auth/TenantProvisioningService.cs), [`AuthDbInitializer.cs`](../../apps/api/Hipos.Api/Auth/AuthDbInitializer.cs), [`DemoAccess.cs`](../../apps/api/Hipos.Api/Features/DemoAccess.cs), [`ServiceEndpoints.cs`](../../apps/api/Hipos.Api/Service/ServiceEndpoints.cs))
 > **Ana Devir Rehberi:** [DEVIR_REHBERI.md](DEVIR_REHBERI.md) · **Yol Haritası:** [DURUM_VE_YOL_HARITASI.md](DURUM_VE_YOL_HARITASI.md)
 
 ---
@@ -14,8 +15,12 @@
 
 | Alan / Özellik | Durum | Açıklama |
 | :--- | :--- | :--- |
-| **`auth` PostgreSQL Şeması** | **Çalışıyor** | `auth.users`, `auth.memberships`, `auth.pin_codes` tabloları aktiftir. |
-| **Yönetici Girişi (Email + Şifre)** | **Çalışıyor** | `POST /api/v1/auth/login` BCrypt doğrulamasıyla JWT ve kullanıcı DTO döner (`patron@hipos.local`). |
+| **`auth` PostgreSQL Şeması** | **Çalışıyor** | `auth.firms`, `auth.branches`, `auth.users`, `auth.memberships`, `auth.pin_codes` tabloları aktiftir (`20261111171121_AddTenantsAndBranches` migration'ı dahil). |
+| **Yönetici Girişi & Kapsam Geçişi** | **Çalışıyor** | `POST /api/v1/auth/login` BCrypt doğrulamasıyla JWT döner; `GET /api/v1/auth/me` kullanıcı yetkilerini/şubelerini döner; `POST /api/v1/auth/switch-scope` yeni şube kapsamlı JWT üretir. |
+| **Production `X-Demo-Actor` Kilidi** | ✅ **Çalışıyor (FAZ 10)** | Production ortamında (`HIPOS_ALLOW_DEMO_ACTOR != "true"`) `X-Demo-Actor` header'ı ve `?actor=` parametresi tamamen reddedilir (`401`). `HIPOS_JWT_SECRET` Production'da en az 32 karakter olmalıdır; zayıf/varsayılan anahtarla API başlatılmaz (fail-fast). |
+| **Çok Kiracılı Firma/Şube Onboarding** | ✅ **Çalışıyor (FAZ 10)** | `POST /api/v1/onboarding/tenants` (`X-Platform-Admin-Key` / `IsPlatformAdmin` korumalı) ve `POST /api/v1/firms/{firmId}/branches` yeni firma/şube, masa, kasa ve kurucu hesapları atomik oluşturur; çapraz firma/şube erişimleri `403` döner. |
+| **Print Bridge En Az Yetkili Token** | ✅ **Çalışıyor (FAZ 10)** | `POST /api/v1/firms/{firmId}/branches/{branchId}/printing/bridge-token` yalnızca tek şube için `role="bridge"` token'ı üretir (`DemoAccess.CanAccessPrintBridge`); `bridge` token'ı sadece `GET /printing/config` ve `GET /events/stream` SSE akışına erişebilir, diğer uçlarda `403` alır. |
+| **POS Terminal Şube Bağlama & İzolasyon** | ✅ **Çalışıyor (FAZ 10)** | `/waiter`, `/kitchen` ve `/cashier` PIN açılışına kadar korumalı API/SSE çağrısı yapmaz; her terminal rolü kendi route anahtarında (`hipos_waiter_token`, `hipos_kitchen_token`, `hipos_cashier_token`) izole JWT tutar ve `GET /api/v1/auth/branch-info` ile bağlı şubeyi doğrular. |
 | **Hızlı Dokunmatik PIN Doğrulama** | **Çalışıyor** | `POST /api/v1/auth/pin-verify` Kasiyer (`1111`), Garson (`2222`), Aşçı (`3333`), Patron (`9999`) ve şubedeki tüm personellerin PIN'lerini BCrypt hash ile doğrular. |
 | **POS PIN Pad Kilit Ekranı** | **Çalışıyor** | Kasa ve Garson ekranları dokunmatik numpad ile açılır; inaktivitede kilitlenir. |
 | **Admin Personel & PIN Yönetim Ekranı** | ✅ **Çalışıyor (FAZ 2)** | `/admin/kitchen/personnel` ekranında tüm departman personelleri listelenir; yeşil `🔑 PIN Aktif` rozeti gösterilir; yönetici yeni PIN tanımlayabilir veya mevcut PIN'i sıfırlayabilir. |
@@ -95,3 +100,25 @@ Bu modül; restoran operasyonunu yetkisiz kullanımlardan koruyan güvenlik ve k
    - Admin üzerinden Ayşe Kasiyer'in PIN'i `1234` yapıldı ve kartında `🔑 PIN: 1234` rozeti belirdi.
    - Google Chrome ile `http://localhost:5176/waiter` açıldı, PIN pad'e `1234` girildi.
    - Ayşe Kasiyer başarıyla oturum açtı, header'da *"Hoş geldin, Ayşe Kasiyer"* yazdı ve garson dropdown'unda otomatik seçilerek 26 masa siparişe hazır hale geldi.
+
+---
+
+## 🔒 4. FAZ 10 Kapsamında Tamamlanan Üretim Güvenlik Kilidi ve Çok Kiracılı Mimari (11 Kasım 2026)
+
+1. **Production Güvenlik Kilidi (`DemoAccess.cs`, `Program.cs`, `AuthTokenService.cs`):**
+   - `HIPOS_JWT_SECRET` Production ortamında zorunlu hale getirildi ve 32 karakterden kısa veya varsayılan anahtarla başlatma engellendi (fail-fast çıkış).
+   - `HIPOS_ALLOW_DEMO_ACTOR` açıkça `"true"` yapılmadıkça (ve Production'da) `X-Demo-Actor` header'ı ve `?actor=` query parametresi yok sayılır; imzasız/sahte JWT ve anonim istekler `401` döner.
+2. **Çok Kiracılı Şema & Onboarding (`AuthEndpoints.cs`, `TenantProvisioningService.cs`, `20261111171121_AddTenantsAndBranches`):**
+   - `auth.firms` ve `auth.branches` tabloları eklendi.
+   - `POST /api/v1/onboarding/tenants` (`X-Platform-Admin-Key` veya `IsPlatformAdmin`) yeni müşteri firması, ilk şube, salon/masalar, Ana Kasa (`MAIN`) ve kurucu patron hesabı + PIN kaydını oluşturur.
+   - `POST /api/v1/firms/{firmId}/branches` mevcut firmaya ek şube açar; `POST /api/v1/auth/switch-scope` kullanıcının üyeliği varsa seçili `(firmId, branchId)` için yeni kapsamlı JWT üretir. Yetkisiz çapraz firma/şube erişimleri `403` ile kesilir.
+   - Çok kiracılı kurulum sonrası kurucu patron/kasiyer gibi diğer departman personellerinin de `/waiter` ekranından sipariş gönderebilmesi için `ServiceEndpoints.cs` (`POST /tables/{tableId}/orders`, `POST /assignments`) ve `SalesOrders.cs` üzerindeki `department='service'` zorunluluğu kaldırılarak `GET /waiters` ile uyumlu biçimde şubedeki tüm aktif personellerin (`IsActive == true`) sipariş alabilmesi sağlandı.
+3. **Print Bridge En Az Yetkili (`bridge`) Kapsamı (`DemoAccess.cs`, `RealtimeEndpoints.cs`, `PrintingEndpoints.cs`, `scripts/hipos-print-bridge.mjs`):**
+   - `POST /api/v1/firms/{firmId}/branches/{branchId}/printing/bridge-token` yalnızca ilgili şubeye sınırlı `role="bridge"` JWT'si üretir.
+   - `DemoAccess`: `IsBridge` kullanıcılarında `CanRead` ve `CanReadFirm` `false` döner; yalnızca `CanAccessPrintBridge` açıktır (`GET /printing/config` ve `GET /events/stream`). Satış/kasa/adisyon uçları `bridge` token'a `403` döner.
+   - `scripts/hipos-print-bridge.mjs` `--token` / `HIPOS_BRIDGE_TOKEN` veya `--email` + `--password` ile JWT doğrulaması kullanır ve `Authorization: Bearer` ile SSE dinler.
+4. **Admin & POS Frontend İzolasyonu (`AuthGuard.tsx`, `authFetch.ts`, `BranchesPage.tsx`, `terminalScope.ts`, `PinPadModal.tsx`, `OperationalApps.tsx`):**
+   - Admin arayüzü JWT zorunlu hale getirildi, statik firma/şube ID'leri ve `X-Demo-Actor` gönderimi kaldırıldı; Şubeler sayfasına (`BranchesPage.tsx`) şube oluşturma, terminal URL kopyalama, Print Bridge token üretimi ve platform yöneticisi onboarding formu eklendi.
+   - POS arayüzü (`@hipos/pos`) `?firmId=&branchId=` + `hipos_terminal_scope` üzerinden dinamik şube bağlar, kilitliyken API/SSE isteği atmaz ve `/waiter`, `/kitchen`, `/cashier` oturumlarını ayrı `localStorage` anahtarlarında (`hipos_waiter_token`, `hipos_kitchen_token`, `hipos_cashier_token`) tutar.
+5. **Doğrulama Kanıtı (`scripts/test_faz10_security_multitenant.mjs`):**
+   - Zayıf JWT sırrıyla Production API başlatma reddedildi; Production API'de anonim, `X-Demo-Actor`, `?actor=` ve sahte JWT istekleri `401` aldı; Tenant 2 onboarding (`403` -> `201`), çoklu şube oluşturma, çapraz kiracı izolasyonu (`403` + `401`), `bridge` token kapsam sınırı + sahte TCP termal yazıcıya 629 bayt ESC/POS teslimatı ve Playwright ile Admin + Waiter (`Masa 01` siparişi) + Kitchen (`Masa 01` kartı) + Cashier rota izolasyonu uçtan uca sıfır `X-Demo-Actor` başlığı ile doğrulandı.

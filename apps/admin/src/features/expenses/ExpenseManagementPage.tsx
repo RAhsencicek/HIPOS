@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowLeft, ReceiptText } from "lucide-react";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { PageHeading, StatusPill } from "../../shared/ui";
 
 type Category = { id: string; name: string; isActive: boolean };
@@ -9,7 +10,6 @@ type Expense = { id: string; categoryId: string; categoryName: string; expenseDa
   amountMinor: number; currency: "TRY"; description: string; source: "manual"; actor: string; createdAt: string };
 type ListResponse = { items: Expense[]; pageInfo: { page: number; pageSize: number; totalItems: number; totalPages: number } };
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const todayIstanbul = () => new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());
@@ -23,9 +23,9 @@ const dateLabel = (date: string) => new Intl.DateTimeFormat("tr-TR", {
 async function api<T>(path: string, actor: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    response = await adminFetch(path, {
       method,
-      headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+      demoActor: actor,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {

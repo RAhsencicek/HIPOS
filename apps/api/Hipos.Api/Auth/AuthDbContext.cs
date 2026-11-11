@@ -11,6 +11,8 @@ public sealed class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbC
         optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     }
 
+    public DbSet<FirmRow> Firms => Set<FirmRow>();
+    public DbSet<BranchRow> Branches => Set<BranchRow>();
     public DbSet<UserRow> Users => Set<UserRow>();
     public DbSet<MembershipRow> Memberships => Set<MembershipRow>();
     public DbSet<PinCodeRow> PinCodes => Set<PinCodeRow>();
@@ -19,6 +21,42 @@ public sealed class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbC
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("auth");
+
+        modelBuilder.Entity<FirmRow>(entity =>
+        {
+            entity.ToTable("firms");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(64);
+            entity.Property(row => row.Code).HasColumnName("code").HasMaxLength(32).IsRequired();
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(row => row.BrandName).HasColumnName("brand_name").HasMaxLength(160);
+            entity.Property(row => row.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasIndex(row => row.Code).IsUnique();
+        });
+
+        modelBuilder.Entity<BranchRow>(entity =>
+        {
+            entity.ToTable("branches");
+            entity.HasKey(row => row.Id);
+            entity.Property(row => row.Id).HasColumnName("id").HasMaxLength(64);
+            entity.Property(row => row.FirmId).HasColumnName("firm_id").HasMaxLength(64).IsRequired();
+            entity.Property(row => row.Code).HasColumnName("code").HasMaxLength(32).IsRequired();
+            entity.Property(row => row.Name).HasColumnName("name").HasMaxLength(160).IsRequired();
+            entity.Property(row => row.District).HasColumnName("district").HasMaxLength(160).IsRequired();
+            entity.Property(row => row.BridgeTokenHash).HasColumnName("bridge_token_hash").HasMaxLength(255);
+            entity.Property(row => row.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(row => row.CreatedAt).HasColumnName("created_at").IsRequired();
+
+            entity.HasOne(row => row.Firm)
+                .WithMany()
+                .HasForeignKey(row => row.FirmId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(row => row.Code).IsUnique();
+            entity.HasIndex(row => new { row.FirmId, row.IsActive });
+        });
 
         modelBuilder.Entity<UserRow>(entity =>
         {
@@ -30,6 +68,7 @@ public sealed class AuthDbContext(DbContextOptions<AuthDbContext> options) : DbC
             entity.Property(row => row.FullName).HasColumnName("full_name").HasMaxLength(120).IsRequired();
             entity.Property(row => row.Phone).HasColumnName("phone").HasMaxLength(32);
             entity.Property(row => row.IsActive).HasColumnName("is_active").IsRequired();
+            entity.Property(row => row.IsPlatformAdmin).HasColumnName("is_platform_admin").HasDefaultValue(false).IsRequired();
             entity.Property(row => row.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(row => row.UpdatedAt).HasColumnName("updated_at").IsRequired();
 

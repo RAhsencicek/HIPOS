@@ -1,3 +1,4 @@
+import { adminFetch } from "../../shared/authFetch";
 import {
   ArrowRight,
   Banknote,
@@ -119,21 +120,19 @@ export function ReportsPage({
       if (isManual) setRefreshing(true);
       else setLoading(true);
 
-      const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
       const actor =
         ctx.firmId === "11111111-1111-4111-8111-111111111111"
           ? "manager-single"
           : "manager-multi";
 
-      const url = branchApiId
-        ? `${base}/api/v1/firms/${ctx.firmId}/branches/${branchApiId}/reports/sales-analytics?range=${range}`
-        : `${base}/api/v1/firms/${ctx.firmId}/reports/sales-analytics?range=${range}`;
+      const path = branchApiId
+        ? `/api/v1/firms/${ctx.firmId}/branches/${branchApiId}/reports/sales-analytics?range=${range}`
+        : `/api/v1/firms/${ctx.firmId}/reports/sales-analytics?range=${range}`;
 
       try {
-        const response = await fetch(url, {
-          headers: {
-            "X-Demo-Actor": actor,
-          },
+        const response = await adminFetch(path, {
+          firmId: ctx.firmId,
+          demoActor: actor,
         });
 
         if (!response.ok) {

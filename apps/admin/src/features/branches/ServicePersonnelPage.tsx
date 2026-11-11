@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { ArrowLeft, Search, UserRound, UsersRound } from "lucide-react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Department = "management" | "kitchen" | "service" | "cashier" | "support";
@@ -48,8 +49,9 @@ const blankDraft = (): Draft => ({
 async function personnelApi<T>(path: string, actor: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
-      method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+    response = await adminFetch(path, {
+      method,
+      demoActor: actor,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch { throw new Error("Yerel personel API'sine bağlanılamadı. API'nin çalıştığını kontrol edin."); }

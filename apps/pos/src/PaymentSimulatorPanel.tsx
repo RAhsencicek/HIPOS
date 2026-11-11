@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { createRequestId } from "./requestId";
+import { posFetch } from "./terminalScope";
 
 export type TestOrder = {
   id: string;
@@ -24,7 +25,6 @@ type PaymentAttempt = {
 type PaymentResult = { attempt: PaymentAttempt; order: TestOrder };
 type ApiProblem = { code?: string; detail?: string };
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (minor: number) => new Intl.NumberFormat("tr-TR", {
   style: "currency", currency: "TRY",
 }).format(minor / 100);
@@ -40,9 +40,9 @@ class PaymentApiError extends Error {
 async function paymentApi<T>(path: string, actor: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    response = await posFetch(path, {
       method: body ? "POST" : "GET",
-      headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+      demoActor: actor,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {

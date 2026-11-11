@@ -8,6 +8,7 @@ public sealed class UserRow
     public string FullName { get; set; } = "";
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool IsPlatformAdmin { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

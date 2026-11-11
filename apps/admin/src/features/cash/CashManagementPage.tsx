@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
+import { adminFetch } from "../../shared/authFetch";
 import {
   ArrowDownLeft,
   ArrowRight,
@@ -143,7 +144,6 @@ type ShiftPage = { items: Shift[]; total: number };
 type MovementPage = { items: Movement[]; total: number };
 type View = "summary" | "registers" | "movements" | "shifts" | "cash" | "card" | "opening-closing";
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const cashDenominations = [20000, 10000, 5000, 2000, 1000, 500, 100, 50, 25, 10, 5, 1];
 const money = (value: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(value / 100);
 const dateTime = (value: string) => new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -449,9 +449,9 @@ export function CashManagementPage({ ctx, view, canWrite }: { ctx: ViewContext; 
   const api = useCallback(async <T,>(path: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> => {
     let response: Response;
     try {
-      response = await fetch(`${apiBase}${path}`, {
+      response = await adminFetch(path, {
         method,
-        headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+        demoActor: actor,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
     } catch {

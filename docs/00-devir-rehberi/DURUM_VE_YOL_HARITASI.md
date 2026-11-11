@@ -1,6 +1,6 @@
 # HIPOS — Mevcut Durum ve Modüler Yol Haritası
 
-> **Doküman Durumu:** Canlı Yol Haritası ve Fazlı Eylem Planı · Sürüm: v3.5 (9 Kasım 2026)
+> **Doküman Durumu:** Canlı Yol Haritası ve Fazlı Eylem Planı · Sürüm: v4.0 (11 Kasım 2026)
 >
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu ve bağımlılıklar:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
@@ -145,6 +145,14 @@ HIPOS; gerçek bir restoranın yönetim (ERP), mutfak (KDS), salon servis (Waite
 │ 1. /admin/inventory eski 'Satışlar stoğu değiştirmez' uyarısı kaldırıldı│
 │ 2. Yan menü yönlendirmelerinin (/admin/cash, /admin/reports) teyit edildi│
 │ 3. Tüm şartname ve yol haritası dokümanları eşzamanlı kilitlendi (9 KASIM)│
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│ FAZ 10: ÜRETİM GÜVENLİK KİLİDİ, ÇOK KİRACILI İZOLASYON VE ONBOARDING (✅)│
+│ 1. Production'da X-Demo-Actor/?actor= kilidi (401) & güçlü JWT zorunlu │
+│ 2. auth.firms/auth.branches şeması, onboarding ve şube kapsam geçişi   │
+│ 3. Print Bridge en az yetkili 'bridge' JWT + Admin/POS tam izolasyon    │
+│ 4. Playwright + TCP yazıcı E2E: çapraz kiracı 403 & sıfır demo başlık   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -494,9 +502,36 @@ Reçetesindeki hammaddelerden biri tükenen (örneğin ekmek bitti veya mozzarel
 
 ---
 
+### 🔷 FAZ 10 TEKNİK SÖZLEŞMESİ: Üretim Güvenlik Kilidi, Çok Kiracılı İzolasyon ve Müşteri Onboarding (✅ TAMAMLANDI - 11 KASIM 2026)
+
+#### A. İşletme ve Üretim İhtiyacı:
+Çok müşterili ticari yayında (`hipos.hayatisleri.com.tr`) hiçbir istemcinin demo aktör başlığıyla kimlik atlayamaması, bir restoran müşterisinin başka bir restoranın verisine (`firmId`/`branchId`) erişememesi ve yeni müşteri şube + yazıcı köprüsü kurulumunun panelden yapılabilmesi gerekir.
+
+#### B. Uygulanan Mimari ve Güvenlik Kontrolleri:
+1. **Production Kimlik & Anahtar Kilidi ([`DemoAccess.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Features/DemoAccess.cs), [`AuthTokenService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Auth/AuthTokenService.cs)):**
+   - `HIPOS_ALLOW_DEMO_ACTOR != "true"` durumunda (Production varsayılanı) `X-Demo-Actor` ve `?actor=` reddedilir (`401`).
+   - Production'da 32 karakterden kısa veya varsayılan `HIPOS_JWT_SECRET` tespit edildiğinde API başlangıçta fail-fast durur.
+2. **Çok Kiracılı Şema, Onboarding ve Aktif Personel Tutarlılığı ([`AuthEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Auth/AuthEndpoints.cs), [`TenantProvisioningService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Auth/TenantProvisioningService.cs), [`ServiceEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Service/ServiceEndpoints.cs), [`SalesOrders.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesOrders.cs)):**
+   - `20261111171121_AddTenantsAndBranches` migration'ı ile `auth.firms` ve `auth.branches` tabloları eklendi.
+   - `POST /api/v1/onboarding/tenants` (platform admin anahtarı / rolü zorunlu), `POST /api/v1/firms/{firmId}/branches`, `GET /api/v1/auth/me`, `POST /api/v1/auth/switch-scope` ve `GET /api/v1/auth/branch-info` uçları eklendi.
+   - Yeni kurulan şubede kurucu patron veya diğer departman personellerinin garson tabletinden sipariş gönderebilmesi için `POST /tables/{tableId}/orders`, `POST /assignments` ve `SalesOrders.ValidateWaiterAsync` üzerindeki `department='service'` kısıtı `IsActive == true` kontrolüyle `GET /waiters` ile eşitlendi.
+3. **Print Bridge En Az Yetkili Kapsamı ([`PrintingEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingEndpoints.cs), [`RealtimeEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Realtime/RealtimeEndpoints.cs), [`hipos-print-bridge.mjs`](file:///Users/mac/HIPOS/scripts/hipos-print-bridge.mjs)):**
+   - `POST /printing/bridge-token` ile üretilen `role="bridge"` token'ı `DemoAccess.CanAccessPrintBridge` üzerinden yalnızca `GET /printing/config` ve `GET /events/stream` uçlarına erişir; iş uçlarında `403` alır.
+4. **Admin & POS Frontend İzolasyonu ([`AuthGuard.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/auth/AuthGuard.tsx), [`BranchesPage.tsx`](file:///Users/mac/HIPOS/apps/admin/src/features/branches/BranchesPage.tsx), [`terminalScope.ts`](file:///Users/mac/HIPOS/apps/pos/src/terminalScope.ts), [`PinPadModal.tsx`](file:///Users/mac/HIPOS/apps/pos/src/components/PinPadModal.tsx), [`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx)):**
+   - Admin JWT girişine ve dinamik kapsam seçimine geçirildi; POS terminalleri (`waiter`, `kitchen`, `cashier`) rota bazlı `localStorage` anahtarları (`hipos_waiter_token`, `hipos_kitchen_token`, `hipos_cashier_token`) ile ayrıştırıldı ve kilitliyken sıfır API/SSE isteği atacak şekilde kilitlendi.
+
+#### C. Canlı Test ve Saha Kanıtları (11 Kasım 2026):
+* **Otomatik Güvenlik & E2E Paketi:** [`test_faz10_security_multitenant.mjs`](file:///Users/mac/HIPOS/scripts/test_faz10_security_multitenant.mjs)
+  - Zayıf `HIPOS_JWT_SECRET` ile Production API başlatma reddedildi; Production'da anonim/`X-Demo-Actor`/`?actor=`/sahte JWT `401` aldı.
+  - Platform anahtarsız onboarding `403`, anahtarlı Tenant 2 (`Etiler Şube`) ve 2. şube (`Cadde Şube`) `201`; iki kiracı arasında API `403` ve çapraz PIN `401` döndü.
+  - Print Bridge `bridge` token'ı `/sales/checks` üzerinde `403` aldı ve yalnızca `bridge` token'ı ile yerel TCP termal yazıcıya `629` bayt ESC/POS fişi teslim etti.
+  - Playwright ile Admin (`AuthGuard`/`BranchesPage`) + Waiter (`Masa 01` siparişi) + Kitchen (`Masa 01` bileti) + Cashier rota bazlı token izolasyonu tek bir `X-Demo-Actor` başlığı gönderilmeden geçti.
+
+---
+
 ## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ
 
-Tüm 9 faz eksiksiz olarak uygulanmış, PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile görsel olarak doğrulanmış, ESC/POS termal yazıcı hatlarına kadar canlı saha testlerinden geçirilmiştir:
-1. `DURUM_VE_YOL_HARITASI.md`: Tüm fazlar `Tamamlandı` olarak mühürlenmiştir.
-2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_YAZICI.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`: Yeni endpoint'ler, veri sözleşmeleri ve UI bileşenleriyle senkronize edilmiştir.
-3. Canlı sistemde hiçbir askıda kalan (zombi) masa, tutarsız kasa bakiyesi veya sahte mock veri kalmamıştır. Proje üretime ve saha kullanımına tam hazırdır.
+Faz 1–10 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
+1. `DURUM_VE_YOL_HARITASI.md`: Faz 1–10 durumu ve doğrulama sonuçları güncellenmiştir.
+2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_YAZICI.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`, `MODUL_07_KIMLIK_VE_AUTH.md`: Yeni endpoint'ler, veri sözleşmeleri ve güvenlik/izolasyon kurallarıyla senkronize edilmiştir.
+3. Production güvenlik kilidi (`HIPOS_ALLOW_DEMO_ACTOR=false` varsayılanı ve güçlü `HIPOS_JWT_SECRET` zorunluluğu), çok kiracılı izolasyon ve Print Bridge JWT akışı doğrulanmıştır. Sıradaki adım Faz 11+ (yerel yazdırma köprüsü ve çevrimdışı/LAN hibrit dayanıklılık adımları) ile devam eder.

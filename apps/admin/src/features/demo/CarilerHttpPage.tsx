@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Kind = "customer" | "supplier";
@@ -48,9 +49,9 @@ const todayIstanbul = () => new Intl.DateTimeFormat("sv-SE", {
 async function api<T>(path: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
+    response = await adminFetch(path, {
       method,
-      headers: { "X-Demo-Actor": "manager-single", ...(body ? { "Content-Type": "application/json" } : {}) },
+      demoActor: "manager-single",
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
@@ -102,10 +103,10 @@ export function CarilerHttpPage({ ctx, kind, view }: { ctx: ViewContext; kind: K
   const [splitPayment, setSplitPayment] = useState(false);
   const [selectedRegisterId, setSelectedRegisterId] = useState("");
   const [allocations, setAllocations] = useState<AllocationEntry[]>([]);
-  const scope = ctx.scenarioId === "single" && ctx.branchApiId
+  const scope = (ctx.isRealAuth || ctx.scenarioId === "single") && ctx.branchApiId
     ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/caris`
     : null;
-  const cashScope = ctx.scenarioId === "single" && ctx.branchApiId
+  const cashScope = (ctx.isRealAuth || ctx.scenarioId === "single") && ctx.branchApiId
     ? `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/cash/overview`
     : null;
 

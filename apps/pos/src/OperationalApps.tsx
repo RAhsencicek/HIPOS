@@ -4,10 +4,21 @@ import { createRequestId } from "./requestId";
 import { ProductOptionPicker, type SelectedOption, type OptionSelection } from "./ProductOptionPicker";
 import "./operational.css";
 import { PinPadModal } from "./components/PinPadModal";
+import {
+  POS_API_BASE,
+  POS_AUTH_CHANGED_EVENT,
+  buildPosTerminalHref,
+  clearPosSession,
+  getPosAppKind,
+  getPosSession,
+  getPosToken,
+  getTerminalScope,
+  posFetch,
+  savePosSession,
+  useTerminalScope,
+  type PosSession,
+} from "./terminalScope";
 
-const firmId = "11111111-1111-4111-8111-111111111111";
-const branchId = "33333333-3333-4333-8333-333333333333";
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (minor: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(minor / 100);
 type ApiProblem = { code?: string; detail?: string; message?: string };
 type ApiRequestError = Error & { status?: number; code?: string };
@@ -49,12 +60,22 @@ function buildFloorSections(tables: Table[], configuredFloors: string[] = []): A
   return list;
 }
 
-function useRestaurantRealtime(onEvent: (event: { type: string; data?: any }) => void) {
+function useRestaurantRealtime(
+  onEvent: (event: { type: string; data?: any }) => void,
+  enabled = true,
+  authToken?: string | null
+) {
+  const scope = useTerminalScope();
+  const appKind = getPosAppKind();
+
   useEffect(() => {
-    const token = localStorage.getItem("hipos_token");
-    const sseUrl = `${apiBase}/api/v1/firms/${firmId}/branches/${branchId}/events/stream?actor=pos-single${
-      token ? `&token=${encodeURIComponent(token)}` : ""
-    }`;
+    if (!enabled) return;
+    const token = authToken ?? getPosToken(appKind);
+    if (!token && !import.meta.env.DEV) return;
+
+    const sseUrl = token
+      ? `${POS_API_BASE}/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/events/stream?token=${encodeURIComponent(token)}`
+      : `${POS_API_BASE}/api/v1/firms/${scope.firmId}/branches/${scope.branchId}/events/stream?actor=pos-single`;
     let eventSource: EventSource | null = null;
     let retryTimeout: number | null = null;
     let isDisposed = false;
@@ -111,7 +132,7 @@ function useRestaurantRealtime(onEvent: (event: { type: string; data?: any }) =>
       if (retryTimeout) window.clearTimeout(retryTimeout);
       eventSource?.close();
     };
-  }, [onEvent]);
+  }, [onEvent, enabled, authToken, scope.firmId, scope.branchId, appKind]);
 }
 type OpenCheck = { id: string; status: string; paymentStatus?: string; tableId?: string | null; version: number; totalMinor: number; paidMinor?: number; remainingMinor?: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[]; payments: Array<{ id: string; amountMinor?: number; status?: string }>; orders: Array<{ id: string; version?: number; remainingMinor?: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; note?: string | null }> }> };
 type KitchenStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
@@ -127,16 +148,17 @@ type KitchenStation = { id: string; code: string; name: string };
 
 function PosProductImage({ image, productId, name }: { image: string; productId: string; name: string }) {
   const [url, setUrl] = useState("");
+  const { firmId, branchId } = useTerminalScope();
   useEffect(() => {
     if (!image.startsWith("upload:")) return;
     const controller = new AbortController(); let objectUrl = ""; setUrl("");
     const path = `/api/v1/firms/${firmId}/branches/${branchId}/catalog/products/${encodeURIComponent(productId)}/images/${encodeURIComponent(image.slice(7))}`;
-    void fetch(`${apiBase}${path}`, { headers: { "X-Demo-Actor": "pos-single" }, signal: controller.signal })
+    void posFetch(path, { demoActor: "pos-single", signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error("image unavailable"); return response.blob(); })
       .then(blob => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); } })
       .catch(() => {});
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [image, productId]);
+  }, [image, productId, firmId, branchId]);
   if (!image.startsWith("upload:")) return <>{image || "🍽️"}</>;
   return url ? <img src={url} alt={name} /> : <span aria-label="Görsel yüklenemedi">🍽️</span>;
 }
@@ -145,16 +167,11 @@ async function request<T>(path: string, actor: string, body?: unknown, method?: 
   let response: Response;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 25_000);
-  const token = localStorage.getItem("hipos_pos_token") || localStorage.getItem("hipos_cashier_token") || localStorage.getItem("hipos_waiter_token") || localStorage.getItem("hipos_kitchen_token");
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    response = await posFetch(path, {
+      demoActor: actor,
       method: method ?? (body ? "POST" : "GET"),
       signal: controller.signal,
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        "X-Demo-Actor": actor,
-        ...(body ? { "Content-Type": "application/json" } : {})
-      },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
   } catch {
@@ -172,9 +189,6 @@ async function request<T>(path: string, actor: string, body?: unknown, method?: 
   return response.json() as Promise<T>;
 }
 
-const servicePath = `/api/v1/firms/${firmId}/branches/${branchId}/service`;
-const ordersPath = `/api/v1/firms/${firmId}/sales/orders?branchId=${branchId}`;
-const checksPath = `/api/v1/firms/${firmId}/branches/${branchId}/sales/checks`;
 const demoDescriptions: Record<string, string> = {
   "55555555-5555-4555-8555-555555555501": "Domates sosu, mozzarella ve fesleğen.",
   "55555555-5555-4555-8555-555555555502": "Tavuk ve taze sebzeli sandviç.",
@@ -231,15 +245,22 @@ type CashierCustomer = { id: string; name: string; phone: string | null; isActiv
 type CashierCheck = Omit<OpenCheck, "orders" | "payments"> & { createdAt: string; paymentStatus: "unpaid" | "partially_paid" | "paid" | "pending" | "unknown"; payments: Array<{ id: string; amountMinor: number; method: string; provider?: string; status: string; createdAt: string }>; paidMinor: number; remainingMinor: number; orders: Array<{ id: string; version: number; remainingMinor: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number; note?: string | null; options?: ProductOption[] }> }> };
 type AccountReceipt = { check: CashierCheck; location: string; printedAt: string };
 type QuickCreate = { requestId: string; firstOrderId: string; items: Array<{ productId: string; quantity: number; note?: string | null; options: Array<{ groupId: string; optionId: string; quantity: number }> }>; customerId: null; tableId: null; waiterId: null };
-const quickRequestKey = `hipos.quick-create.${firmId}.${branchId}`;
-const morningOpenRequestKey = `hipos.cash-opening.${firmId}.${branchId}`;
-
 export function CashierApp() {
-  const [cashierSession, setCashierSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
-    const saved = localStorage.getItem("hipos_cashier_user");
-    const token = localStorage.getItem("hipos_cashier_token");
-    return saved && token ? { token, user: JSON.parse(saved) } : null;
-  });
+  const terminalScope = useTerminalScope();
+  const { firmId, branchId } = terminalScope;
+  const servicePath = `/api/v1/firms/${firmId}/branches/${branchId}/service`;
+  const checksPath = `/api/v1/firms/${firmId}/branches/${branchId}/sales/checks`;
+  const quickRequestKey = `hipos.quick-create.${firmId}.${branchId}`;
+  const morningOpenRequestKey = `hipos.cash-opening.${firmId}.${branchId}`;
+  const assignedRegisterKey = `hipos_pos_assigned_register_id.${firmId}.${branchId}`;
+
+  const [cashierSession, setCashierSession] = useState<PosSession | null>(() => getPosSession("cashier"));
+
+  useEffect(() => {
+    const sync = () => setCashierSession(getPosSession("cashier"));
+    window.addEventListener(POS_AUTH_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(POS_AUTH_CHANGED_EVENT, sync);
+  }, []);
   const [tables, setTables] = useState<Table[]>([]);
   const [configuredFloors, setConfiguredFloors] = useState<string[]>([]);
   const [cashOverview, setCashOverview] = useState<CashOverview | null>(null);
@@ -256,6 +277,7 @@ export function CashierApp() {
     const resetTimer = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
+        clearPosSession("cashier");
         setCashierSession(null);
       }, 10 * 60 * 1000);
     };
@@ -342,10 +364,10 @@ export function CashierApp() {
         return;
       }
       try {
-        const res = await fetch(`${apiBase}/api/v1/auth/pin-verify`, {
+        const res = await fetch(`${POS_API_BASE}/api/v1/auth/pin-verify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ firmId, branchId, pin: stationManagerPin, clientType: "pos" }),
+          body: JSON.stringify({ firmId, branchId, pin: stationManagerPin, clientType: "cashier" }),
         });
         if (!res.ok) {
           setStationError("Girdiğiniz yönetici PIN kodu hatalı.");
@@ -362,7 +384,7 @@ export function CashierApp() {
       }
     }
 
-    localStorage.setItem("hipos_pos_assigned_register_id", registerId);
+    localStorage.setItem(assignedRegisterKey, registerId);
     selectRegister(registerId);
     setStationModalOpen(false);
     setStationManagerPin("");
@@ -596,6 +618,7 @@ export function CashierApp() {
   }, [cancellingCheck]);
 
   useEffect(() => {
+    if (!cashierSession) return;
     let live = true;
     request<MenuWorkspace>(`/api/v1/firms/${firmId}/branches/${branchId}/catalog/menus`, "pos-single")
       .then((menuResult) => {
@@ -610,8 +633,12 @@ export function CashierApp() {
       })
       .catch(cause => { if (live) { setCatalogProducts([]); setCatalogError(cause instanceof Error ? cause.message : "Ürünler yüklenemedi."); } });
     return () => { live = false; };
-  }, [catalogRevision]);
-  useEffect(() => { const timer = window.setInterval(() => { if (document.visibilityState === "visible") setCatalogRevision(value => value + 1); }, 60_000); return () => window.clearInterval(timer); }, []);
+  }, [cashierSession, firmId, branchId, catalogRevision]);
+  useEffect(() => {
+    if (!cashierSession) return;
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") setCatalogRevision(value => value + 1); }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [cashierSession]);
 
   const quickTotalMinor = quickCart.reduce((sum, item) => sum + item.quantity * (item.product.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)), 0);
   const quickCartCount = quickCart.reduce((sum, item) => sum + item.quantity, 0);
@@ -626,8 +653,9 @@ export function CashierApp() {
     }
   }
   useEffect(() => {
+    if (!cashierSession) return;
     if (cashierMode === "quick") void loadUnfinishedChecks();
-  }, [cashierMode]);
+  }, [cashierSession, cashierMode]);
   async function resumeQuickCheck(checkId: string) {
     setQuickBusy(true); setQuickError("");
     try {
@@ -849,7 +877,7 @@ export function CashierApp() {
         }
       }
     } finally { if (current === serial.current) setLoading(false); }
-  }, []);
+  }, [servicePath, checksPath]);
 
   const loadCash = useCallback(async () => {
     try {
@@ -858,11 +886,11 @@ export function CashierApp() {
       setCashOverview(overview);
       if (!initialStationChecked.current && overview.registers.length > 0) {
         initialStationChecked.current = true;
-        const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+        const savedStation = localStorage.getItem(assignedRegisterKey);
         if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
           setSelectedRegisterId(savedStation);
         } else if (overview.registers.length === 1) {
-          localStorage.setItem("hipos_pos_assigned_register_id", overview.registers[0].id);
+          localStorage.setItem(assignedRegisterKey, overview.registers[0].id);
           setSelectedRegisterId(overview.registers[0].id);
         } else {
           setStationMode("initial");
@@ -870,7 +898,7 @@ export function CashierApp() {
           setSelectedRegisterId(overview.registers[0].id);
         }
       } else if (!selectedRegisterId && overview.registers.length > 0) {
-        const savedStation = localStorage.getItem("hipos_pos_assigned_register_id");
+        const savedStation = localStorage.getItem(assignedRegisterKey);
         if (savedStation && overview.registers.some((r) => r.id === savedStation)) {
           setSelectedRegisterId(savedStation);
         } else {
@@ -887,7 +915,7 @@ export function CashierApp() {
     } finally {
       setCashLoading(false);
     }
-  }, [selectedRegisterId]);
+  }, [firmId, branchId, assignedRegisterKey, selectedRegisterId]);
 
   // Canlı senkronizasyon fonksiyonu
   const triggerSync = useCallback(() => {
@@ -909,11 +937,14 @@ export function CashierApp() {
         }
       },
       [triggerSync]
-    )
+    ),
+    Boolean(cashierSession),
+    cashierSession?.token
   );
 
   // 2. Yedek periyodik kontrol ve ekran odaklanma tetikleyicisi
   useEffect(() => {
+    if (!cashierSession) return;
     triggerSync();
     const intervalTimer = window.setInterval(triggerSync, 15000);
 
@@ -931,7 +962,7 @@ export function CashierApp() {
       window.removeEventListener("focus", handleWakeOrFocus);
       window.removeEventListener("online", handleWakeOrFocus);
     };
-  }, [triggerSync, cashRefresh]);
+  }, [cashierSession, triggerSync, cashRefresh]);
 
   async function submitCashShift(event: React.FormEvent) {
     event.preventDefault();
@@ -1222,11 +1253,11 @@ export function CashierApp() {
     return (
       <PinPadModal
         title="Kasa Dokunmatik Ekranı"
-        allowedRoles={["cashier", "owner", "manager", "waiter"]}
+        appKind="cashier"
+        allowedRoles={["cashier", "owner", "manager"]}
         subtitle="Kasayı açmak ve tahsilat yapmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
-          localStorage.setItem("hipos_cashier_token", data.token);
-          localStorage.setItem("hipos_cashier_user", JSON.stringify(data.user));
+          savePosSession("cashier", data);
           setCashierSession(data);
         }}
       />
@@ -1237,7 +1268,7 @@ export function CashierApp() {
     <header className="ops-header cashier-header-clean">
       {/* SOL: Logo + Sabit İstasyon Rozeti */}
       <div className="cashier-header-left">
-        <a href="/cashier" className="ops-brand waiter-brand">
+        <a href={buildPosTerminalHref("/cashier", terminalScope)} className="ops-brand waiter-brand">
           <img src="/hipos-logo.png" alt="HIPOS" />
           <span className="cashier-badge-pill">KASA</span>
         </a>
@@ -1361,8 +1392,7 @@ export function CashierApp() {
             className="operator-lock-btn"
             title="Kasiyeri değiştir veya ekranı kilitle"
             onClick={() => {
-              localStorage.removeItem("hipos_cashier_token");
-              localStorage.removeItem("hipos_cashier_user");
+              clearPosSession("cashier");
               setCashierSession(null);
             }}
           >
@@ -2907,11 +2937,19 @@ export function CashierApp() {
 }
 
 export function WaiterApp() {
-    const [waiterSession, setWaiterSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
-        const saved = localStorage.getItem("hipos_waiter_user");
-        const token = localStorage.getItem("hipos_waiter_token");
-        return saved && token ? { token, user: JSON.parse(saved) } : null;
-    });
+  const terminalScope = useTerminalScope();
+  const { firmId, branchId } = terminalScope;
+  const servicePath = `/api/v1/firms/${firmId}/branches/${branchId}/service`;
+  const ordersPath = `/api/v1/firms/${firmId}/sales/orders?branchId=${branchId}`;
+  const checksPath = `/api/v1/firms/${firmId}/branches/${branchId}/sales/checks`;
+
+  const [waiterSession, setWaiterSession] = useState<PosSession | null>(() => getPosSession("waiter"));
+
+  useEffect(() => {
+    const sync = () => setWaiterSession(getPosSession("waiter"));
+    window.addEventListener(POS_AUTH_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(POS_AUTH_CHANGED_EVENT, sync);
+  }, []);
 
   useEffect(() => {
     if (!waiterSession) return;
@@ -2919,6 +2957,7 @@ export function WaiterApp() {
     const resetTimer = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
+        clearPosSession("waiter");
         setWaiterSession(null);
       }, 10 * 60 * 1000);
     };
@@ -3112,8 +3151,11 @@ export function WaiterApp() {
       setError(cause instanceof Error ? cause.message : "Veriler yüklenemedi.");
     }
     finally { if (serial === reloadSerial.current) setLoading(false); }
-  }, [tableAction, tableId]);
-  useEffect(() => { void reload(); }, [reload, refreshTick, tableId]);
+  }, [firmId, branchId, servicePath, ordersPath, checksPath, tableAction, tableId, waiterSession?.user?.fullName]);
+  useEffect(() => {
+    if (!waiterSession) return;
+    void reload();
+  }, [waiterSession, reload, refreshTick, tableId]);
 
   // 1. SSE ile anlık masa ve adisyon durumu senkronizasyonu
   useRestaurantRealtime(
@@ -3124,17 +3166,19 @@ export function WaiterApp() {
         void reload();
       },
       [tableStatusSaving, saving, operationSaving, reload]
-    )
+    ),
+    Boolean(waiterSession),
+    waiterSession?.token
   );
 
   // 2. Yedek periyodik kontrol
   useEffect(() => {
-    if (tableStatusSaving || saving || operationSaving) return;
+    if (!waiterSession || tableStatusSaving || saving || operationSaving) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void reload();
     }, 20000);
     return () => window.clearInterval(timer);
-  }, [tableStatusSaving, saving, operationSaving, reload]);
+  }, [waiterSession, tableStatusSaving, saving, operationSaving, reload]);
 
   useEffect(() => {
     if (waiterSession?.user && waiters.length > 0 && !waiterId) {
@@ -3681,11 +3725,11 @@ export function WaiterApp() {
     return (
       <PinPadModal
         title="Garson Tablet Girişi"
+        appKind="waiter"
         allowedRoles={["waiter", "cashier", "owner", "manager", "chef"]}
         subtitle="Masalara sipariş girmek için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
-          localStorage.setItem("hipos_waiter_token", data.token);
-          localStorage.setItem("hipos_waiter_user", JSON.stringify(data.user));
+          savePosSession("waiter", data);
           setWaiterSession(data);
           const match = waiters.find((w) => w.name.trim().toLowerCase() === data.user.fullName.trim().toLowerCase());
           if (match) setWaiterId(match.id);
@@ -3696,7 +3740,7 @@ export function WaiterApp() {
 
   return <main className="ops-shell waiter-shell">
     <header className="ops-header">
-      <a href="/waiter" className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a>
+      <a href={buildPosTerminalHref("/waiter", terminalScope)} className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a>
       <div className="waiter-header-actions">
         <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
           👤 Garson: {waiterSession.user.fullName}
@@ -3704,8 +3748,7 @@ export function WaiterApp() {
         <button
           type="button"
           onClick={() => {
-            localStorage.removeItem("hipos_waiter_token");
-            localStorage.removeItem("hipos_waiter_user");
+            clearPosSession("waiter");
             setWaiterSession(null);
           }}
           className="waiter-back"
@@ -4164,9 +4207,18 @@ function playKitchenChime() {
 }
 
 export function KitchenApp() {
-  const [kitchenSession, setKitchenSession] = useState<boolean>(() =>
-    Boolean(localStorage.getItem("hipos_kitchen_token"))
+  const terminalScope = useTerminalScope();
+  const { firmId, branchId } = terminalScope;
+  const [kitchenSession, setKitchenSession] = useState<PosSession | null>(() =>
+    getPosSession("kitchen")
   );
+
+  useEffect(() => {
+    const sync = () => setKitchenSession(getPosSession("kitchen"));
+    window.addEventListener(POS_AUTH_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(POS_AUTH_CHANGED_EVENT, sync);
+  }, []);
+
   const [tasks, setTasks] = useState<KitchenTask[]>([]);
   const [stations, setStations] = useState<KitchenStation[]>([]);
   const [stationFilter, setStationFilter] = useState("all");
@@ -4206,8 +4258,11 @@ export function KitchenApp() {
       setTasks(result.items); setStations(stationResult.items);
       setError(""); setLastRefresh(new Date());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Mutfak kuyruğu alınamadı."); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+  }, [firmId, branchId]);
+  useEffect(() => {
+    if (!kitchenSession) return;
+    void load();
+  }, [kitchenSession, load]);
 
   // 1. SSE ile anlık sipariş ve mutfak akışı
   useRestaurantRealtime(
@@ -4227,14 +4282,17 @@ export function KitchenApp() {
         }
       },
       [load]
-    )
+    ),
+    Boolean(kitchenSession),
+    kitchenSession?.token
   );
 
   // 2. Yedek periyodik kontrol
   useEffect(() => {
+    if (!kitchenSession) return;
     const timer = window.setInterval(() => { void load(); }, 15000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [kitchenSession, load]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(timer); }, []);
 
   type KitchenGroup = {
@@ -4437,11 +4495,12 @@ export function KitchenApp() {
     return (
       <PinPadModal
         title="Mutfak KDS Girişi"
-        allowedRoles={["chef", "owner", "manager", "waiter"]}
+        appKind="kitchen"
+        allowedRoles={["chef", "kitchen", "owner", "manager", "waiter"]}
         subtitle="Mutfak ekranını açmak için 4 haneli PIN kodunuzu tuşlayın"
         onSuccess={(data) => {
-          localStorage.setItem("hipos_kitchen_token", data.token);
-          setKitchenSession(true);
+          savePosSession("kitchen", data);
+          setKitchenSession(data);
         }}
       />
     );
@@ -4449,13 +4508,13 @@ export function KitchenApp() {
 
   return <main className="ops-shell kitchen-shell">
     <header className="ops-header">
-      <a href="/kitchen" className="ops-brand">HIPOS <span>MUTFAK</span></a>
+      <a href={buildPosTerminalHref("/kitchen", terminalScope)} className="ops-brand">HIPOS <span>MUTFAK</span></a>
       <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-        <a className="ops-link" href="/waiter">Garson ekranı</a>
+        <a className="ops-link" href={buildPosTerminalHref("/waiter", terminalScope)}>Garson ekranı</a>
         <button
           onClick={() => {
-            localStorage.removeItem("hipos_kitchen_token");
-            setKitchenSession(false);
+            clearPosSession("kitchen");
+            setKitchenSession(null);
           }}
           style={{
             padding: "0.25rem 0.6rem",
@@ -4599,6 +4658,7 @@ export function KitchenApp() {
 }
 
 export function mountOperationalApp() {
+  getTerminalScope();
   const path = window.location.pathname.replace(/\/$/, "");
   if (path === "/waiter" || path === "/kitchen" || path === "/cashier") {
     try {
@@ -4611,7 +4671,7 @@ export function mountOperationalApp() {
     try {
       const preferred = localStorage.getItem("hipos_preferred_app");
       if (preferred === "waiter" || preferred === "cashier" || preferred === "kitchen") {
-        window.location.replace(`/${preferred}`);
+        window.location.replace(`/${preferred}${window.location.search}`);
         return true;
       }
     } catch {}

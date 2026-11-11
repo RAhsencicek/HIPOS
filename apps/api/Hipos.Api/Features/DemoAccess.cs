@@ -1,19 +1,52 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using Hipos.Api.Auth;
+
 namespace Hipos.Api.Features;
 
-public sealed record DemoActor(string Name, bool CanManage, bool CanOperate, IReadOnlySet<string> AllowedBranches)
+public sealed record DemoActor(
+    string Name,
+    bool CanManage,
+    bool CanOperate,
+    IReadOnlySet<string> AllowedBranches,
+    string Role = "demo",
+    bool IsRealAuth = false,
+    string? UserId = null,
+    string? FirmId = null,
+    bool IsPlatformAdmin = false,
+    string? BranchId = null)
 {
+    public bool IsBridge => string.Equals(Role, "bridge", StringComparison.OrdinalIgnoreCase);
+
     public bool CanRead(string firmId, string branchId) =>
+        !IsBridge && AllowedBranches.Contains($"{firmId}:{branchId}");
+
+    public bool CanAccessPrintBridge(string firmId, string branchId) =>
         AllowedBranches.Contains($"{firmId}:{branchId}");
 }
 
 public static class DemoAccess
 {
-    // Yalnız geliştirme prototipi. Gerçek firma/şube üyeliği veritabanından doğrulanacaktır.
-    public static bool CanReadCatalog(DemoActor actor, string firmId, string? branchId)
+    private static AuthTokenService? _tokenService;
+    private static bool _allowDemoActor;
+
+    public static void Configure(AuthTokenService tokenService, bool allowDemoActor)
     {
-        if (branchId is not null) return actor.CanRead(firmId, branchId);
+        _tokenService = tokenService;
+        _allowDemoActor = allowDemoActor;
+    }
+
+    public static bool CanReadFirm(DemoActor actor, string firmId)
+    {
+        if (actor.IsBridge)
+            return false;
+
+        if (actor.IsRealAuth)
+        {
+            return actor.FirmId == firmId ||
+                   actor.AllowedBranches.Any(scope => scope.StartsWith($"{firmId}:", StringComparison.Ordinal));
+        }
+
         string[] allBranches = firmId switch
         {
             InMemoryFeatureStore.SingleFirm => [InMemoryFeatureStore.SingleBranch],
@@ -22,6 +55,17 @@ public static class DemoAccess
             _ => [],
         };
         return allBranches.Length > 0 && allBranches.All(branch => actor.CanRead(firmId, branch));
+    }
+
+    // Yalnız geliştirme prototipi. Gerçek firma/şube üyeliği JWT kapsamından doğrulanır.
+    public static bool CanReadCatalog(DemoActor actor, string firmId, string? branchId)
+    {
+        if (branchId is not null) return actor.CanRead(firmId, branchId);
+        if (actor.IsRealAuth)
+        {
+            return actor.CanManage && CanReadFirm(actor, firmId);
+        }
+        return CanReadFirm(actor, firmId);
     }
 
     private static readonly IReadOnlyDictionary<string, DemoActor> Actors =
@@ -54,48 +98,68 @@ public static class DemoAccess
         };
     public static DemoActor? Resolve(HttpContext context)
     {
-        // 1. Önce gelen istekte gerçek JWT Bearer Token var mı kontrol et (Header veya Query String)
+        // 1. Önce gelen istekte imzalı JWT Bearer Token var mı kontrol et (Header veya GET ?token=)
         var authHeader = context.Request.Headers.Authorization.ToString();
         string? tokenString = null;
         if (!string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             tokenString = authHeader["Bearer ".Length..].Trim();
         }
-        else if (context.Request.Query.TryGetValue("token", out var queryToken) && !string.IsNullOrWhiteSpace(queryToken))
+        else if (HttpMethods.IsGet(context.Request.Method) &&
+                 context.Request.Query.TryGetValue("token", out var queryToken) &&
+                 !string.IsNullOrWhiteSpace(queryToken))
         {
             tokenString = queryToken.ToString().Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(tokenString))
         {
-            try
+            var tokenService = _tokenService ?? context.RequestServices.GetService<AuthTokenService>();
+            var principal = tokenService?.ValidateToken(tokenString);
+            if (principal is null)
             {
-                var handler = new JwtSecurityTokenHandler();
-                if (handler.CanReadToken(tokenString))
-                {
-                    var jwt = handler.ReadJwtToken(tokenString);
-                    var role = jwt.Claims.FirstOrDefault(c => c.Type == "role" || c.Type == ClaimTypes.Role)?.Value ?? "waiter";
-                    var firmId = jwt.Claims.FirstOrDefault(c => c.Type == "firmId")?.Value ?? InMemoryFeatureStore.SingleFirm;
-                    var branchId = jwt.Claims.FirstOrDefault(c => c.Type == "branchId")?.Value ?? InMemoryFeatureStore.SingleBranch;
-                    var name = jwt.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Name || c.Type == ClaimTypes.Name)?.Value ?? role;
-
-                    bool canManage = role == "owner";
-                    bool canOperate = true;
-                    var allowedBranches = new HashSet<string> { Scope(firmId, branchId) };
-
-                    return new DemoActor(name, canManage, canOperate, allowedBranches);
-                }
-            }
-            catch
-            {
-                // Token geçersizse null döner
+                // İmzası sahte, bozuk veya süresi dolmuş token ASLA X-Demo-Actor'e düşmemelidir.
                 return null;
             }
+
+            var role = principal.Claims.FirstOrDefault(c => c.Type == "role" || c.Type == ClaimTypes.Role)?.Value ?? "waiter";
+            var firmId = principal.Claims.FirstOrDefault(c => c.Type == "firmId")?.Value;
+            var branchId = principal.Claims.FirstOrDefault(c => c.Type == "branchId")?.Value;
+            var name = principal.Claims.FirstOrDefault(c =>
+                c.Type == JwtRegisteredClaimNames.Name || c.Type == "name" || c.Type == ClaimTypes.Name)?.Value ?? role;
+            var userId = principal.Claims.FirstOrDefault(c =>
+                c.Type == JwtRegisteredClaimNames.Sub || c.Type == "sub" || c.Type == ClaimTypes.NameIdentifier)?.Value;
+            var isPlatformAdmin = string.Equals(
+                principal.Claims.FirstOrDefault(c => c.Type == "isPlatformAdmin")?.Value,
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+
+            var allowedBranches = new HashSet<string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(firmId) && !string.IsNullOrWhiteSpace(branchId))
+            {
+                allowedBranches.Add(Scope(firmId, branchId));
+            }
+            foreach (var claim in principal.Claims.Where(c => c.Type == "branchScope"))
+            {
+                if (!string.IsNullOrWhiteSpace(claim.Value))
+                    allowedBranches.Add(claim.Value);
+            }
+
+            if (allowedBranches.Count == 0 && !isPlatformAdmin)
+                return null;
+
+            bool canManage = role is "owner" or "manager";
+            bool canOperate = role is "owner" or "manager" or "cashier" or "waiter" or "chef" or "kitchen";
+
+            return new DemoActor(name, canManage, canOperate, allowedBranches, role, true, userId, firmId, isPlatformAdmin, branchId);
         }
 
-        // 2. Geriye dönük uyumluluk: Eğer token yoksa sahte X-Demo-Actor başlığına veya query param'a bak
+        // 2. X-Demo-Actor / ?actor= YALNIZ geliştirme/test ortamında (ve açık izinliyken) çalışır
+        if (!_allowDemoActor)
+            return null;
+
         var actorKey = context.Request.Headers["X-Demo-Actor"].ToString();
-        if (string.IsNullOrWhiteSpace(actorKey))
+        if (string.IsNullOrWhiteSpace(actorKey) && HttpMethods.IsGet(context.Request.Method))
         {
             actorKey = context.Request.Query["actor"].ToString();
         }

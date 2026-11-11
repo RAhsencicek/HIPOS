@@ -1,4 +1,5 @@
 import demo from "../../../../../contracts/demo-single-branch.v1.json";
+import { buildAuthHeaders, clearAuthSession, getAuthToken } from "../../shared/authFetch";
 import type { CatalogScope, Money } from "./contracts";
 
 export type MenuSection = { sectionId: string; name: string; productIds: string[] };
@@ -21,10 +22,13 @@ export class HttpMenuProvider {
   private async request<T>(scope: CatalogScope, suffix: string, method = "GET", body?: unknown): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${this.path(scope)}${suffix}`, { method,
-        headers: { "X-Demo-Actor": scope.firmId === demo.firm.id ? "manager-single" : "manager-multi",
-          ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      response = await fetch(`${this.baseUrl}${this.path(scope)}${suffix}`, {
+        method,
+        headers: buildAuthHeaders({ firmId: scope.firmId, hasJsonBody: Boolean(body) }),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
     } catch { throw new MenuApiError("LOAD_FAILED", "Menü sunucusuna ulaşılamadı. Bağlantıyı kontrol edip tekrar deneyin."); }
+    if (response.status === 401 && getAuthToken()) clearAuthSession();
     const result = await response.json().catch(() => null) as T & { code?: string; detail?: string } | null;
     if (!response.ok) throw new MenuApiError(result?.code ?? (response.status >= 500 ? "LOAD_FAILED" : "REQUEST_FAILED"), result?.detail ?? "Menü işlemi tamamlanamadı.");
     if (!result) throw new MenuApiError("LOAD_FAILED", "Sunucu yanıtı okunamadı. Kayıt durumunu kontrol edin.");

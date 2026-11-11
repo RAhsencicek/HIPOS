@@ -7,6 +7,14 @@ import { ProductOptionPicker, type OptionSelection } from "./ProductOptionPicker
 import type { TestOrder } from "./PaymentSimulatorPanel";
 import "./styles.css";
 import { PinPadModal } from "./components/PinPadModal";
+import {
+  POS_AUTH_CHANGED_EVENT,
+  clearPosSession,
+  getPosSession,
+  posFetch,
+  savePosSession,
+  type PosSession,
+} from "./terminalScope";
 
 type Product = {
   id: string;
@@ -35,21 +43,16 @@ const scopes = [
   },
 ] as const;
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const money = (amountMinor: number) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(amountMinor / 100);
 
 async function api<T>(path: string, actor: string, body?: unknown): Promise<T> {
     let response: Response;
-    const token = localStorage.getItem("hipos_cashier_token") || localStorage.getItem("hipos_pos_token");
     try {
-        response = await fetch(`${apiBase}${path}`, {
+        response = await posFetch(path, {
+            appKind: "pos",
+            demoActor: actor,
             method: body ? "POST" : "GET",
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                "X-Demo-Actor": actor,
-                ...(body ? { "Content-Type": "application/json" } : {})
-            },
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
     } catch {
@@ -63,12 +66,14 @@ async function api<T>(path: string, actor: string, body?: unknown): Promise<T> {
 }
 
 function App() {
-    // Kasiyer Oturumu
-    const [cashierSession, setCashierSession] = useState<{ token: string; user: { fullName: string; role: string } } | null>(() => {
-        const saved = localStorage.getItem("hipos_cashier_user");
-        const token = localStorage.getItem("hipos_cashier_token");
-        return saved && token ? { token, user: JSON.parse(saved) } : null;
-    });
+    // Kasiyer Oturumu (route bazlı izole JWT)
+    const [cashierSession, setCashierSession] = useState<PosSession | null>(() => getPosSession("pos"));
+
+    useEffect(() => {
+        const sync = () => setCashierSession(getPosSession("pos"));
+        window.addEventListener(POS_AUTH_CHANGED_EVENT, sync);
+        return () => window.removeEventListener(POS_AUTH_CHANGED_EVENT, sync);
+    }, []);
 
     // 15 Dakika Hareketsizlik Kilidi (Auto-Lock)
     useEffect(() => {
@@ -79,6 +84,7 @@ function App() {
             window.clearTimeout(timer);
             // 15 dakika (15 * 60 * 1000 ms) hareketsiz kalınca ekranı kilitle
             timer = window.setTimeout(() => {
+                clearPosSession("pos");
                 setCashierSession(null);
             }, 15 * 60 * 1000);
         };
@@ -107,6 +113,7 @@ function App() {
   const [retryId, setRetryId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!cashierSession) return;
     let active = true;
     setLoading(true);
     setError("");
@@ -130,7 +137,7 @@ function App() {
     void loadProducts();
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void loadProducts(); }, 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [scope.firmId, scope.branchId, scope.actor]);
+  }, [cashierSession, scope.firmId, scope.branchId, scope.actor]);
 
   const selected = products.find((item) => item.id === productId);
   async function createOrder() {
@@ -157,10 +164,12 @@ function App() {
             <PinPadModal
                 title="Kasa Terminali Girişi"
                 subtitle="Kasayı açmak için 4 haneli PIN kodunuzu tuşlayın"
-                allowedRoles={["cashier"]}
+                firmId={scope.firmId}
+                branchId={scope.branchId}
+                appKind="pos"
+                allowedRoles={["cashier", "owner", "manager"]}
                 onSuccess={(data) => {
-                    localStorage.setItem("hipos_cashier_token", data.token);
-                    localStorage.setItem("hipos_cashier_user", JSON.stringify(data.user));
+                    savePosSession("pos", data);
                     setCashierSession(data);
                 }}
             />
@@ -180,8 +189,7 @@ function App() {
           </span>
           <button
             onClick={() => {
-              localStorage.removeItem("hipos_cashier_token");
-              localStorage.removeItem("hipos_cashier_user");
+              clearPosSession("pos");
               setCashierSession(null);
             }}
             style={{

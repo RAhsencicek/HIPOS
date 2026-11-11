@@ -1,17 +1,12 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
+import { apiUrl, saveAuthSession, type AuthBranchInfo, type AuthFirmInfo, type AuthUserInfo } from "../../shared/authFetch";
 
 interface LoginResponse {
     token: string;
-    user: {
-        id: string;
-        email: string;
-        fullName: string;
-        role: string;
-        firmId: string;
-        branchId: string;
-        phone?: string;
-    };
+    user: AuthUserInfo;
     expiresAt: string;
+    firm?: AuthFirmInfo | null;
+    branches?: AuthBranchInfo[];
 }
 
 export function LoginPage({ onLoginSuccess }: { onLoginSuccess?: (data: LoginResponse) => void }) {
@@ -26,8 +21,7 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess?: (data: LoginRes
         setLoading(true);
 
         try {
-            const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
-            const response = await fetch(`${apiBase}/api/v1/auth/login`, {
+            const response = await fetch(apiUrl("/api/v1/auth/login"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ email, password }),
@@ -42,8 +36,12 @@ export function LoginPage({ onLoginSuccess }: { onLoginSuccess?: (data: LoginRes
 
             const data: LoginResponse = await response.json();
 
-            localStorage.setItem("hipos_token", data.token);
-            localStorage.setItem("hipos_user", JSON.stringify(data.user));
+            saveAuthSession({
+                token: data.token,
+                user: data.user,
+                firm: data.firm ?? null,
+                branches: data.branches ?? [],
+            });
 
             if (onLoginSuccess) {
                 onLoginSuccess(data);

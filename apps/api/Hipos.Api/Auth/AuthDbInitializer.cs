@@ -10,8 +10,94 @@ public static class AuthDbInitializer
     public const string DefaultFirmId = "11111111-1111-4111-8111-111111111111";
     public const string DefaultBranchId = "33333333-3333-4333-8333-333333333333";
 
+    public static async Task EnsureDemoTenantsAsync(AuthDbContext db, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var demoFirms = new[]
+        {
+            new FirmRow
+            {
+                Id = DefaultFirmId,
+                Code = "KDK",
+                Name = "Örnek Kadıköy Kafe",
+                BrandName = null,
+                IsActive = true,
+                CreatedAt = now
+            },
+            new FirmRow
+            {
+                Id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                Code = "ABC",
+                Name = "ABC Restoran Grubu",
+                BrandName = "PizzaMarka",
+                IsActive = true,
+                CreatedAt = now
+            }
+        };
+
+        foreach (var firm in demoFirms)
+        {
+            if (!await db.Firms.AnyAsync(f => f.Id == firm.Id, cancellationToken))
+                db.Firms.Add(firm);
+        }
+
+        var demoBranches = new[]
+        {
+            new BranchRow
+            {
+                Id = DefaultBranchId,
+                FirmId = DefaultFirmId,
+                Code = "KDK-01",
+                Name = "Kadıköy Şubesi",
+                District = "İstanbul · Kadıköy",
+                IsActive = true,
+                CreatedAt = now
+            },
+            new BranchRow
+            {
+                Id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+                FirmId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                Code = "ABC-MODA",
+                Name = "Moda Şubesi",
+                District = "İstanbul · Kadıköy",
+                IsActive = true,
+                CreatedAt = now
+            },
+            new BranchRow
+            {
+                Id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+                FirmId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                Code = "ABC-BSK",
+                Name = "Beşiktaş Şubesi",
+                District = "İstanbul · Beşiktaş",
+                IsActive = true,
+                CreatedAt = now
+            },
+            new BranchRow
+            {
+                Id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+                FirmId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                Code = "ABC-ATS",
+                Name = "Ataşehir Şubesi",
+                District = "İstanbul · Ataşehir",
+                IsActive = true,
+                CreatedAt = now
+            }
+        };
+
+        foreach (var branch in demoBranches)
+        {
+            if (!await db.Branches.AnyAsync(b => b.Id == branch.Id, cancellationToken))
+                db.Branches.Add(branch);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public static async Task SeedDemoUsersAsync(AuthDbContext db, CancellationToken cancellationToken = default)
     {
+        await EnsureDemoTenantsAsync(db, cancellationToken);
+
         // 1. Eğer sistemde zaten kullanıcı varsa tekrar ekleme yapma
         if (await db.Users.AnyAsync(cancellationToken))
             return;
@@ -186,8 +272,10 @@ public static class AuthDbInitializer
         var branchId = DefaultBranchId;
         var now = DateTimeOffset.UtcNow;
 
-        // 1. Core Auth demo kullanıcılarının service.employees içinde mevcut olmasını sağla
-        var existingEmployees = await serviceDb.Employees.ToListAsync(cancellationToken);
+        // 1. Core Auth demo kullanıcılarının (yalnız DefaultFirmId/DefaultBranchId) service.employees içinde mevcut olmasını sağla
+        var existingEmployees = await serviceDb.Employees
+            .Where(e => e.FirmId == firmId && e.BranchId == branchId)
+            .ToListAsync(cancellationToken);
 
         void EnsureEmployee(string empId, string fullName, string dept, string jobTitle, string phone)
         {
@@ -240,7 +328,10 @@ public static class AuthDbInitializer
         };
 
         var allUsers = await authDb.Users.ToListAsync(cancellationToken);
-        var allMemberships = await authDb.Memberships.Include(m => m.PinCode).ToListAsync(cancellationToken);
+        var allMemberships = await authDb.Memberships
+            .Include(m => m.PinCode)
+            .Where(m => m.FirmId == firmId && m.BranchId == branchId)
+            .ToListAsync(cancellationToken);
 
         foreach (var emp in existingEmployees)
         {

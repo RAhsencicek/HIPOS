@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { adminFetch } from "../../shared/authFetch";
 import type { ViewContext } from "../../app/context";
 import { PageHeading, StatusPill } from "../../shared/ui";
 
@@ -109,10 +110,9 @@ export function MonthlyDailyTurnoverPage({ ctx }: { ctx: ViewContext }) {
     setLoading(true);
     setError("");
     try {
-      const base = import.meta.env.VITE_API_BASE_URL ?? "";
       const scope = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
-      const url = `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/sales/orders${scope}`;
-      const response = await fetch(url, { headers: { "X-Demo-Actor": actor } });
+      const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/sales/orders${scope}`;
+      const response = await adminFetch(path, { firmId: ctx.firmId, demoActor: actor });
       if (!response.ok) throw new Error(`API hatası (${response.status})`);
       const data = (await response.json()) as SalesSummaryResponse;
       setOrders(data.items ?? []);

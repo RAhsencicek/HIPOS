@@ -1,3 +1,4 @@
+import { adminFetch } from "../../shared/authFetch";
 import {
   ArrowRight,
   Boxes,
@@ -94,16 +95,14 @@ export function ActivityPage({ ctx }: { ctx: ViewContext }) {
   /* Load Activities from Backend */
   const loadActivities = useCallback(async () => {
     setLoading(true);
-    const base = import.meta.env.VITE_API_BASE_URL ?? "";
-    const headers = { "X-Demo-Actor": actor };
 
     try {
       if (branchId) {
         const catParam = selectedCategory !== "all" ? `&category=${encodeURIComponent(selectedCategory)}` : "";
         const searchParam = searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : "";
-        const res = await fetch(
-          `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/activities?limit=100${catParam}${searchParam}`,
-          { headers }
+        const res = await adminFetch(
+          `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/activities?limit=100${catParam}${searchParam}`,
+          { firmId: ctx.firmId, demoActor: actor }
         );
         if (res.ok) {
           const data = (await res.json()) as ActivityApiResponse;

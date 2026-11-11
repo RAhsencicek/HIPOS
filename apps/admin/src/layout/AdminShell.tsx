@@ -19,7 +19,29 @@ import {
 import { sections } from "../data/catalog";
 import { isFutureSidebarItem } from "../data/featurePresentation";
 import type { ViewContext } from "../app/context";
+import { clearAuthSession } from "../shared/authFetch";
 import { Icon } from "../shared/ui";
+
+function formatInitials(fullName?: string | null): string {
+  const parts = (fullName ?? "HY").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "HY";
+  if (parts.length === 1) return parts[0].slice(0, 2).toLocaleUpperCase("tr-TR");
+  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toLocaleUpperCase("tr-TR");
+}
+
+function formatRoleLabel(role?: string | null, isPlatformAdmin?: boolean): string {
+  if (isPlatformAdmin) return "Platform Yöneticisi";
+  switch ((role ?? "").toLowerCase()) {
+    case "owner":
+      return "İşletme Sahibi";
+    case "manager":
+      return "Şube Müdürü";
+    case "cashier":
+      return "Kasiyer";
+    default:
+      return role || "Yönetici";
+  }
+}
 
 const allSections = sections.flatMap((section) => [
   { label: section.label, path: `/admin/${section.id}`, group: "Ana alan" },
@@ -207,17 +229,19 @@ export function Shell({
               <ChevronDown size={12} className="pill-arrow" />
             </div>
 
-            <div className="topbar-select-pill scenario-pill" title="İşletme Modu (Tek / Çok Şubeli)">
-              <select
-                aria-label="İşletme senaryosu"
-                value={ctx.scenarioId}
-                onChange={(e) => ctx.setScenarioId(e.target.value)}
-              >
-                <option value="single">Tek Şube Modu</option>
-                <option value="multi">Çok Şubeli Zincir</option>
-              </select>
-              <ChevronDown size={12} className="pill-arrow" />
-            </div>
+            {!ctx.isRealAuth && (
+              <div className="topbar-select-pill scenario-pill" title="İşletme Modu (Tek / Çok Şubeli)">
+                <select
+                  aria-label="İşletme senaryosu"
+                  value={ctx.scenarioId}
+                  onChange={(e) => ctx.setScenarioId(e.target.value)}
+                >
+                  <option value="single">Tek Şube Modu</option>
+                  <option value="multi">Çok Şubeli Zincir</option>
+                </select>
+                <ChevronDown size={12} className="pill-arrow" />
+              </div>
+            )}
           </div>
           <div className="global-search">
             <Search size={16} />
@@ -264,9 +288,9 @@ export function Shell({
             )}
           </div>
           <div className="topbar-actions">
-            <div className="topbar-env-pill" title="Canlı Önizleme Ortamı">
+            <div className="topbar-env-pill" title={ctx.isRealAuth ? "Canlı İşletme Oturumu" : "Canlı Önizleme Ortamı"}>
               <span className="live-dot" />
-              <span>Önizleme Ortamı</span>
+              <span>{ctx.isRealAuth ? (ctx.brand ? `${ctx.firm} · ${ctx.brand}` : "Canlı Oturum") : "Önizleme Ortamı"}</span>
             </div>
             <button
               className="icon-button topbar-icon"
@@ -285,17 +309,19 @@ export function Shell({
             >
               <CircleHelp size={18} />
                       </button>
-                      <div className="topbar-profile" title="Patron Profili" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                          <div className="user-avatar" style={{ backgroundColor: "#2563eb", color: "#fff" }}>AP</div>
+                      <div className="topbar-profile" title="Kullanıcı Profili" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                          <div className="user-avatar" style={{ backgroundColor: "#2563eb", color: "#fff" }}>
+                              {formatInitials(ctx.user?.fullName)}
+                          </div>
                           <div className="user-info">
-                              <strong>Ahmet Patron</strong>
-                              <small style={{ color: "#10b981", fontWeight: "600" }}>Owner (Patron)</small>
+                              <strong>{ctx.user?.fullName ?? "Yönetici"}</strong>
+                              <small style={{ color: "#10b981", fontWeight: "600" }}>
+                                  {formatRoleLabel(ctx.user?.role, ctx.user?.isPlatformAdmin)}
+                              </small>
                           </div>
                           <button
                               onClick={() => {
-                                  localStorage.removeItem("hipos_token");
-                                  localStorage.removeItem("hipos_user");
-                                  window.location.href = "/";
+                                  clearAuthSession();
                               }}
                               title="Oturumu Kapat"
                               style={{

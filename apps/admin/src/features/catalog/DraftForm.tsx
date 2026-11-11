@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Link } from "react-router";
 import { UploadCloud, X } from "lucide-react";
 import { useCatalogProvider, useFeatureProvider } from "../../app/providers";
+import { adminFetch } from "../../shared/authFetch";
 import type {
   CatalogOptionGroup,
   CatalogProductDetail,
@@ -207,14 +208,10 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
       // Save channel preferences
       if (scope.branchId) {
         try {
-          const actor = scope.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : "manager-multi";
           const chanPath = `/api/v1/firms/${encodeURIComponent(scope.firmId)}/branches/${encodeURIComponent(scope.branchId)}/catalog/products/${encodeURIComponent(saved.id)}/channels`;
-          const chanRes = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${chanPath}`, {
+          const chanRes = await adminFetch(chanPath, {
             method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Demo-Actor": actor,
-            },
+            firmId: scope.firmId,
             body: JSON.stringify({
               requestId: crypto.randomUUID(),
               expectedVersion: currentVersion,
@@ -235,12 +232,11 @@ export function DraftForm({ scope, product, initialCategoryId, canSetPrice = fal
       if (imageFile && scope.branchId) {
         try {
           const reqId = crypto.randomUUID();
-          const actor = scope.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : "manager-multi";
           const path = `/api/v1/firms/${encodeURIComponent(scope.firmId)}/branches/${encodeURIComponent(scope.branchId)}/catalog/products/${encodeURIComponent(saved.id)}/images?requestId=${reqId}&expectedVersion=${currentVersion}`;
-          const imgRes = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
+          const imgRes = await adminFetch(path, {
             method: "PUT",
+            firmId: scope.firmId,
             headers: {
-              "X-Demo-Actor": actor,
               "Content-Type": imageFile.type || "application/octet-stream",
             },
             body: imageFile,

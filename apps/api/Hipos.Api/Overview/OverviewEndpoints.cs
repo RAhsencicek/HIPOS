@@ -4,6 +4,7 @@ using Hipos.Api.Inventory;
 using Hipos.Api.Sales;
 using Hipos.Api.Expenses;
 using Hipos.Api.Catalog;
+using Hipos.Api.Features;
 
 namespace Hipos.Api.Overview;
 
@@ -34,9 +35,12 @@ public static class OverviewEndpoints
         alertsGroup.MapGet("", async (
             string firmId,
             string branchId,
+            HttpContext context,
             OverviewDbContext db,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardBranch(context, firmId, branchId);
+            if (denied is not null) return denied;
             if (!overviewReady) return Results.StatusCode(503);
 
             var items = await db.AlertAcknowledgments.AsNoTracking()
@@ -69,9 +73,11 @@ public static class OverviewEndpoints
             OverviewDbContext db,
             CancellationToken ct) =>
         {
+            var (actorObj, denied) = GuardBranch(context, firmId, branchId, requireManage: true);
+            if (denied is not null) return denied;
             if (!overviewReady) return Results.StatusCode(503);
 
-            var actor = context.Request.Headers["X-Demo-Actor"].FirstOrDefault() ?? "manager-single";
+            var actor = actorObj!.Name;
             var now = DateTimeOffset.UtcNow;
 
             var itemsToAck = new List<AlertAcknowledgmentRow>();
@@ -145,9 +151,12 @@ public static class OverviewEndpoints
             string firmId,
             string branchId,
             ResetAlertRequest req,
+            HttpContext context,
             OverviewDbContext db,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardBranch(context, firmId, branchId, requireManage: true);
+            if (denied is not null) return denied;
             if (!overviewReady) return Results.StatusCode(503);
 
             if (req.All == true)
@@ -183,6 +192,7 @@ public static class OverviewEndpoints
             string? category,
             string? search,
             int? limit,
+            HttpContext context,
             OverviewDbContext overviewDb,
             CashDbContext cashDb,
             InventoryDbContext inventoryDb,
@@ -190,6 +200,9 @@ public static class OverviewEndpoints
             ExpenseDbContext expenseDb,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardBranch(context, firmId, branchId);
+            if (denied is not null) return denied;
+
             var maxLimit = Math.Clamp(limit ?? 50, 1, 200);
             var list = new List<ActivityFeedItem>();
 
@@ -424,9 +437,13 @@ public static class OverviewEndpoints
         cashProfitGroup.MapGet("/branches/{branchId}/overview/cash-profit", async (
             string firmId,
             string branchId,
+            HttpContext context,
             CashDbContext cashDb,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardBranch(context, firmId, branchId);
+            if (denied is not null) return denied;
+
             var registers = await cashDb.Registers.AsNoTracking()
                 .Where(r => r.FirmId == firmId && r.BranchId == branchId && r.IsActive)
                 .OrderBy(r => r.Code)
@@ -503,9 +520,13 @@ public static class OverviewEndpoints
 
         cashProfitGroup.MapGet("/overview/cash-profit", async (
             string firmId,
+            HttpContext context,
             CashDbContext cashDb,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardFirm(context, firmId);
+            if (denied is not null) return denied;
+
             var registers = await cashDb.Registers.AsNoTracking()
                 .Where(r => r.FirmId == firmId && r.IsActive)
                 .OrderBy(r => r.Code)
@@ -587,10 +608,13 @@ public static class OverviewEndpoints
             string branchId,
             string? category,
             int? limit,
+            HttpContext context,
             SalesDbContext salesDb,
             CatalogDbContext catalogDb,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardBranch(context, firmId, branchId);
+            if (denied is not null) return denied;
             return await GetTopDishesAsync(firmId, branchId, category, limit, salesDb, catalogDb, ct);
         });
 
@@ -598,10 +622,13 @@ public static class OverviewEndpoints
             string firmId,
             string? category,
             int? limit,
+            HttpContext context,
             SalesDbContext salesDb,
             CatalogDbContext catalogDb,
             CancellationToken ct) =>
         {
+            var (_, denied) = GuardFirm(context, firmId);
+            if (denied is not null) return denied;
             return await GetTopDishesAsync(firmId, null, category, limit, salesDb, catalogDb, ct);
         });
     }
@@ -773,5 +800,49 @@ public static class OverviewEndpoints
             "drinks" => "☕",
             _ => isDish ? "🍽️" : "🥤"
         };
+    }
+
+    private static (DemoActor? Actor, IResult? Denied) GuardBranch(
+        HttpContext context,
+        string firmId,
+        string branchId,
+        bool requireManage = false)
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null)
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHENTICATED", message = "Oturum gerekli." },
+                statusCode: 401));
+        }
+
+        if (!actor.CanRead(firmId, branchId) || (requireManage && !actor.CanManage))
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHORIZED_SCOPE", message = "Bu şubenin özet verilerine erişim izniniz yok." },
+                statusCode: 403));
+        }
+
+        return (actor, null);
+    }
+
+    private static (DemoActor? Actor, IResult? Denied) GuardFirm(HttpContext context, string firmId)
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null)
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHENTICATED", message = "Oturum gerekli." },
+                statusCode: 401));
+        }
+
+        if (!DemoAccess.CanReadFirm(actor, firmId))
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHORIZED_SCOPE", message = "Bu işletmenin özet verilerine erişim izniniz yok." },
+                statusCode: 403));
+        }
+
+        return (actor, null);
     }
 }

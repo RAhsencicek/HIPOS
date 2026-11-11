@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, LayoutGrid, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
+import { adminFetch, getAuthToken } from "../../shared/authFetch";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Line = { productId: string; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number };
@@ -29,8 +30,9 @@ const normalizeFloor = (floor: string | null | undefined): string | null => {
 async function serviceApi<T>(path: string, actor: string, method: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
-      method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+    response = await adminFetch(path, {
+      method,
+      demoActor: actor,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
@@ -86,11 +88,12 @@ export function ServiceTablesPage({ ctx, source }: { ctx: ViewContext; source: "
   useEffect(() => {
     const branchApiId = ctx.selectedBranch?.apiId;
     if (source !== "http" || !branchApiId) return;
-    const base = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:5180";
-    const token = localStorage.getItem("hipos_token");
-    const sseUrl = `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchApiId)}/events/stream?actor=${actor}${
-      token ? `&token=${encodeURIComponent(token)}` : ""
-    }`;
+    const base = import.meta.env.VITE_API_BASE_URL ?? "";
+    const token = getAuthToken();
+    const authParam = token
+      ? `token=${encodeURIComponent(token)}`
+      : `actor=${encodeURIComponent(actor)}`;
+    const sseUrl = `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchApiId)}/events/stream?${authParam}`;
     let eventSource: EventSource | null = null;
     let timer: number | null = null;
     let disposed = false;

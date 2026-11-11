@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { posFetch } from "./terminalScope";
 
 export type SelectedOption = { groupId: string; optionId: string; quantity: number; groupName: string; optionName: string; priceDeltaMinor: number };
 export type OptionSelection = { valid: boolean; items: SelectedOption[]; unitPriceMinor: number };
@@ -20,7 +21,7 @@ export function ProductOptionPicker({ firmId, branchId, actor, productId, basePr
     let timedOut = false;
     const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 12000);
     const path = `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/catalog/products/${encodeURIComponent(productId)}/option-groups`;
-    void fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { headers: { "X-Demo-Actor": actor }, signal: controller.signal })
+    void posFetch(path, { demoActor: actor, signal: controller.signal })
       .then(async response => { if (!response.ok) { const body = await response.json().catch(() => ({})) as { detail?: string }; throw new Error(body.detail ?? "Seçenekler alınamadı."); } return response.json() as Promise<{ items: Group[] }>; })
       .then(result => setGroups(result.items)).catch(reason => { if (timedOut) setError("Seçenekler zamanında yüklenemedi. Bağlantınızı kontrol edip tekrar deneyin."); else if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Seçenekler alınamadı."); }).finally(() => window.clearTimeout(timeout));
     return () => { window.clearTimeout(timeout); controller.abort(); };

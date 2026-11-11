@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { adminFetch } from "../../shared/authFetch";
 
 type Props = { image: string; productId: string; firmId: string; branchId: string | null; actor: string; name: string };
 export function ProductImage({ image, productId, firmId, branchId, actor, name }: Props) {
@@ -10,7 +11,7 @@ export function ProductImage({ image, productId, firmId, branchId, actor, name }
     setUrl("");
     const imageId = image.slice("upload:".length);
     const path = `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/catalog/products/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}`;
-    void fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { headers: { "X-Demo-Actor": actor }, signal: controller.signal })
+    void adminFetch(path, { firmId, demoActor: actor, signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error("image unavailable"); return response.blob(); })
       .then(blob => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); } })
       .catch(() => {});

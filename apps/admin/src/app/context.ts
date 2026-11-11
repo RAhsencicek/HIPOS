@@ -1,4 +1,5 @@
 import type { DemoBranch } from "../data/catalog";
+import type { AuthUserInfo } from "../shared/authFetch";
 
 export type ViewContext = {
   scenarioId: string;
@@ -12,4 +13,8 @@ export type ViewContext = {
   firm: string;
   brand: string | null;
   isMulti: boolean;
+  user?: AuthUserInfo | null;
+  isRealAuth?: boolean;
+  switchBranchScope?: (branchId: string) => Promise<void>;
+  refreshAuthSession?: () => Promise<void>;
 };

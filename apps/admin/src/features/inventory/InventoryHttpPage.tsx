@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { ArrowRight, Boxes, ClipboardCheck, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, MetricCard, PageHeading, StatusPill } from "../../shared/ui";
 
 type Warehouse = { id: string; name: string; isActive: boolean };
@@ -58,8 +59,9 @@ export function InventoryHttpPage({ ctx, view, canWriteItems, canWriteRecipes, c
   const api = useCallback(async <T,>(path: string, method: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<T> => {
     let response: Response;
     try {
-      response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
-        method, headers: { "X-Demo-Actor": actor, ...(body ? { "Content-Type": "application/json" } : {}) },
+      response = await adminFetch(path, {
+        method,
+        demoActor: actor,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
     } catch { throw new Error("Stok bilgilerine şu anda ulaşılamıyor. Lütfen tekrar deneyin."); }

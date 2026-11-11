@@ -1,4 +1,5 @@
 import { CatalogProviderError } from "./contracts";
+import { buildAuthHeaders, clearAuthSession, getAuthToken } from "../../shared/authFetch";
 import type {
   CatalogProductDetail,
   CatalogOptionGroup,
@@ -39,12 +40,6 @@ type ApiProblem = { code?: string; detail?: string };
 export class HttpCatalogProvider implements CatalogProvider {
   constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "") {}
 
-  private actor(scope: CatalogScope): string {
-    return scope.firmId === "11111111-1111-4111-8111-111111111111"
-      ? "manager-single"
-      : "manager-multi";
-  }
-
   private async request<T>(
     path: string, scope: CatalogScope,
     method: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown,
@@ -53,14 +48,14 @@ export class HttpCatalogProvider implements CatalogProvider {
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: {
-          "X-Demo-Actor": this.actor(scope),
-          ...(body ? { "Content-Type": "application/json" } : {}),
-        },
+        headers: buildAuthHeaders({ firmId: scope.firmId, hasJsonBody: Boolean(body) }),
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
     } catch {
       throw new CatalogProviderError("LOAD_FAILED", 503, "Yerel katalog API'sine bağlanılamadı.");
+    }
+    if (response.status === 401 && getAuthToken()) {
+      clearAuthSession();
     }
     if (!response.ok) {
       const problem = (await response.json().catch(() => ({}))) as ApiProblem;

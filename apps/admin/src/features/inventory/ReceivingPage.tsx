@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, FileText, Plus, Trash2, Truck, X } from "lucide-react";
 import type { ViewContext } from "../../app/context";
+import { adminFetch } from "../../shared/authFetch";
 import { DemoNotice, PageHeading, StatusPill } from "../../shared/ui";
 
 type Warehouse = { id: string; name: string; isActive: boolean };
@@ -36,7 +37,7 @@ const number = (value: string) => Number.isFinite(Number(value)) ? Number(value)
 const lineTotal = (line: Line) => Math.round(number(line.quantity) * number(line.unitPrice) * 100);
 
 async function get<T>(path: string, actor: string): Promise<T> {
-  const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { headers: { "X-Demo-Actor": actor } });
+  const response = await adminFetch(path, { demoActor: actor });
   if (!response.ok) {
     const problem = await response.json().catch(() => ({})) as { detail?: string };
     throw new Error(problem.detail ?? `Veri yüklenemedi (${response.status}).`);
@@ -45,8 +46,10 @@ async function get<T>(path: string, actor: string): Promise<T> {
 }
 
 async function post<T>(path: string, actor: string, body: unknown): Promise<T> {
-  const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Demo-Actor": actor }, body: JSON.stringify(body),
+  const response = await adminFetch(path, {
+    method: "POST",
+    demoActor: actor,
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const problem = await response.json().catch(() => ({})) as { detail?: string };

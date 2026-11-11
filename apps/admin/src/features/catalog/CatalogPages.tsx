@@ -1,3 +1,4 @@
+import { adminFetch } from "../../shared/authFetch";
 import {
   AlertCircle,
   ArrowLeft,
@@ -296,7 +297,13 @@ function GalleryProduct({ product, ctx, canWriteDraft, canPublish }: { product: 
     const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/images?requestId=${id}&expectedVersion=${version}`;
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "X-Demo-Actor": ctx.isMulti ? "manager-multi" : "manager-single", "Content-Type": file.type || "application/octet-stream" }, body: file });
+      const response = await adminFetch(path, {
+        method: "PUT",
+        firmId: ctx.firmId,
+        demoActor: ctx.isMulti ? "manager-multi" : "manager-single",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
       if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; throw new Error(problem.detail ?? "Görsel kaydedilemedi."); }
       request.current = null; setFile(null); if (input.current) input.current.value = ""; setMessage("Görsel kaydedildi."); notifyChange();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Görsel kaydedilemedi."); }
@@ -338,7 +345,12 @@ function ChannelControls({ product, ctx, canWriteDraft, canPublish }: { product:
     try {
       const path = `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/catalog/products/${encodeURIComponent(product.id)}/channels`;
       const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : (ctx.isMulti ? "manager-multi" : "manager-single");
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Demo-Actor": actor }, body: JSON.stringify({ requestId: command.id, expectedVersion: command.version, desiredChannels: command.channels }) });
+      const response = await adminFetch(path, {
+        method: "PUT",
+        firmId: ctx.firmId,
+        demoActor: actor,
+        body: JSON.stringify({ requestId: command.id, expectedVersion: command.version, desiredChannels: command.channels }),
+      });
       if (!response.ok) { const problem = await response.json().catch(() => ({})) as { detail?: string }; pending.current = null; throw new Error(problem.detail ?? "Kanal seçimi kaydedilemedi."); }
       const channelResult = await response.json() as { version: number };
       pending.current = null;
@@ -867,10 +879,10 @@ export function ProductDetail({
     if (inventorySource !== "http" || !ctx.branchApiId) { setRecipeState({ status: "loaded", recipe: null }); return; }
     let cancelled = false;
     setRecipeState({ status: "loading" });
-    const base = import.meta.env.VITE_API_BASE_URL ?? "";
     const actor = ctx.isMulti ? "manager-multi" : "manager-single";
-    void fetch(`${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/inventory/recipes/${encodeURIComponent(productId)}`, {
-      headers: { "X-Demo-Actor": actor },
+    void adminFetch(`/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(ctx.branchApiId)}/inventory/recipes/${encodeURIComponent(productId)}`, {
+      firmId: ctx.firmId,
+      demoActor: actor,
     }).then(async (response) => {
       if (response.status === 404) return null;
       if (!response.ok) {
@@ -1070,9 +1082,11 @@ export function ProductDetail({
                       const actor = ctx.firmId === "11111111-1111-4111-8111-111111111111" ? "manager-single" : (ctx.isMulti ? "manager-multi" : "manager-single");
                       setImageBusy(true); setImageError(""); setSaveNotice("");
                       try {
-                        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ""}${path}`, {
+                        const response = await adminFetch(path, {
                           method: "PUT",
-                          headers: { "X-Demo-Actor": actor, "Content-Type": imageFile.type || "application/octet-stream" },
+                          firmId: ctx.firmId,
+                          demoActor: actor,
+                          headers: { "Content-Type": imageFile.type || "application/octet-stream" },
                           body: imageFile,
                         });
                         if (!response.ok) {

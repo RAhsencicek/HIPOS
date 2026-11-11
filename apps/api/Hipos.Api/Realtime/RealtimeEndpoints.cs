@@ -20,9 +20,16 @@ public static class RealtimeEndpoints
             CancellationToken ct) =>
         {
             var actor = DemoAccess.Resolve(context);
-            if (actor is null || !actor.CanRead(firmId, branchId))
+            if (actor is null)
             {
                 context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Authentication required to stream events.", ct);
+                return;
+            }
+
+            if (!actor.CanAccessPrintBridge(firmId, branchId))
+            {
+                context.Response.StatusCode = 403;
                 await context.Response.WriteAsync("Unauthorized to stream events for this branch.", ct);
                 return;
             }

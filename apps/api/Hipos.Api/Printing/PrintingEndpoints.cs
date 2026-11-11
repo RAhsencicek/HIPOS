@@ -1,3 +1,4 @@
+using Hipos.Api.Auth;
 using Hipos.Api.Features;
 using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
@@ -20,9 +21,13 @@ public static class PrintingEndpoints
             string branchId,
             Guid orderId,
             bool? isReprint,
+            HttpContext context,
             [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var result = await printing.PrintKitchenOrderAsync(firmId, branchId, orderId, isReprint ?? false, ct);
             return result.Success
                 ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
@@ -35,9 +40,13 @@ public static class PrintingEndpoints
             string branchId,
             string tableId,
             bool? isReprint,
+            HttpContext context,
             [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var result = await printing.PrintKitchenTableAsync(firmId, branchId, tableId, isReprint ?? false, ct);
             return result.Success
                 ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
@@ -50,9 +59,13 @@ public static class PrintingEndpoints
             string branchId,
             Guid checkId,
             bool? isReprint,
+            HttpContext context,
             [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var result = await printing.PrintKitchenCheckAsync(firmId, branchId, checkId, isReprint ?? false, ct);
             return result.Success
                 ? Results.Ok(new { success = true, result.Target, result.TransportUsed, isReprint = isReprint ?? false })
@@ -64,11 +77,15 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             Guid checkId,
+            HttpContext context,
             [FromServices] PrintingService printing,
             bool openCashDrawer = false,
             string paymentMethod = "NAKIT",
             CancellationToken ct = default) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var result = await printing.PrintCashierBillAsync(firmId, branchId, checkId, ct, openCashDrawer, paymentMethod);
             return result.Success
                 ? Results.Ok(new { success = true, result.Target, result.TransportUsed })
@@ -80,12 +97,16 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             string tableId,
+            HttpContext context,
             [FromServices] SalesDbContext salesDb,
             [FromServices] PrintingService printing,
             bool openCashDrawer = false,
             string paymentMethod = "NAKIT",
             CancellationToken ct = default) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var check = await salesDb.Checks
                 .AsNoTracking()
                 .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
@@ -116,6 +137,9 @@ public static class PrintingEndpoints
             HttpContext context,
             CancellationToken ct) =>
         {
+            var (actorObj, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var paymentMethod = (req?.PaymentMethod ?? context.Request.Query["paymentMethod"].FirstOrDefault() ?? "NAKIT").ToUpperInvariant();
 
             var check = await salesDb.Checks
@@ -129,7 +153,7 @@ public static class PrintingEndpoints
 
             var checkId = check.Id;
             var now = DateTimeOffset.UtcNow;
-            var actor = DemoAccess.Resolve(context)?.Name ?? "pos-single";
+            var actor = actorObj!.Name;
 
             // 1. Kasa fişi bas ve nakit ise para çekmecesini aç
             PrintResult? printResult = null;
@@ -255,9 +279,13 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             string? target,
+            HttpContext context,
             [FromServices] PrintingService printing,
             CancellationToken ct) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var targetDevice = target ?? "kitchen";
             var result = await printing.TestPrintAsync(targetDevice, firmId, branchId, ct);
             return Results.Ok(new { success = result.Success, target = targetDevice, result.TransportUsed, result.Error });
@@ -265,10 +293,16 @@ public static class PrintingEndpoints
 
         // 4.1 Ağ Yazıcısı Bağlantı Kontrolü (Hızlı TCP Soket Ping)
         group.MapGet("/printing/check-connection", async (
+            string firmId,
+            string branchId,
             string ip,
             int? port,
+            HttpContext context,
             CancellationToken ct) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
             var targetPort = port is > 0 ? port.Value : 9100;
             var (reachable, latencyMs, error) = await PrintingService.CheckConnectionAsync(ip, targetPort, ct);
             return Results.Ok(new
@@ -282,13 +316,109 @@ public static class PrintingEndpoints
         });
 
         // 5. Yazıcı Yapılandırması (Ağ IP'lerini dinamik ayarlama)
-        group.MapGet("/printing/config", ([FromServices] PrintingService printing) =>
-            Results.Ok(printing.GetConfig()));
-
-        group.MapPost("/printing/config", (UpdatePrinterConfigRequest request, [FromServices] PrintingService printing) =>
+        group.MapGet("/printing/config", (
+            string firmId,
+            string branchId,
+            HttpContext context,
+            [FromServices] PrintingService printing) =>
         {
+            var (_, denied) = Guard(context, firmId, branchId, allowBridge: true);
+            return denied ?? Results.Ok(printing.GetConfig());
+        });
+
+        group.MapPost("/printing/config", (
+            string firmId,
+            string branchId,
+            UpdatePrinterConfigRequest request,
+            HttpContext context,
+            [FromServices] PrintingService printing) =>
+        {
+            var (_, denied) = Guard(context, firmId, branchId, requireManage: true, allowCashierManage: true);
+            if (denied is not null) return denied;
+
             printing.UpdateConfig(request);
             return Results.Ok(printing.GetConfig());
         });
+
+        // 6. Yerel Yazıcı Köprüsü (Print Bridge) İçin Uzun Ömürlü Şube Yetkili Token Üretme
+        group.MapPost("/printing/bridge-token", (
+            string firmId,
+            string branchId,
+            HttpContext context,
+            [FromServices] AuthTokenService tokenService) =>
+        {
+            var (actor, denied) = Guard(context, firmId, branchId, requireManage: true);
+            if (denied is not null) return denied;
+
+            var bridgeUserId = Guid.TryParse(actor?.UserId, out var parsed) ? parsed : Guid.NewGuid();
+            var (token, expiresAt) = tokenService.GenerateToken(
+                bridgeUserId,
+                $"bridge-{branchId}@hipos.local",
+                $"Print Bridge ({branchId})",
+                "bridge",
+                firmId,
+                branchId,
+                TimeSpan.FromDays(365),
+                [$"{firmId}:{branchId}"],
+                false);
+
+            return Results.Ok(new
+            {
+                token,
+                expiresAt,
+                firmId,
+                branchId,
+                role = "bridge"
+            });
+        });
+    }
+
+    private static (DemoActor? Actor, IResult? Denied) Guard(
+        HttpContext context,
+        string firmId,
+        string branchId,
+        bool requireOperate = false,
+        bool requireManage = false,
+        bool allowCashierManage = false,
+        bool allowBridge = false)
+    {
+        var actor = DemoAccess.Resolve(context);
+        if (actor is null)
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHENTICATED", message = "Oturum gerekli." },
+                statusCode: 401));
+        }
+
+        var canAccessBranch = allowBridge
+            ? actor.CanAccessPrintBridge(firmId, branchId)
+            : actor.CanRead(firmId, branchId);
+
+        if (!canAccessBranch)
+        {
+            return (null, Results.Json(
+                new { code = "UNAUTHORIZED_SCOPE", message = "Bu şube için yazdırma yetkiniz yok." },
+                statusCode: 403));
+        }
+
+        var hasCashier = allowCashierManage &&
+            ((actor.IsRealAuth && string.Equals(actor.Role, "cashier", StringComparison.OrdinalIgnoreCase)) ||
+             (!actor.IsRealAuth && actor.CanOperate));
+
+        if (requireManage && !actor.CanManage && !hasCashier)
+        {
+            return (null, Results.Json(
+                new { code = "FORBIDDEN", message = "Bu yazıcı yapılandırma işlemi için yetkiniz yok." },
+                statusCode: 403));
+        }
+
+        if (requireOperate && !actor.CanManage && !actor.CanOperate)
+        {
+            return (null, Results.Json(
+                new { code = "FORBIDDEN", message = "Bu yazdırma veya hesap kapatma işlemi için yetkiniz yok." },
+                statusCode: 403));
+        }
+
+        return (actor, null);
     }
 }

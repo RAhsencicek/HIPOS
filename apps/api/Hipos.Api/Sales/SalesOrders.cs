@@ -405,7 +405,7 @@ public sealed class SalesOrders(SalesDbContext db, CatalogQueries catalog, Featu
                 if (blocked is not null) return blocked;
             }
             if (!await ExistsAsync(connection, transaction,
-                "SELECT EXISTS (SELECT 1 FROM service.employees WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active AND department='service')",
+                "SELECT EXISTS (SELECT 1 FROM service.employees WHERE id=@id AND firm_id=@firm AND branch_id=@branch AND is_active)",
                 cancellationToken, ("id", check.WaiterId), ("firm", firmId), ("branch", branchId)))
                 return new FeatureFailure("WAITER_NOT_FOUND", 404, "Bu şubede aktif servis personeli bulunamadı.");
         }

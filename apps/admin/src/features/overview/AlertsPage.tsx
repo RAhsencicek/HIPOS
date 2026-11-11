@@ -1,3 +1,4 @@
+import { adminFetch } from "../../shared/authFetch";
 import {
   AlertCircle,
   AlertTriangle,
@@ -177,16 +178,15 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
   /* Load Live Data across multiple subsystems */
   const loadAlertsData = useCallback(async () => {
     setLoading(true);
-    const base = import.meta.env.VITE_API_BASE_URL ?? "";
-    const headers = { "X-Demo-Actor": actor };
+    const reqInit = { firmId: ctx.firmId, demoActor: actor };
 
     try {
       // 1. Critical Stock
       if (branchId) {
         try {
-          const res = await fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/inventory/critical-stock`,
-            { headers }
+          const res = await adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/inventory/critical-stock`,
+            reqInit
           );
           if (res.ok) {
             const data = (await res.json()) as CriticalStockResponse;
@@ -198,9 +198,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
 
         // 2. Tables & Service
         try {
-          const res = await fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/service/tables`,
-            { headers }
+          const res = await adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/service/tables`,
+            reqInit
           );
           if (res.ok) {
             const data = (await res.json()) as TablesResponse;
@@ -212,9 +212,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
 
         // 3. Cash Shifts
         try {
-          const res = await fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/cash/overview`,
-            { headers }
+          const res = await adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/cash/overview`,
+            reqInit
           );
           if (res.ok) {
             const data = (await res.json()) as CashResponse;
@@ -226,9 +226,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
 
         // 4. Kitchen tasks
         try {
-          const res = await fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/kitchen/tasks?status=active`,
-            { headers }
+          const res = await adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/kitchen/tasks?status=active`,
+            reqInit
           );
           if (res.ok) {
             const data = (await res.json()) as KitchenResponse;
@@ -240,9 +240,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
 
         // 5. Backend Persisted Acknowledgments
         try {
-          const res = await fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts`,
-            { headers }
+          const res = await adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts`,
+            reqInit
           );
           if (res.ok) {
             const data = (await res.json()) as OverviewAlertsApiResponse;
@@ -420,8 +420,6 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
     const alert = allAlerts.find((a) => a.id === id);
     const next = new Set(dismissedIds);
     const isCurrentlyDismissed = next.has(id);
-    const base = import.meta.env.VITE_API_BASE_URL ?? "";
-    const headers = { "Content-Type": "application/json", "X-Demo-Actor": actor };
 
     if (isCurrentlyDismissed) {
       next.delete(id);
@@ -432,9 +430,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
         return m;
       });
       if (branchId) {
-        void fetch(
-          `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/reset`,
-          { method: "POST", headers, body: JSON.stringify({ alertKey: id }) }
+        void adminFetch(
+          `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/reset`,
+          { method: "POST", firmId: ctx.firmId, demoActor: actor, body: JSON.stringify({ alertKey: id }) }
         );
       }
     } else {
@@ -450,11 +448,12 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
         };
         setAckMap((prev) => new Map(prev).set(id, newRec));
         if (branchId) {
-          void fetch(
-            `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/acknowledge`,
+          void adminFetch(
+            `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/acknowledge`,
             {
               method: "POST",
-              headers,
+              firmId: ctx.firmId,
+              demoActor: actor,
               body: JSON.stringify({
                 alertKey: id,
                 category: alert.category,
@@ -483,13 +482,12 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
     });
     setAckMap(newMap);
     if (branchId && activeAlerts.length > 0) {
-      const base = import.meta.env.VITE_API_BASE_URL ?? "";
-      const headers = { "Content-Type": "application/json", "X-Demo-Actor": actor };
-      void fetch(
-        `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/acknowledge`,
+      void adminFetch(
+        `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/acknowledge`,
         {
           method: "POST",
-          headers,
+          firmId: ctx.firmId,
+          demoActor: actor,
           body: JSON.stringify({
             items: activeAlerts.map((a) => ({
               alertKey: a.id,
@@ -506,11 +504,9 @@ export function AlertsPage({ ctx }: { ctx: ViewContext }) {
     saveDismissed(new Set());
     setAckMap(new Map());
     if (branchId) {
-      const base = import.meta.env.VITE_API_BASE_URL ?? "";
-      const headers = { "Content-Type": "application/json", "X-Demo-Actor": actor };
-      void fetch(
-        `${base}/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/reset`,
-        { method: "POST", headers, body: JSON.stringify({ all: true }) }
+      void adminFetch(
+        `/api/v1/firms/${encodeURIComponent(ctx.firmId)}/branches/${encodeURIComponent(branchId)}/overview/alerts/reset`,
+        { method: "POST", firmId: ctx.firmId, demoActor: actor, body: JSON.stringify({ all: true }) }
       );
     }
   };

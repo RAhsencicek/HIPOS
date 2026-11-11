@@ -6,6 +6,7 @@ import type {
   SetFeatureDesiredState,
 } from "./contracts";
 import { FeatureProviderError } from "./contracts";
+import { buildAuthHeaders, clearAuthSession, getAuthToken } from "../../shared/authFetch";
 
 type ApiProblem = { code?: string; detail?: string };
 
@@ -13,34 +14,27 @@ type ApiProblem = { code?: string; detail?: string };
 export class HttpFeatureProvider implements FeatureProvider {
   constructor(private readonly baseUrl = import.meta.env.VITE_API_BASE_URL ?? "") {}
 
-  private actor(scope?: FeatureScope): string {
-    return scope?.firmId === "11111111-1111-4111-8111-111111111111"
-      ? "manager-single"
-      : "manager-multi";
-    }
-    private async request<T>(
-        path: string,
-        scope?: FeatureScope,
-        body?: unknown,
-    ): Promise<T> {
-        let response: Response;
-        const token = typeof localStorage !== "undefined" ? localStorage.getItem("hipos_token") : null;
-        try {
-            response = await fetch(`${this.baseUrl}${path}`, {
-                method: body ? "PUT" : "GET",
-                headers: {
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                    "X-Demo-Actor": this.actor(scope),
-                    ...(body ? { "Content-Type": "application/json" } : {}),
-                },
-                ...(body ? { body: JSON.stringify(body) } : {}),
-            });
+  private async request<T>(
+    path: string,
+    scope?: FeatureScope,
+    body?: unknown,
+  ): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: body ? "PUT" : "GET",
+        headers: buildAuthHeaders({ firmId: scope?.firmId, hasJsonBody: Boolean(body) }),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
     } catch {
       throw new FeatureProviderError(
         "LOAD_FAILED",
         503,
         "Yerel .NET prototipine bağlanılamadı.",
       );
+    }
+    if (response.status === 401 && getAuthToken()) {
+      clearAuthSession();
     }
     if (!response.ok) {
       const problem = (await response.json().catch(() => ({}))) as ApiProblem;

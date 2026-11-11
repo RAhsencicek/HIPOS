@@ -23,9 +23,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
 builder.Services.AddSingleton<IRestaurantEventHub, RestaurantEventHub>();
+builder.Services.AddSingleton<AuthTokenService>();
 
-// TODO: X-Demo-Actor geçici kimlik çözümüdür — ileride gerçek auth (JWT vb.) eklenecek.
-// Üretim kilidi kaldırıldı: artık Production ortamında da çalışır.
+// Production ortamında X-Demo-Actor devre dışıdır; yalnızca doğrulanmış JWT Bearer / ?token= kabul edilir.
 
 var storage = builder.Configuration["HIPOS_FEATURE_STORAGE"] ?? "memory";
 if (storage == "postgres")
@@ -52,7 +52,6 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "kitchen")));
     builder.Services.AddDbContext<AuthDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "auth")));
-    builder.Services.AddSingleton<AuthTokenService>();
     builder.Services.AddDbContext<OverviewDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "overview")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
@@ -68,6 +67,7 @@ if (storage == "postgres")
     builder.Services.AddScoped<PaymentSimulator>();
     builder.Services.AddSingleton<FeatureNewWorkGate>();
     builder.Services.AddScoped<CashProvisioningService>();
+    builder.Services.AddScoped<TenantProvisioningService>();
     var printerConfig = new PrinterConfig();
     builder.Configuration.GetSection("Printers").Bind(printerConfig);
     builder.Services.AddSingleton(printerConfig);
@@ -84,10 +84,14 @@ builder.Services.AddCors(options => options.AddPolicy("LocalPreview", policy =>
 {
     // Yerel geliştirme ve LAN terminalleri (tablet, fiziksel kasa terminali, KDS vb.)
     policy.SetIsOriginAllowed(_ => true)
-        .WithHeaders("Content-Type", "X-Demo-Actor", "Authorization")
+        .WithHeaders("Content-Type", "X-Demo-Actor", "Authorization", "X-Platform-Admin-Key")
         .WithMethods("GET", "PUT", "POST", "DELETE");
 }));
 var app = builder.Build();
+DemoAccess.Configure(
+    app.Services.GetRequiredService<AuthTokenService>(),
+    app.Environment.IsDevelopment() &&
+    !string.Equals(app.Configuration["HIPOS_ALLOW_DEMO_ACTOR"], "false", StringComparison.OrdinalIgnoreCase));
 var catalogReady = false;
 var salesReady = false;
 var cariReady = false;
@@ -176,7 +180,7 @@ if (storage == "postgres") app.MapCatalogOptionGroupEndpoints(catalogReady);
 if (storage == "postgres") app.MapSalesCheckEndpoints(salesReady, serviceReady, app.Environment.IsDevelopment(), authReady);
 if (storage == "postgres") app.MapKitchenEndpoints(kitchenReady);
 if (storage == "postgres") app.MapPrintingEndpoints();
-if (storage == "postgres") app.MapAuthEndpoints(authReady);
+if (storage == "postgres") app.MapAuthEndpoints(authReady, app.Environment.IsDevelopment());
 if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
 if (storage == "postgres") app.MapReportsEndpoints(salesReady);
 if (storage == "postgres") app.MapRealtimeEndpoints();
