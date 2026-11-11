@@ -2,12 +2,12 @@
 
 > **Doküman Durumu:** Kesinleşmiş Modül Devir ve Uygulama Şartnamesi · Sürüm: v3.1
 > **Kapsam:** KDS Ekranı, Durum Makinesi, Gecikme Alarmları, İstasyon Filtreleme ve ESC/POS Termal Fiş Basımı
-> **Modül Durumu:** Kalıcı KDS çekirdeği çalışıyor · Bildirim, satış iptali bağlantısı, gerçek yetki, offline çalışma ve yazıcı entegrasyonu eksik
-> **PostgreSQL Şeması:** `kitchen` (`tasks`, `task_audit`)
-> **Yönetim Paneli / POS Ekranı:** Kısmi (`apps/pos` `/kitchen` aktif, ikiye bölünmüş görünüm ve servise hazır)
-> **API:** Var (görev listesi ve sürüm kontrollü durum güncelleme)
-> **Test:** PostgreSQL kabul paketinde KDS görev üretimi, istasyon, durum, idempotency, sürüm ve audit senaryoları var
-> **Üretime Hazır mı?:** Hayır (Garson bildirimi, satış iptali bağlantısı, gerçek auth, offline/sync ve termal yazıcı servisi eksiktir)
+> **Modül Durumu:** Kalıcı KDS çekirdeği, Print Bridge v2 (TCP/USB/Spool) ve Garson `HAZIR` + Satış İptali bağlantısı çalışıyor · Fiziki yazıcılarla saha testi ve çok şubeli dinamik istasyon editörü sıradadır
+> **PostgreSQL Şeması:** `kitchen` (`tasks`, `task_audit`, `stations`, `station_categories`) ve `printing` (`printer_profiles`)
+> **Yönetim Paneli / POS Ekranı:** Aktif (`apps/pos` `/kitchen` ikiye bölünmüş görünüm, servise hazır, iptal geçmişi, Print Bridge/sync durum rozeti)
+> **API:** Var (görev listesi, sürüm kontrollü durum güncelleme, SSE `kitchen.updated`, `PrintingService` & `SyncService`)
+> **Test:** `postgres.test.mjs`, `test_faz10_security_multitenant.mjs`, `test_faz11_multiprinter_bridge.mjs`, `test_faz12_13_hardware_sync.mjs`
+> **Üretime Hazır mı?:** Yazılım & simülasyon doğrulandı (`hipos.hayatisleri.com.tr`); şubedeki fiziki termal yazıcılarla saha kabulü yapılacaktır
 <!-- 23 Ekim 2026: Üst durum özetindeki eksik bilgi mevcut KDS uygulamasına göre eklendi; üretim engelleri silinmeden korundu. -->
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu için:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
@@ -36,23 +36,17 @@
 - İptalin mutfak tarafındaki veri temeli hazırlanmıştır: görev `cancelled` durumunu, iptal zamanı, gerekçe ve aktörü saklar; KDS iptal edilen görevi kırmızı ve üzeri çizili geçmişte gösterebilir. İptal komutunun sahibi satış/adisyon modülüdür. Satış kalemi iptal endpoint'i ve müdür onayı henüz bulunmadığı için mutfak doğrudan iptal başlatmaz; gerçek bağlantı ortak entegrasyonda yapılacaktır.
 
 ### 📌 Hızlı Gerçeklik Özeti
-* **Bugün Kodda Gerçekten Çalışanlar (Mevcut Durum):**
-  - `/kitchen` ekranı (`OperationalApps.tsx`) 3 saniyelik polling ile kalıcı `kitchen.tasks` görevlerini listeler.
+* **Bugün Kodda Gerçekten Çalışanlar (Mevcut Durum — Faz 10–13):**
+  - `/kitchen` ekranı (`OperationalApps.tsx`) SSE (`GET /events/stream`) + 3 saniyelik güvenli fallback ile `kitchen.tasks` görevlerini anlık listeler; PIN girişi ve `auth` şeması aktiftir.
   - Garsonun girdiği her sipariş kalemi ayrı görev olur; aynı adisyona sonradan gelen sipariş kendi süresini başlatır.
-  - Dokunmatik `Bekliyor → Hazırlanıyor → Hazır → Servis edildi` geçişleri, sürüm kontrolü ve audit kaydı çalışır.
+  - Dokunmatik `Bekliyor → Hazırlanıyor → Hazır → Servis edildi` geçişleri, sürüm kontrolü ve audit kaydı çalışır; görev `HAZIR` olunca `kitchen.updated` SSE olayı Garson tabletinde anlık toast bildirimi tetikler.
   - İkiye bölünmüş ekran görünümü (sol: Yiyecek, sağ: İçecek), Yiyecek (`food`), İçecek (`drink`) ve Atanmamış filtreleri çalışır; gecikme süresi ve renkleri gösterilir.
-  - İptal bilgisini saklayacak alanlar ve iptal geçmişi görünümü vardır; satış/adisyon iptal komutu henüz bağlı değildir.
-  - İsteğe bağlı sipariş notu satıştan mutfak görevine taşınır ve mutfak fişinde gösterilir; mevcut garson ekranında not giriş alanı henüz yoktur.
-  <!-- 23 Ekim 2026: Salt-okunur prototip ifadesindeki eksik bilgi, tamamlanan kalıcı KDS akışıyla güncellendi. -->
-* **Henüz Kodlanmamış / Hedeflenen Backlog (Eksikler):**
-  - Yönetilebilir istasyon/kategori ayar ekranı (ilk sabit demo eşleştirmesi ve KDS filtreleri çalışıyor)
-  - Garsona “sipariş hazır” anlık bildirimi ve teslim alındı bilgisi
-  - Satış/adisyon kalem iptali, iptal gerekçesi ve gerektiğinde müdür PIN onayı bağlantısı
-  - Demo aktör yerine gerçek mutfak kullanıcısı/PIN ve rol yetkilendirmesi
-  - Yerel ağ kesintisi, cihaz kuyruğu ve merkezi offline/sync davranışı
-  - ESC/POS TCP 9100 ağ yazıcısı yerel servisi ve otomatik bilet dökümü
-  - Yazıcı bağlantı ve kuyruk yönetimi
-  <!-- 23 Ekim 2026: Tamamlanan API, buton ve sayaç maddeleri mevcut duruma taşındı; kalan sorunlar korunup eksik bildirim/auth/offline maddeleri eklendi. -->
+  - Satış kalemi iptali (`adjustments` `void`) ve tam adisyon iptali (`POST /sales/checks/{id}/cancel`) bağlı `kitchen.tasks` kayıtlarını otomatik `cancelled` yapar ve Mutfak/Bar yazıcılarına ESC/POS `IPTAL BILETI` gönderir.
+  - `PrintingService` + Print Bridge v2 (`scripts/hipos-print-bridge.mjs`), şube bazlı TCP 9100 / USB termal fiş basımı, Yiyecek/Bar ayrıştırması, kapalı yazıcıda disk retry spool ve `--dry-run` önizleme destekler; `/kitchen` başlığında hibrit sync rozeti görünür.
+* **Henüz Kodlanmamış / Sırada (Backlog):**
+  - Admin panelinden özel istasyon/kategori eşleştirme CRUD ekranı (2 sabit istasyon: Yiyecek `food` + İçecek `drink` çalışır)
+  - Garsonun `HAZIR` bildirimini "Teslim alındı" butonuyla susturma/izleme kaydı (servis edildi aksiyonu mevcuttur)
+  - Sahadaki fiziksel Mutfak/Bar/Kasa termal yazıcılarıyla canlı baskı kabulü (yalnızca simülatör ve `--dry-run` doğrulandı)
 
 ---
 

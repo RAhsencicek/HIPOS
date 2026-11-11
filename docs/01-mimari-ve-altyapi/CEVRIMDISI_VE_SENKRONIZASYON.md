@@ -11,22 +11,19 @@
 
 ---
 
-> [!WARNING]
-> ### ⚠️ Çevrimdışı ve Senkronizasyon Uygulama Durumu
-> * **LAN hedefi:** planlandı
-> * **Yerel Mini PC:** uygulanmadı
-> * **sync.outbox:** yok
-> * **Merkezi eşitleme:** yok
-> * **Çakışma çözümü:** yok
+> [!NOTE]
+> ### ✅ Çevrimdışı ve Senkronizasyon Uygulama Durumu (Faz 13 — 11 Kasım 2026)
+> * **LAN Hub Dağıtımı:** [`compose.lan.yaml`](../../compose.lan.yaml) ile yerel Mini PC yığını (`db`, `migrate`, `api`, `admin`, `pos`) tanımlandı
+> * **`sync` Şeması ([`SyncDbContext.cs`](../../apps/api/Hipos.Api/Sync/SyncDbContext.cs)):** `sync.outbox`, `sync.inbound_events` ve `sync.branch_sync_status` tabloları uygulandı (`20261111193513_InitSync`)
+> * **Merkezi Eşitleme:** `SyncBackgroundWorker`, `SyncService`, `GET /sync/status`, `GET /sync/outbox`, `POST /sync/flush`, `POST /api/v1/sync/batch` aktif
+> * **Çakışma Koruması:** Aynı `eventId` farklı `payloadHash` ile geldiğinde `IDEMPOTENCY_CONFLICT`; operatör yeniden denemesi için `POST /sync/outbox/{eventId}/retry`
+> * **UI Durum Rozeti:** `OperationalApps.tsx` üst çubuğunda `Bulut Bağlı`, `Yerel Ağda · Bulut Bekliyor`, `Eşitleme Durdu`, `Bağlantı Yok` rozeti canlı çalışıyor
 
 ---
 
-## 1. Problem Tanımı ve Mevcut Kod Durumu
+## 1. Uygulanan Mimari Özeti (`SyncDbContext` & Hibrit Topoloji)
 
-Bir restoranın internet bağlantısı koptuğunda operasyonun **1 saniye bile durmaması** gerekir. Garson masadan sipariş almaya, mutfak bilet basmaya, kasa hesap tahsil etmeye devam edebilmelidir.
-* Şu anki HIPOS kodu tek bir yerel veritabanına doğrudan bağlanmaktadır.
-* İnternet kesildiğinde yerel ağda (LAN) işlem kuyruğu biriktirecek bir **Outbox tablosu** yoktur.
-* İnternet geri geldiğinde verileri buluta aktaracak bir **senkronizasyon servisi (Sync Worker)** ve **çakışma yönetimi (Conflict Resolution)** kodlanmamıştır.
+Bir restoranın internet bağlantısı koptuğunda operasyonun durmaması için şube içi LAN Hub (`compose.lan.yaml`, `HIPOS_CLOUD_SYNC_URL` tanımlı) satış, mutfak ve kasa kayıtlarını kendi yerel PostgreSQL veritabanına yazar ve her mutasyon sonunda [`SyncService.TryEnqueueAsync`](../../apps/api/Hipos.Api/Sync/SyncService.cs) ile olayı `sync.outbox` tablosuna ekler. İnternet geri geldiğinde [`SyncBackgroundWorker`](../../apps/api/Hipos.Api/Sync/SyncBackgroundWorker.cs) (veya UI rozetine tıklayarak çağrılan `POST /sync/flush`) olayları `POST /api/v1/sync/batch` üzerinden merkezi bulut sunucusundaki `sync.inbound_events` tablosuna aktarır. *(Detaylı gereksinim ve kabul senaryoları için [Çevrimdışı Çalışma Sözleşmesi](CEVRIMDISI_CALISMA_VE_SENKRONIZASYON.md) §11'e bakın.)*
 
 ---
 

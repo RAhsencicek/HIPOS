@@ -1,6 +1,9 @@
 using System.Data.Common;
 using Hipos.Api.Features;
+using Hipos.Api.Printing;
 using Hipos.Api.Sales;
+using Hipos.Api.Sync;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
@@ -532,7 +535,7 @@ public static class CashEndpoints
         });
 
         group.MapPost("/shifts", async (string firmId, string branchId, OpenCashShift command, HttpContext context,
-            CashDbContext db, FeatureNewWorkGate gate) =>
+            CashDbContext db, FeatureNewWorkGate gate, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
@@ -579,12 +582,30 @@ public static class CashEndpoints
             {
                 return Fail(context, "SHIFT_ALREADY_OPEN", 409, "Bu kasada aynı anda yalnız bir vardiya açılabilir.");
             }
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "cash_shift",
+                aggregateId: shift.Id.ToString(),
+                eventType: "cash.shift.opened",
+                payload: new
+                {
+                    shiftId = shift.Id,
+                    registerId = shift.RegisterId,
+                    openingCashMinor = shift.OpeningCashMinor,
+                    note = shift.OpeningNote,
+                    openedBy = shift.OpenedBy,
+                    openedAt = shift.OpenedAt,
+                    version = shift.Version,
+                },
+                idempotencyKey: $"cash.shift.opened:{shift.Id}",
+                cancellationToken: context.RequestAborted);
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/shifts/{shift.Id}",
                 new { source = "postgres", simulated = false, shift = ToView(shift) });
         });
 
         group.MapPost("/shifts/{shiftId:guid}/movements", async (string firmId, string branchId, Guid shiftId,
-            AddCashMovement command, HttpContext context, CashDbContext db, FeatureNewWorkGate gate) =>
+            AddCashMovement command, HttpContext context, CashDbContext db, FeatureNewWorkGate gate, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -657,6 +678,26 @@ public static class CashEndpoints
             {
                 return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "İstek kimliği başka bir kasa işleminde kullanılmış.");
             }
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "cash_shift",
+                aggregateId: shift.Id.ToString(),
+                eventType: "cash.movement.added",
+                payload: new
+                {
+                    movementId = row.Id,
+                    shiftId = row.ShiftId,
+                    registerId = row.RegisterId,
+                    kind = row.Kind,
+                    category = row.Category,
+                    amountMinor = row.AmountMinor,
+                    description = row.Description,
+                    actor = row.Actor,
+                    createdAt = row.CreatedAt,
+                },
+                idempotencyKey: $"cash.movement.added:{row.Id}",
+                cancellationToken: context.RequestAborted);
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/cash/movements/{row.Id}",
                 new { source = "postgres", simulated = false, movement = ToView(row) });
         });
@@ -752,7 +793,7 @@ public static class CashEndpoints
         });
 
         group.MapPost("/shifts/{shiftId:guid}/close", async (string firmId, string branchId, Guid shiftId,
-            CloseCashShift command, HttpContext context, CashDbContext db, SalesDbContext salesDb) =>
+            CloseCashShift command, HttpContext context, CashDbContext db, SalesDbContext salesDb, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true, allowDemoOperatorShifts, allowCashierOperator: true);
             if (denied is not null) return denied;
@@ -864,6 +905,28 @@ public static class CashEndpoints
             {
                 return Fail(context, "IDEMPOTENCY_CONFLICT", 409, "Kapanış istek kimliği başka işlemde kullanılmış.");
             }
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "cash_shift",
+                aggregateId: shift.Id.ToString(),
+                eventType: "cash.shift.closed",
+                payload: new
+                {
+                    shiftId = shift.Id,
+                    registerId = shift.RegisterId,
+                    expectedCashMinor = shift.ExpectedCashMinor,
+                    countedCashMinor = shift.CountedCashMinor,
+                    differenceMinor = shift.DifferenceMinor,
+                    retainedFloatMinor = shift.RetainedFloatMinor,
+                    droppedRevenueMinor = shift.DroppedRevenueMinor,
+                    closeNote = shift.CloseNote,
+                    closedBy = shift.ClosedBy,
+                    closedAt = shift.ClosedAt,
+                    version = shift.Version,
+                },
+                idempotencyKey: $"cash.shift.closed:{command.RequestId}",
+                cancellationToken: context.RequestAborted);
             return Results.Ok(new { source = "postgres", simulated = false,
                 shift = ToView(shift, countedDenominations.Select(item => new CashDenominationView(item.DenominationMinor,
                     item.Quantity, (long)item.DenominationMinor * item.Quantity)).ToArray()) });
@@ -886,6 +949,29 @@ public static class CashEndpoints
 
             var report = BuildZReport(shift);
             return Results.Ok(new { source = "postgres", simulated = false, report });
+        });
+
+        group.MapPost("/shifts/{shiftId:guid}/print-z-report", async (string firmId, string branchId, Guid shiftId,
+            HttpContext context, [FromServices] PrintingService printing, CancellationToken ct) =>
+        {
+            var denied = Guard(context, firmId, branchId, ready, true);
+            if (denied is not null) return denied;
+
+            var result = await printing.PrintZReportAsync(firmId, branchId, shiftId, ct);
+            if (!result.Success)
+            {
+                return string.Equals(result.TransportUsed, "None", StringComparison.OrdinalIgnoreCase)
+                    ? Fail(context, "SHIFT_NOT_FOUND", 404, result.Error ?? "Vardiya bulunamadı.")
+                    : Results.BadRequest(new { success = false, result.Target, result.TransportUsed, result.Error });
+            }
+
+            return Results.Ok(new
+            {
+                success = true,
+                shiftId,
+                target = result.Target,
+                transportUsed = result.TransportUsed,
+            });
         });
     }
 
@@ -989,7 +1075,7 @@ public static class CashEndpoints
             row.OpenedAt, row.ClosedBy, row.ClosedAt, row.CloseNote, row.Version, row.OpeningNote, denominations,
             row.RetainedFloatMinor, row.DroppedRevenueMinor);
 
-    private static ZReportView BuildZReport(CashShiftRow shift)
+    internal static ZReportView BuildZReport(CashShiftRow shift)
     {
         var activeMovements = shift.Movements.Where(m => m.CorrectionType != "reversal").ToList();
         var posSales = activeMovements.Where(m => m.Kind == "pos_sale").ToList();

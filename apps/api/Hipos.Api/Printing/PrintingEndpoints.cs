@@ -320,6 +320,23 @@ public static class PrintingEndpoints
             });
         });
 
+        // 4.2 Manuel Para Çekmecesi Açma Tetikleyicisi (RJ11 Kick Pulse: ESC p 0 25 250)
+        group.MapPost("/printing/open-drawer", async (
+            string firmId,
+            string branchId,
+            HttpContext context,
+            [FromServices] PrintingService printing,
+            CancellationToken ct) =>
+        {
+            var (actor, denied) = Guard(context, firmId, branchId, requireOperate: true);
+            if (denied is not null) return denied;
+
+            var result = await printing.OpenCashDrawerAsync(firmId, branchId, actor?.Name ?? "operator", ct);
+            return result.Success
+                ? Results.Ok(new { success = true, target = result.Target, transportUsed = result.TransportUsed })
+                : Results.BadRequest(new { success = false, result.Target, result.TransportUsed, result.Error });
+        });
+
         // 5. Şubeye Özel Yazıcı Yapılandırması (Ağ IP + USB + Bar İstasyonu + Teslimat Modu)
         group.MapGet("/printing/config", async (
             string firmId,

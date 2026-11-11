@@ -137,6 +137,7 @@ export function PrinterSettingsModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testPrinting, setTestPrinting] = useState<string | null>(null);
+  const [drawerOpening, setDrawerOpening] = useState(false);
   const [ipTestingTarget, setIpTestingTarget] = useState<string | null>(null);
   const [ipTestResults, setIpTestResults] = useState<
     Record<string, { reachable: boolean; latencyMs: number; error?: string; bridgeConnected?: boolean }>
@@ -284,6 +285,39 @@ export function PrinterSettingsModal({
       });
     } finally {
       setTestPrinting(null);
+    }
+  }
+
+  async function openDrawer() {
+    if (drawerOpening) return;
+    setDrawerOpening(true);
+    setFeedback(null);
+    try {
+      const res = await posFetch(
+        `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/printing/open-drawer`,
+        { appKind, demoActor: actor, method: "POST", body: "{}" },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        transportUsed?: string;
+        error?: string;
+        message?: string;
+        detail?: string;
+      };
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error ?? data.message ?? data.detail ?? "Çekmece açma sinyali gönderilemedi.");
+      }
+      setFeedback({
+        kind: "success",
+        text: `💵 Nakit çekmecesi açma sinyali gönderildi (${data.transportUsed ?? "OK"}).`,
+      });
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Çekmece açma sinyali gönderilemedi.",
+      });
+    } finally {
+      setDrawerOpening(false);
     }
   }
 
@@ -781,6 +815,15 @@ export function PrinterSettingsModal({
                   >
                     {testPrinting === "cashier" ? "Gönderiliyor…" : "🧪 Kasa Test Fişi"}
                   </button>
+                  <button
+                    type="button"
+                    className="waiter-quiet-action"
+                    style={{ fontSize: "12px", background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}
+                    disabled={drawerOpening}
+                    onClick={() => void openDrawer()}
+                  >
+                    {drawerOpening ? "Açılıyor…" : "💵 Çekmece Aç"}
+                  </button>
                 </div>
                 {renderTargetResult("cashier")}
               </>
@@ -792,15 +835,26 @@ export function PrinterSettingsModal({
                   (val) => setForm((f) => ({ ...f, cashierSystemPrinterName: val })),
                   "Örn: KodPOS_Kasa",
                 )}
-                <button
-                  type="button"
-                  className="waiter-quiet-action"
-                  style={{ marginTop: "8px", fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }}
-                  disabled={Boolean(testPrinting)}
-                  onClick={() => void runTestPrint("cashier")}
-                >
-                  {testPrinting === "cashier" ? "Gönderiliyor…" : "🧪 Kasa Test Fişi (USB)"}
-                </button>
+                <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="waiter-quiet-action"
+                    style={{ fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a" }}
+                    disabled={Boolean(testPrinting)}
+                    onClick={() => void runTestPrint("cashier")}
+                  >
+                    {testPrinting === "cashier" ? "Gönderiliyor…" : "🧪 Kasa Test Fişi (USB)"}
+                  </button>
+                  <button
+                    type="button"
+                    className="waiter-quiet-action"
+                    style={{ fontSize: "12px", background: "#ecfdf5", borderColor: "#a7f3d0", color: "#065f46" }}
+                    disabled={drawerOpening}
+                    onClick={() => void openDrawer()}
+                  >
+                    {drawerOpening ? "Açılıyor…" : "💵 Çekmece Aç"}
+                  </button>
+                </div>
               </>
             )}
           </section>

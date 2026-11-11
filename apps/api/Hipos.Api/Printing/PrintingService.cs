@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text.Json;
 using Hipos.Api.Auth;
+using Hipos.Api.Cash;
 using Hipos.Api.Catalog;
 using Hipos.Api.Features;
 using Hipos.Api.Kitchen;
@@ -24,7 +25,8 @@ public sealed class PrintingService(
     KitchenDbContext? kitchenDb = null,
     CatalogDbContext? catalogDb = null,
     AuthDbContext? authDb = null,
-    FeatureRuntimeCapabilities? runtime = null)
+    FeatureRuntimeCapabilities? runtime = null,
+    CashDbContext? cashDb = null)
 {
     private readonly PrinterConfig _config = fallbackConfig;
     private static readonly string SettingsFilePath = Path.Combine(AppContext.BaseDirectory, "printer_settings.json");
@@ -324,7 +326,27 @@ public sealed class PrintingService(
         var lines = orders.SelectMany(o => o.Lines).ToList();
         var (tableName, waiterName) = await ResolveCheckTableAndWaiterAsync(firmId, branchId, check, ct, fallbackWaiter: "Kasiyer", quickTableLabel: "Paket / Gel-Al");
 
-        var consolidated = lines
+        var adjustments = await salesDb.CheckAdjustments
+            .AsNoTracking()
+            .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+            .ToListAsync(ct);
+
+        var voidQtyByLineId = adjustments
+            .Where(a => a.Action == "void" && a.OrderLineId != null)
+            .GroupBy(a => a.OrderLineId!.Value)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        var activeLines = new List<(string ProductName, int Quantity, long UnitPriceMinor, long LineTotalMinor)>();
+        foreach (var l in lines)
+        {
+            var voided = voidQtyByLineId.GetValueOrDefault(l.Id, 0);
+            var remainingQty = Math.Max(0, l.Quantity - voided);
+            if (remainingQty <= 0) continue;
+            var ratioTotal = remainingQty == l.Quantity ? l.LineTotalMinor : checked(remainingQty * l.UnitPriceMinor);
+            activeLines.Add((l.ProductName, remainingQty, l.UnitPriceMinor, ratioTotal));
+        }
+
+        var consolidated = activeLines
             .GroupBy(l => l.ProductName)
             .Select(g => new CashierReceiptItem(
                 ProductName: g.Key,
@@ -333,15 +355,12 @@ public sealed class PrintingService(
                 LineTotalMinor: g.Sum(x => x.LineTotalMinor)))
             .ToList();
 
-        long grossTotal = consolidated.Sum(x => x.LineTotalMinor);
-
-        var adjustments = await salesDb.CheckAdjustments
-            .AsNoTracking()
-            .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
-            .ToListAsync(ct);
-
+        long activeGrossTotal = consolidated.Sum(x => x.LineTotalMinor);
         long discountMinor = adjustments.Where(a => a.Action is "discount" or "comp").Sum(a => a.AmountMinor);
-        long netTotal = Math.Max(0, grossTotal - discountMinor);
+        long grossFromOrders = orders.Sum(o => o.TotalMinor);
+        long totalAdjustmentMinor = adjustments.Sum(a => a.AmountMinor);
+        long netTotal = Math.Max(0, grossFromOrders - totalAdjustmentMinor);
+        long grossTotal = Math.Max(activeGrossTotal, netTotal + discountMinor);
 
         var successfulPayments = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").ToList();
         long paidMinor = successfulPayments.Sum(p => p.AmountMinor);
@@ -418,6 +437,176 @@ public sealed class PrintingService(
                 paymentMethod
             },
             ct: ct);
+    }
+
+    public async Task<PrintResult> PrintZReportAsync(
+        string firmId,
+        string branchId,
+        Guid shiftId,
+        CancellationToken ct = default)
+    {
+        var cfg = await GetConfigAsync(firmId, branchId, ct);
+        if (cashDb is null || !(runtime?.CashReady ?? false))
+        {
+            return new PrintResult(false, cfg.CashierPrinter.Name, "None", "Kasa veritabanı hazır değil.");
+        }
+
+        var shift = await cashDb.Shifts
+            .AsNoTracking()
+            .Include(s => s.Register)
+            .Include(s => s.Denominations)
+            .Include(s => s.Movements)
+            .SingleOrDefaultAsync(s => s.FirmId == firmId && s.BranchId == branchId && s.Id == shiftId, ct);
+
+        if (shift is null)
+        {
+            return new PrintResult(false, cfg.CashierPrinter.Name, "None", "Vardiya bulunamadı.");
+        }
+
+        var report = CashEndpoints.BuildZReport(shift);
+        var (firmTitle, branchTitle) = await ResolveFirmAndBranchTitlesAsync(firmId, branchId, ct);
+        var bytes = EscPosBuilder.BuildZReportReceipt(firmTitle, branchTitle, report);
+
+        return await DeliverPrintJobAsync(
+            firmId: firmId,
+            branchId: branchId,
+            deliveryMode: cfg.DeliveryMode,
+            targetConfig: cfg.CashierPrinter,
+            targetKey: "cashier",
+            jobType: "z_report",
+            escPosBytes: bytes,
+            payloadMetadata: new
+            {
+                shiftId,
+                reportType = report.ReportType,
+                reportNumber = report.ReportNumber,
+                registerName = report.RegisterName,
+            },
+            ct: ct);
+    }
+
+    public async Task<PrintResult> OpenCashDrawerAsync(
+        string firmId,
+        string branchId,
+        string actor,
+        CancellationToken ct = default)
+    {
+        var cfg = await GetConfigAsync(firmId, branchId, ct);
+        var pulseBytes = EscPosBuilder.BuildCashDrawerKick();
+
+        return await DeliverPrintJobAsync(
+            firmId: firmId,
+            branchId: branchId,
+            deliveryMode: cfg.DeliveryMode,
+            targetConfig: cfg.CashierPrinter,
+            targetKey: "cashier",
+            jobType: "open_drawer",
+            escPosBytes: pulseBytes,
+            payloadMetadata: new
+            {
+                actor,
+                reason = "manual_drawer_kick",
+            },
+            ct: ct);
+    }
+
+    public async Task<PrintResult> PrintKitchenVoidItemsAsync(
+        string firmId,
+        string branchId,
+        Guid checkId,
+        string actor,
+        string reason,
+        IReadOnlyList<(Guid ProductId, string ProductName, int Quantity)> voidItems,
+        CancellationToken ct = default)
+    {
+        var cfg = await GetConfigAsync(firmId, branchId, ct);
+        if (voidItems.Count == 0)
+        {
+            return new PrintResult(false, cfg.KitchenPrinter.Name, "None", "İptal edilen ürün bulunamadı.");
+        }
+
+        var check = await salesDb.Checks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == checkId && row.FirmId == firmId && row.BranchId == branchId, ct);
+
+        string tableName = "Masa";
+        if (check is not null)
+        {
+            (tableName, _) = await ResolveCheckTableAndWaiterAsync(firmId, branchId, check, ct, fallbackWaiter: actor);
+        }
+
+        var (_, branchTitle) = await ResolveFirmAndBranchTitlesAsync(firmId, branchId, ct);
+        bool splitBar = cfg.AutoSplitKitchenByStation
+            && cfg.BarPrinter.Enabled
+            && !string.Equals(cfg.BarPrinter.Type, "Disabled", StringComparison.OrdinalIgnoreCase);
+
+        Dictionary<Guid, string>? productStations = null;
+        if (splitBar)
+        {
+            productStations = await ResolveLineStationsAsync(firmId, branchId, voidItems.Select(i => i.ProductId), ct);
+        }
+
+        var kitchenList = new List<(string ProductName, int Quantity)>();
+        var barList = new List<(string ProductName, int Quantity)>();
+
+        foreach (var item in voidItems)
+        {
+            if (splitBar && productStations is not null &&
+                productStations.TryGetValue(item.ProductId, out var stationCode) &&
+                string.Equals(stationCode, "drink", StringComparison.OrdinalIgnoreCase))
+            {
+                barList.Add((item.ProductName, item.Quantity));
+            }
+            else
+            {
+                kitchenList.Add((item.ProductName, item.Quantity));
+            }
+        }
+
+        var results = new List<PrintResult>();
+        var now = DateTimeOffset.UtcNow;
+        var checkRef = checkId.ToString()[..8].ToUpperInvariant();
+
+        if (kitchenList.Count > 0)
+        {
+            var kitchenBytes = EscPosBuilder.BuildKitchenVoidTicket(
+                tableName, actor, checkRef, now, kitchenList, reason, "HIPOS MUTFAK", branchTitle);
+            results.Add(await DeliverPrintJobAsync(
+                firmId, branchId, cfg.DeliveryMode, cfg.KitchenPrinter,
+                "kitchen", "kitchen_void", kitchenBytes,
+                new { station = "food", checkId, tableName, reason }, ct));
+        }
+
+        if (barList.Count > 0)
+        {
+            var barBytes = EscPosBuilder.BuildKitchenVoidTicket(
+                tableName, actor, checkRef, now, barList, reason, "BAR / ICECEK", branchTitle);
+            results.Add(await DeliverPrintJobAsync(
+                firmId, branchId, cfg.DeliveryMode, cfg.BarPrinter,
+                "bar", "bar_void", barBytes,
+                new { station = "drink", checkId, tableName, reason }, ct));
+        }
+
+        return AggregatePrintResults(results, cfg.KitchenPrinter.Name);
+    }
+
+    private static PrintResult AggregatePrintResults(IReadOnlyList<PrintResult> results, string defaultTarget)
+    {
+        if (results.Count == 0)
+        {
+            return new PrintResult(false, defaultTarget, "None", "Yazdırılacak ürün bulunamadı.");
+        }
+        if (results.Count == 1)
+        {
+            return results[0];
+        }
+        var allOk = results.All(r => r.Success);
+        var errors = results.Where(r => !r.Success && !string.IsNullOrWhiteSpace(r.Error)).Select(r => r.Error!).ToArray();
+        return new PrintResult(
+            Success: allOk,
+            Target: string.Join(" + ", results.Select(r => r.Target)),
+            TransportUsed: string.Join(" + ", results.Select(r => r.TransportUsed).Distinct()),
+            Error: errors.Length > 0 ? string.Join(" | ", errors) : null);
     }
 
     public async Task<PrintResult> TestPrintAsync(
@@ -627,23 +816,7 @@ public sealed class PrintingService(
                 ct));
         }
 
-        if (results.Count == 0)
-        {
-            return new PrintResult(false, cfg.KitchenPrinter.Name, "None", "Yazdırılacak ürün bulunamadı.");
-        }
-
-        if (results.Count == 1)
-        {
-            return results[0];
-        }
-
-        var allOk = results.All(r => r.Success);
-        var errors = results.Where(r => !r.Success && !string.IsNullOrWhiteSpace(r.Error)).Select(r => r.Error!).ToArray();
-        return new PrintResult(
-            Success: allOk,
-            Target: string.Join(" + ", results.Select(r => r.Target)),
-            TransportUsed: string.Join(" + ", results.Select(r => r.TransportUsed).Distinct()),
-            Error: errors.Length > 0 ? string.Join(" | ", errors) : null);
+        return AggregatePrintResults(results, cfg.KitchenPrinter.Name);
     }
 
     private async Task<Dictionary<Guid, string>> ResolveLineStationsAsync(

@@ -33,7 +33,12 @@ Bir restoran POS sisteminin gerçek dünyada çalışabilmesi için 4 temel çev
 3. **Barkod / Karekod Okuyucu:** Hızlı satış ve paket serviste ürün/adisyon taramak.
 4. **Para Çekmecesi (Cash Drawer):** Fiş çıktığında otomatik fırlayan metal çekmece.
 
-Şu anki HIPOS projesinde cihaz entegrasyonu adına yalnızca kavramsal dokümanlar ([`ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md`](./ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md)) bulunmaktadır; **fiziksel donanım protokolü veya sürücü kodu bulunmamaktadır**.
+Şu anki HIPOS projesinde **mali ÖKC cihazı (`IFiscalRegisterAdapter`) tarafında** yalnızca kavramsal dokümanlar ([`ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md`](./ENTEGRASYON_ENVANTERI_VE_TOKEN_SURECI.md)) bulunmaktadır; fiziksel Token/Beko ÖKC protokolü veya sertifikalı mali sürücü kodu bulunmamaktadır.
+
+Buna karşılık **mali olmayan çevre birimleri (Faz 11–12)** yazılım olarak uygulanmış ve mock donanımlarla uçtan uca test edilmiştir (fiziksel cihazlarla saha testi sahada yapılacaktır):
+- **Termal Yazıcı & Print Bridge v2 ([`hipos-print-bridge.mjs`](../../scripts/hipos-print-bridge.mjs), [`PrintingService.cs`](../../apps/api/Hipos.Api/Printing/PrintingService.cs)):** TCP 9100 ağ yazıcısı, Windows/macOS USB yazıcı kuyrukları, istasyon bazlı Mutfak/Bar/Kasa ayrıştırması, `IPTAL BILETI`, `GUN SONU Z-RAPORU` ve yazıcı kapalıyken diske yazıp otomatik kurtaran retry spool (`--spool-file`, `--dry-run`).
+- **RJ11 Para Çekmecesi ([`EscPosBuilder.cs`](../../apps/api/Hipos.Api/Printing/EscPosBuilder.cs#L247-L252), `POST /printing/open-drawer`):** Nakit tahsilatta ve Kasa ekranındaki `"💵 Çekmece"` butonunda standart ESC/POS RJ11 darbesi (`0x1B 0x40 0x1B 0x70 0x00 0x19 0xFA`) üretir.
+- **USB HID Barkod Okuyucu ([`OperationalApps.tsx`](../../apps/pos/src/OperationalApps.tsx)):** Klavye emülasyonlu (HID) USB okuyucuların gönderdiği hızlı karakter + `Enter` dizisini Hızlı Satış ekranında yakalar, SKU/ürün eşleştirir ve sepete ekler.
 
 ---
 

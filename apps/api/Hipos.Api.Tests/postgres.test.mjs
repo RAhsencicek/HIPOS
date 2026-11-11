@@ -403,7 +403,27 @@ test(
       );
       await execFile(
         "dotnet",
-        ["tool", "run", "dotnet-ef", "database", "update", "--project", project, "--context", "KitchenDbContext"],
+        ["tool", "run", "dotnet-ef", "database", "update", "--no-build", "--project", project, "--context", "KitchenDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--no-build", "--project", project, "--context", "AuthDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--no-build", "--project", project, "--context", "OverviewDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--no-build", "--project", project, "--context", "PrintingDbContext"],
+        { cwd: repo, env },
+      );
+      await execFile(
+        "dotnet",
+        ["tool", "run", "dotnet-ef", "database", "update", "--no-build", "--project", project, "--context", "SyncDbContext"],
         { cwd: repo, env },
       );
       const migratedCategory = await runPg("psql", [
@@ -581,20 +601,29 @@ test(
       assert.equal(cashOverview.data.registers.length, 1);
       assert.equal(cashOverview.data.openShifts.length, 0);
       assert.equal((await request(`${cashPath}/overview`, "GET", undefined, "viewer-multi")).status, 403);
-      // Günlük toplam, açık/kapalı vardiyalardan yalnız bugünün test tahsilatlarını toplar.
+      // Günlük tahsilat özeti yalnızca bugünün başarılı satış ödemelerini toplar.
+      const dailyCheckId = "99999999-9999-4999-8999-99999999dc01";
+      const dailyOrderId = "99999999-9999-4999-8999-99999999da01";
       const dailyRows = ["99999999-9999-4999-8999-99999999dd01", "99999999-9999-4999-8999-99999999dd02", "99999999-9999-4999-8999-99999999dd03"];
       await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
-        `INSERT INTO cash.movements (id,firm_id,branch_id,register_id,shift_id,kind,category,tender_method,amount_minor,currency,description,source,provider,provider_event_id,actor,created_at) VALUES
-        ('${dailyRows[0]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','cash',12500,'TRY','test','pos','test','daily-1','test',now()),
-        ('${dailyRows[1]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','card',7500,'TRY','test','pos','test','daily-2','test',now()),
-        ('${dailyRows[2]}','${single}','${singleBranch}','77777777-7777-4777-8777-777777777700','77777777-7777-4777-8777-777777777701','pos_sale','cash_sale','cash',5000,'TRY','test','pos','test','daily-3','test',now() - interval '2 days')`]);
-      const dailyCollections = await request(`${cashPath}/daily-collections`, "GET", undefined, "manager-single");
+        `INSERT INTO sales.checks (id,firm_id,branch_id,status,currency,created_at,version)
+         VALUES ('${dailyCheckId}','${single}','${singleBranch}','open','TRY',now(),1);
+         INSERT INTO sales.orders (id,check_id,firm_id,branch_id,source,status,payment_status,total_minor,currency,request_fingerprint,kitchen_items_json,created_at,version)
+         VALUES ('${dailyOrderId}','${dailyCheckId}','${single}','${singleBranch}','test_pos','open','paid',25000,'TRY','daily-test','[]',now(),1);
+         INSERT INTO sales.payment_attempts (id,check_id,firm_id,branch_id,order_id,amount_minor,currency,method,status,requested_outcome,version,actor,created_at,updated_at) VALUES
+        ('${dailyRows[0]}','${dailyCheckId}','${single}','${singleBranch}','${dailyOrderId}',12500,'TRY','cash','succeeded','succeeded',1,'test',now(),now()),
+        ('${dailyRows[1]}','${dailyCheckId}','${single}','${singleBranch}','${dailyOrderId}',7500,'TRY','card','succeeded','succeeded',1,'test',now(),now()),
+        ('${dailyRows[2]}','${dailyCheckId}','${single}','${singleBranch}','${dailyOrderId}',5000,'TRY','cash','succeeded','succeeded',1,'test',now() - interval '2 days',now() - interval '2 days')`]);
+      const salesDailyPath = `/api/v1/firms/${single}/branches/${singleBranch}/sales/daily-collections`;
+      const dailyCollections = await request(salesDailyPath, "GET", undefined, "manager-single");
       assert.equal(dailyCollections.status, 200);
       assert.deepEqual([dailyCollections.data.cashMinor, dailyCollections.data.cardMinor, dailyCollections.data.totalMinor, dailyCollections.data.count], [12500, 7500, 20000, 2]);
       assert.equal(dailyCollections.data.simulated, true);
-      assert.equal((await request(`${cashPath}/daily-collections`, "GET", undefined, "viewer-multi")).status, 403);
+      assert.equal((await request(salesDailyPath, "GET", undefined, "viewer-multi")).status, 403);
       await runPg("psql", ["-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser, "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
-        `DELETE FROM cash.movements WHERE id IN ('${dailyRows.join("','")}')`]);
+        `DELETE FROM sales.payment_attempts WHERE id IN ('${dailyRows.join("','")}');
+         DELETE FROM sales.orders WHERE id='${dailyOrderId}';
+         DELETE FROM sales.checks WHERE id='${dailyCheckId}';`]);
       const cashStates = await request(featureSettingsPath, "GET", undefined, "manager-single");
       const cashFeature = cashStates.data.find((row) => row.key === "cash.management");
       assert.equal(cashFeature.effectiveForNewWork, true);
@@ -779,10 +808,12 @@ test(
       await runPg("psql", [
         "-h", "127.0.0.1", "-p", String(pgPort), "-U", pgUser,
         "-d", "hipos_features", "-v", "ON_ERROR_STOP=1", "-c",
-        `INSERT INTO catalog.categories (firm_id,id,brand_id,name,is_active,sort_order,version,updated_at)
-         VALUES ('${firm}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z'),
-                ('${firm}','dessert',NULL,'Tatlılar',true,0,1,'2026-10-05T09:30:00Z'),
-                ('${single}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z');
+        `INSERT INTO catalog.categories (firm_id,branch_id,id,brand_id,name,is_active,sort_order,version,updated_at)
+         VALUES ('${firm}','${moda}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z'),
+                ('${firm}','${besiktas}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z'),
+                ('${firm}','${moda}','dessert',NULL,'Tatlılar',true,0,1,'2026-10-05T09:30:00Z'),
+                ('${firm}','${besiktas}','dessert',NULL,'Tatlılar',true,0,1,'2026-10-05T09:30:00Z'),
+                ('${single}','${singleBranch}','pizza',NULL,'Pizzalar',true,0,1,'2026-10-05T09:30:00Z');
          INSERT INTO catalog.products
           (id,firm_id,brand_id,name,sku,category_id,category_name,status,channels,image,recipe_linked,base_price_minor,currency,description,allergens,option_groups,branch_ids,updated_at,version)
          VALUES

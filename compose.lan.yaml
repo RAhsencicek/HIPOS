@@ -1,0 +1,133 @@
+# Restoran içi Yerel Ağ (LAN Hub) Dağıtım Şablonu — Faz 13 Hibrit Mimari
+# Kullanım:
+#   HIPOS_CLOUD_SYNC_URL=https://hipos.hayatisleri.com.tr \
+#   HIPOS_CLOUD_SYNC_TOKEN=<merkez-sync-token> \
+#   HIPOS_JWT_SECRET=<ortak-en-az-32-karakter-jwt-gizli-anahtari> \
+#   docker compose -f compose.lan.yaml up -d --build
+#
+# İsteğe bağlı demo veri yükleme:
+#   docker compose -f compose.lan.yaml --profile demo-seed run --rm seed
+
+x-lan-api-environment: &lan-api-environment
+  ASPNETCORE_ENVIRONMENT: ${HIPOS_LAN_ASPNET_ENV:-Production}
+  ASPNETCORE_URLS: http://+:5180
+  HIPOS_ALLOW_DEMO_ACTOR: ${HIPOS_ALLOW_DEMO_ACTOR:-false}
+  HIPOS_FEATURE_STORAGE: postgres
+  HIPOS_FEATURES_CONNECTION: Host=db;Port=5432;Database=${POSTGRES_DB:-hipos_lan};Username=${POSTGRES_USER:-hipos};Password=${POSTGRES_PASSWORD:-hipos-lan-local-only}
+  HIPOS_JWT_SECRET: ${HIPOS_JWT_SECRET:-hipos-lan-hub-secret-change-at-least-32-chars}
+  HIPOS_CLOUD_SYNC_URL: ${HIPOS_CLOUD_SYNC_URL:-}
+  HIPOS_CLOUD_SYNC_TOKEN: ${HIPOS_CLOUD_SYNC_TOKEN:-}
+  HIPOS_SYNC_NODE_ID: ${HIPOS_SYNC_NODE_ID:-lan-hub-01}
+  HIPOS_PRINT_AGENT_TOKEN: ${HIPOS_PRINT_AGENT_TOKEN:-}
+
+x-lan-web-environment: &lan-web-environment
+  HIPOS_DEV_API_TARGET: http://api:5180
+  VITE_API_BASE_URL: ""
+  VITE_FEATURE_PROVIDER: http
+  VITE_CATALOG_PROVIDER: http
+  VITE_SALES_PROVIDER: http
+  VITE_CARI_PROVIDER: http
+  VITE_SERVICE_PROVIDER: http
+  VITE_INVENTORY_PROVIDER: http
+  VITE_CASH_PROVIDER: http
+  VITE_EXPENSE_PROVIDER: http
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hipos_lan}
+      POSTGRES_USER: ${POSTGRES_USER:-hipos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hipos-lan-local-only}
+    ports:
+      - "127.0.0.1:${HIPOS_LAN_PG_PORT:-5434}:5432"
+    volumes:
+      - hipos_pg_lan:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hipos} -d ${POSTGRES_DB:-hipos_lan}"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: build
+    environment: *lan-api-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        for context in FeatureDbContext CatalogDbContext SalesDbContext CariDbContext
+        ServiceDbContext InventoryDbContext CashDbContext ExpenseDbContext AuthDbContext KitchenDbContext
+        OverviewDbContext PrintingDbContext SyncDbContext;
+        do
+          echo "Migrating $$context";
+          dotnet tool run dotnet-ef database update --project /src/Hipos.Api/Hipos.Api.csproj --context "$$context" --configuration Release --no-build || exit 1;
+        done
+
+  seed:
+    profiles: ["demo-seed"]
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      HIPOS_DEMO_DATABASE_URL: postgresql://${POSTGRES_USER:-hipos}:${POSTGRES_PASSWORD:-hipos-lan-local-only}@127.0.0.1:5432/${POSTGRES_DB:-hipos_lan}
+    network_mode: "service:db"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        npm run demo:seed &&
+        npm run demo:seed:menus &&
+        npm run demo:seed:cari &&
+        npm run demo:seed:service &&
+        npm run demo:seed:inventory &&
+        npm run demo:seed:cash &&
+        npm run demo:seed:expenses
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: *lan-api-environment
+    ports:
+      - "0.0.0.0:5180:5180"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment: *lan-web-environment
+    command: npm run dev --workspace @hipos/admin -- --host 0.0.0.0 --port 5173 --strictPort
+    ports:
+      - "0.0.0.0:5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  pos:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment: *lan-web-environment
+    command: npm run dev --workspace @hipos/pos -- --host 0.0.0.0 --port 5176 --strictPort
+    ports:
+      - "0.0.0.0:5176:5176"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  hipos_pg_lan:

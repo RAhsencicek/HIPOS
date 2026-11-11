@@ -25,9 +25,11 @@
   - Adisyona birden fazla sipariş eklenmesi ve API'ye kaydedilmesi
   - Garson masa detayında açık adisyon, taşıma, birleştirme ve miktar bazlı adisyon bölme akışları
   - Sipariş kaleminde not ve demo hazırlama tercihlerinin mutfak görünümüne taşınması
-  - **Server-Sent Events (SSE) LAN Canlı Eşzamanlılık:** Garson masaya sipariş girdiğinde veya Kasa tahsilat yapıp hesabı kapattığında, tüm el terminalleri, kasalar ve mutfak ekranları sayfayı yenilemeden (No F5) sub-10ms gecikmeyle anında güncellenir (`RestaurantEventHub`, `GET /events/stream`).
+  - **Server-Sent Events (SSE) LAN Canlı Eşzamanlılık:** Garson masaya sipariş girdiğinde, Kasa tahsilat yapıp hesabı kapattığında veya Mutfak bir kalemi `HAZIR` yaptığında, el terminalleri (`HAZIR` anlık toast bildirimi dahil), kasalar ve mutfak ekranları sub-10ms gecikmeyle güncellenir (`RestaurantEventHub`, `GET /events/stream`).
+  - **Kalem İptali & Tam Adisyon İptali → KDS + Mutfak İptal Bileti (Faz 12):** Garson ekranından yapılan kalem iptali (`POST /sales/checks/{id}/adjustments` `void`) ve tam adisyon iptali (`POST /sales/checks/{id}/cancel`) bağlı `kitchen.tasks` satırlarını `cancelled` durumuna çeker ve Mutfak/Bar yazıcılarına ESC/POS `IPTAL BILETI` gönderir.
+  - **Hibrit LAN Bağlantı Rozeti (Faz 13):** Garson üst çubuğunda `Bulut Bağlı` / `Yerel Ağda · Bulut Bekliyor` / `Bağlantı Yok` durum rozeti canlı gösterilir.
 * **Kısmen Hazır / Bekleyenler:**
-  - Garson ekranında yüzde/sabit adisyon indirimi ile gerekçeli miktar bazlı ikram/kalem iptali API'ye kaydedilir. Her kayıt actor, gerekçe ve zaman bilgisiyle denetim izi taşır. Yönetici onayı yalnız `Development` ortamında test amacıyla atlanır; diğer ortamlarda onaysız işlem reddedilir. Gerçek kimlik doğrulama/PIN onayı yönetim ekranı aşamasında tamamlanacaktır.
+  - Yönetici onayı Production'da JWT rolü / PIN doğrulamasıyla korunur; sahada fiziksel banka POS / ÖKC ödeme onay entegrasyonu Token/Beko cihazı gelene kadar simüle tahsilat (`payments.simulator`) ile yürütülür.
   - Ücret etkili ürün modifier seçenekleri Modül 4 kapsamındadır; mevcut garson seçenekleri demo amaçlı ve ücretsizdir.
   - Garson ekranındaki Ödeme Al düğmesi seçilen masayla kasa ekranını açar. Tahsilat işlemi kasa ekranında yürütülür; gerçek kart/POS entegrasyonu ve üretim yetkilendirmesi henüz yoktur.
 

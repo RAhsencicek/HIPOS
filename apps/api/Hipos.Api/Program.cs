@@ -12,6 +12,7 @@ using Hipos.Api.Auth;
 using Hipos.Api.Overview;
 using Hipos.Api.Reports;
 using Hipos.Api.Realtime;
+using Hipos.Api.Sync;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 
@@ -24,6 +25,9 @@ var featureRuntime = new FeatureRuntimeCapabilities();
 builder.Services.AddSingleton(featureRuntime);
 builder.Services.AddSingleton<IRestaurantEventHub, RestaurantEventHub>();
 builder.Services.AddSingleton<AuthTokenService>();
+builder.Services.AddSingleton<SyncCoordinator>();
+builder.Services.AddScoped<SyncService>();
+builder.Services.AddHostedService<SyncBackgroundWorker>();
 
 // Production ortamında X-Demo-Actor devre dışıdır; yalnızca doğrulanmış JWT Bearer / ?token= kabul edilir.
 
@@ -56,6 +60,8 @@ if (storage == "postgres")
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "overview")));
     builder.Services.AddDbContext<PrintingDbContext>(options => options.UseNpgsql(connection,
         npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "printing")));
+    builder.Services.AddDbContext<SyncDbContext>(options => options.UseNpgsql(connection,
+        npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "sync")));
     builder.Services.AddScoped<IFeatureStore, PostgresFeatureStore>();
     builder.Services.AddScoped<CatalogQueries>();
     builder.Services.AddScoped<CatalogDraftCommands>();
@@ -87,7 +93,7 @@ builder.Services.AddCors(options => options.AddPolicy("LocalPreview", policy =>
 {
     // Yerel geliştirme ve LAN terminalleri (tablet, fiziksel kasa terminali, KDS vb.)
     policy.SetIsOriginAllowed(_ => true)
-        .WithHeaders("Content-Type", "X-Demo-Actor", "Authorization", "X-Platform-Admin-Key")
+        .WithHeaders("Content-Type", "X-Demo-Actor", "Authorization", "X-Platform-Admin-Key", "X-Sync-Token")
         .WithMethods("GET", "PUT", "POST", "DELETE");
 }));
 var app = builder.Build();
@@ -106,6 +112,7 @@ var kitchenReady = false;
 var authReady = false;
 var overviewReady = false;
 var printingReady = false;
+var syncReady = false;
 if (storage == "postgres")
 {
     using var scope = app.Services.CreateScope();
@@ -147,6 +154,8 @@ if (storage == "postgres")
     overviewReady = !(await overviewDb.Database.GetPendingMigrationsAsync()).Any();
     var printingDb = scope.ServiceProvider.GetRequiredService<PrintingDbContext>();
     printingReady = !(await printingDb.Database.GetPendingMigrationsAsync()).Any();
+    var syncDb = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+    syncReady = !(await syncDb.Database.GetPendingMigrationsAsync()).Any();
     featureRuntime.CariReady = cariReady;
     if (serviceReady)
     {
@@ -169,6 +178,7 @@ if (storage == "postgres")
     featureRuntime.ExpensesReady = expensesReady;
     featureRuntime.KitchenReady = kitchenReady;
     featureRuntime.PrintingReady = printingReady;
+    featureRuntime.SyncReady = syncReady;
     if (cashReady) await FeatureDbInitializer.PromoteCashAsync(db, CancellationToken.None);
 }
 app.UseCors("LocalPreview");
@@ -191,6 +201,7 @@ if (storage == "postgres") app.MapAuthEndpoints(authReady, app.Environment.IsDev
 if (storage == "postgres") app.MapOverviewEndpoints(overviewReady);
 if (storage == "postgres") app.MapReportsEndpoints(salesReady);
 if (storage == "postgres") app.MapRealtimeEndpoints();
+app.MapSyncEndpoints(syncReady);
 
 app.MapGet("/health", () => Results.Ok(new { status = "prototype", storage }));
 

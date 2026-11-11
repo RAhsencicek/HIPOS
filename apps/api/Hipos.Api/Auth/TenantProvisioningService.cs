@@ -47,6 +47,7 @@ public sealed partial class TenantProvisioningService(
         "catalog.products", "catalog.pricing", "catalog.drafts", "catalog.price_drafts",
         "catalog.publishing", "catalog.menus",
         "sales.monitoring", "sales.checks", "sales.pos_orders", "sales.cashier",
+        "payments.simulator",
         "branches.tables", "staff.records", "service.waiters",
         "kitchen.monitoring", "reports.sales", "cari.management",
         "cash.management", "finance.expenses",

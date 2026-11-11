@@ -3453,3 +3453,85 @@ button, select { font: inherit; }
   }
 }
 
+/* Faz 13: Hibrit LAN / Bulut Eşitleme Durum Rozeti */
+.pos-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.12s ease, opacity 0.12s ease, background-color 0.15s ease;
+}
+
+.pos-sync-pill:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.pos-sync-pill:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.pos-sync-pill .sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pos-sync-pill.online {
+  background: #eaf4eb;
+  color: #1f5c32;
+  border-color: #bfe0c4;
+}
+
+.pos-sync-pill.online .sync-dot {
+  background: #22c55e;
+}
+
+.pos-sync-pill.checking {
+  background: #f5efe2;
+  color: #80602e;
+  border-color: #e6d5b3;
+}
+
+.pos-sync-pill.checking .sync-dot {
+  background: #d97706;
+}
+
+.pos-sync-pill.lan-pending {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.pos-sync-pill.lan-pending .sync-dot {
+  background: #f59e0b;
+}
+
+.pos-sync-pill.blocked {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.pos-sync-pill.blocked .sync-dot {
+  background: #ef4444;
+}
+
+.pos-sync-pill.offline {
+  background: #fff0ed;
+  color: #9a3e2d;
+  border-color: #f5c2b8;
+}
+
+.pos-sync-pill.offline .sync-dot {
+  background: #dc2626;
+}
+

@@ -1,6 +1,6 @@
 # HIPOS — Mevcut Durum ve Modüler Yol Haritası
 
-> **Doküman Durumu:** Canlı Yol Haritası ve Fazlı Eylem Planı · Sürüm: v4.0 (11 Kasım 2026)
+> **Doküman Durumu:** Canlı Yol Haritası ve Fazlı Eylem Planı · Sürüm: v4.1 (11 Kasım 2026 — Faz 12 & 13)
 >
 > **Dokümantasyon Hiyerarşisi:**
 > * **Güncel kod durumu ve bağımlılıklar:** [docs/01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md](../01-mimari-ve-altyapi/BACKEND_MIMARISI_VE_MODUL_BAGIMLILIKLARI.md)
@@ -555,9 +555,56 @@ Her şubenin Kasa, Mutfak ve opsiyonel Bar / İçecek yazıcı ayarlarının ort
 
 ---
 
+### 🔷 FAZ 12 TEKNİK SÖZLEŞMESİ: Saha Donanım Dayanıklılığı, İptal Biletleri, Z-Raporu Baskı, RJ11 Çekmece, HID Barkod ve Garson Hazır Bildirimi (✅ TAMAMLANDI - 11 KASIM 2026)
+
+#### A. İşletme ve Saha İhtiyacı:
+Fiziksel restoran donanımlarıyla (fiş yazıcı, RJ11 çekmece, USB HID barkod okuyucu) sahaya çıkmadan önce yazıcı kesintilerinde fiş kaybı yaşanmaması (`spool`), masa başındaki veya mutfaktaki iptallerin anında KDS + mutfak iptal biletine yansıması, Z-Raporu ve nakit çekmecesi açmanın tek tıkla termal yazıcıdan çalışması, barkodla hızlı satış yapılabilmesi ve garson tabletinin mutfaktan `HAZIR` SSE bildirimi alması gerekir.
+
+#### B. Uygulanan Mimari ve Bileşenler:
+1. **Print Bridge v2 Retry Spool & Dry-Run Simülatörü ([`hipos-print-bridge.mjs`](file:///Users/mac/HIPOS/scripts/hipos-print-bridge.mjs)):**
+   - `--dry-run`, `--preview-dir <klasor>` ve `--spool-file <dosya>` CLI seçenekleri eklendi.
+   - Fiziksel yazıcı geçici olarak kapalı veya ağdan kopmuşsa gelen `print.job` işleri atomik olarak diskteki spool kuyruğuna (`queue` JSON) yazılır; yazıcı yeniden erişilebilir olduğunda sırayla otomatik basılır ve boşalan spool dosyası temizlenir.
+2. **RJ11 Para Çekmecesi & Gerçek Termal Z-Raporu ([`EscPosBuilder.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/EscPosBuilder.cs), [`PrintingService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingService.cs), [`PrintingEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingEndpoints.cs), [`CashEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Cash/CashEndpoints.cs)):**
+   - `EscPosBuilder.BuildCashDrawerKick()` ile standart `ESC @` + `ESC p 0 25 250` (`0x1B 0x70 0x00 0x19 0xFA`) RJ11 darbesi üretilir; Kasa ekranında `"💵 Çekmece"` butonu `POST /printing/open-drawer` ucunu tetikler (Print Bridge v2 çevrimiçiyken SSE üzerinden, yerel ağda TCP 9100 üzerinden).
+   - Vardiya kapanışında açılan Z-Raporu penceresinde (`#z-report-title`) `"🖨️ Fiş Yazdır"` butonu `POST /cash/shifts/{shiftId}/print-z-report` üzerinden `EscPosBuilder.BuildZReportReceipt(...)` (`GUN SONU Z-RAPORU` ve `KASA CEKMECESI MUTABAKATI`) fişini termal yazıcıya yollar.
+3. **Kalem İptali / Adisyon İptali → KDS + Mutfak İptal Bileti ([`SalesCheckEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesCheckEndpoints.cs)):**
+   - `POST /sales/checks/{checkId}/adjustments` (`action: "void"`) veya `POST /sales/checks/{checkId}/cancel` çağrıldığında bağlı açık `kitchen.tasks` satırları `cancelled` durumuna geçirilir, SSE ile `kitchen.updated` / `check.cancelled` yayınlanır ve `PrintingService.PrintKitchenVoidItemsAsync` (`IPTAL BILETI`) Mutfak/Bar yazıcılarına yönlendirilir.
+4. **USB HID Barkod Dinleyici & Garson SSE `HAZIR` Bildirimi ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`operational.css`](file:///Users/mac/HIPOS/apps/pos/src/operational.css)):**
+   - Kasa Hızlı Satış ekranında global HID klavye-emülasyonlu barkod okuyucu dinleyicisi hızlı karakter dizisini (`Enter` sonlandırmalı) SKU veya ürün kimliğiyle eşleyip sepete otomatik ekler.
+   - Mutfak ekranı bir görevi `ready` (`HAZIR`) yaptığında `kitchen.updated` SSE olayı Garson terminalinde toast bildirim çubuğu gösterir.
+   - Yeni müşteri onboarding akışında (`TenantProvisioningService.StarterEnabledFeatures`) Kasa UI ödeme akışının kullandığı `payments.simulator` kapısı varsayılan olarak etkinleştirildi.
+
+> **Donanım Sınırı (Şeffaf Beyan):** Faz 12 testleri yerel TCP/JSON-UTF8 yazıcı simülatörleri, `--dry-run` önizleme ve Playwright Chromium otomasyonuyla doğrulanmıştır; fiziksel termal yazıcı, metal para çekmecesi ve fiziksel USB barkod okuyucu saha testi sahadaki donanımlarla yapılacaktır. Beko/Token ÖKC mali GMP3 bağlantısı için Token geliştirici portalı ve test cihazı hâlen beklenmektedir.
+
+---
+
+### 🔷 FAZ 13 TEKNİK SÖZLEŞMESİ: Restoran İçi Hibrit LAN Hub, `sync` Şeması ve 3 Durumlu Bağlantı Rozeti (✅ TAMAMLANDI - 11 KASIM 2026)
+
+#### A. İşletme ve Üretim İhtiyacı:
+İnternet kesildiğinde şube içindeki yerel Mini PC (`compose.lan.yaml`) üzerinde çalışan Garson, Mutfak ve Kasa terminallerinin satış ve vardiya işlemlerini PostgreSQL'e yazmaya devam etmesi; internet geri geldiğinde bu olayların merkezi buluta (`https://hipos.hayatisleri.com.tr`) sırayla, tekil (`event_id`) ve çakışma denetimli (`payload_hash`) aktarılması ve POS üst çubuğunun bağlantı durumunu açıkça göstermesi gerekir.
+
+#### B. Uygulanan Mimari ve Bileşenler:
+1. **`SyncDbContext` (`sync` Şeması — 13. EF Core Context) ([`SyncDbContext.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sync/SyncDbContext.cs)):**
+   - `20261111193513_InitSync` migration'ı ile `sync.outbox`, `sync.inbound_events` ve `sync.branch_sync_status` tabloları eklendi (`compose.yaml` ve `compose.lan.yaml` `migrate` servislerine bağlandı).
+2. **Transaksiyon Sonrası Outbox & Bulut Eşitleme ([`SyncService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sync/SyncService.cs), [`SyncBackgroundWorker.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sync/SyncBackgroundWorker.cs), [`SyncEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sync/SyncEndpoints.cs)):**
+   - [`SalesCheckEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesCheckEndpoints.cs), [`KitchenEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Kitchen/KitchenEndpoints.cs) ve [`CashEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Cash/CashEndpoints.cs) kalıcı commit sonrasında `SyncService.TryEnqueueAsync` üzerinden olayları (`check.created`, `order.added`, `check.split`, `check.adjusted`, `payment.recorded`, `check.closed`, `check.cancelled`, `kitchen.task.updated`, `cash.shift.opened`, `cash.movement.added`, `cash.shift.closed`) outbox'a yazar.
+   - `HIPOS_CLOUD_SYNC_URL` tanımlıyken (`nodeMode="lan_hub"`) `SyncBackgroundWorker` bekleyen kayıtları katlanarak artan gecikmeyle (`[5, 15, 30, 60, 120, 300]` sn) buluta `POST /api/v1/sync/batch` üzerinden gönderir.
+   - Bulut `POST /api/v1/sync/batch` ucu `X-Sync-Token` (`HIPOS_CLOUD_SYNC_TOKEN`) veya firma/şube kapsamlı JWT ile yetkilendirilir; aynı `eventId` ve aynı `payloadHash` geldiğinde `acked` + `duplicate: true` döner; aynı `eventId` farklı içerikle gelirse `conflict` (`IDEMPOTENCY_CONFLICT`) döndürür.
+   - Yönetim/izleme uçları: `GET /api/v1/firms/{firmId}/branches/{branchId}/sync/status`, `GET /sync/outbox`, `POST /sync/flush`, `POST /sync/outbox/{eventId}/retry`.
+3. **Yerel LAN Dağıtım Şablonu ([`compose.lan.yaml`](file:///Users/mac/HIPOS/compose.lan.yaml)) & 3 Durumlu POS Rozeti ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx)):**
+   - Kasa, Garson ve Mutfak başlıklarında [`SyncStatusPill`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx#L231-L295) bileşeni anlık `Bulut Bağlı` / `Bulut Bağlı (LAN)` (`online_synced`), `Yerel Ağda · Bulut Bekliyor (N)` (`lan_pending`), `Eşitleme Durdu (N)` (`sync_blocked`) ve `Bağlantı Yok` (`offline`) durumlarını gösterir; tıklandığında `POST /sync/flush` tetikler ve SSE `sync.status_updated` / `sync.batch_applied` olaylarıyla anında güncellenir.
+
+#### C. Doğrulama Kanıtları (11 Kasım 2026):
+* **Otomatik Donanım Dayanıklılığı & Hibrit Sync E2E ([`test_faz12_13_hardware_sync.mjs`](file:///Users/mac/HIPOS/scripts/test_faz12_13_hardware_sync.mjs)):**
+  - Print Bridge `--help` flags, geçici kapalı TCP yazıcıda disk spool + otomatik kurtarma (`[DRY-RUN MODU]` ve gerçek TCP soket), kalem iptali + tam adisyon iptalinde KDS `cancelled` + ESC/POS `IPTAL BILETI` doğrulandı.
+  - Playwright Chromium ile Garson SSE `HAZIR` toast bildirimi, Kasa Hızlı Satış USB HID barkod okuma, Kasa `💵 Çekmece` RJ11 pulse (`0x1b 0x70 0x00 0x19 0xfa`), vardiya kapama + Z-Raporu `"🖨️ Fiş Yazdır"` (`GUN SONU Z-RAPORU`) doğrulandı.
+  - İzole LAN Hub PostgreSQL (`:5185` API + `:5178` Vite) ile bulut kesintisinde adisyon açılışı sonrası sarı `Yerel Ağda · Bulut Bekliyor (1)` rozeti, bulut dönüşünde rozete tıklayarak bulut `sync.inbound_events` aktarımı, yeşil `Bulut Bağlı (LAN)` geçişi, yinelenen gönderimde `duplicate: true` ve bozuk hash gönderiminde `IDEMPOTENCY_CONFLICT` doğrulandı.
+
+---
+
 ## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ
 
-Faz 1–11 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
-1. `DURUM_VE_YOL_HARITASI.md`: Faz 1–11 durumu ve doğrulama sonuçları güncellenmiştir.
-2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_KDS.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`, `MODUL_07_KIMLIK_VE_AUTH.md`: Yeni endpoint'ler, veri sözleşmeleri, şube yazıcı profilleri ve güvenlik/izolasyon kurallarıyla senkronize edilmiştir.
-3. Production güvenlik kilidi (`HIPOS_ALLOW_DEMO_ACTOR=false` varsayılanı ve güçlü `HIPOS_JWT_SECRET` zorunluluğu), çok kiracılı izolasyon ve Faz 11 çoklu yazıcı + Print Bridge v2 kurulum paketi doğrulanmıştır. Sıradaki adım Faz 12+ (çevrimdışı LAN / yerel senkronizasyon dayanıklılık adımları) ile devam eder.
+Faz 1–13 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
+1. `DURUM_VE_YOL_HARITASI.md`: Faz 1–13 durumu, sözleşmeleri ve doğrulama sonuçları güncellenmiştir.
+2. `MODUL_01_KASA_VE_POS.md`, `MODUL_02_MASA_VE_ADISYON.md`, `MODUL_03_MUTFAK_VE_KDS.md`, `MODUL_05_STOK_VE_RECETE.md`, `MODUL_06_CARI_VE_GIDER.md`, `MODUL_07_KIMLIK_VE_AUTH.md`, `DONANIM_VE_MALI_CIHAZLAR.md` ve `CEVRIMDISI_*` belgeleri gerçek kod kapsamıyla senkronize edilmiştir.
+3. Sıradaki adımlar: fiziki termal yazıcı/RJ11 çekmece/USB barkod saha testi, Token/Beko ÖKC GMP3 geliştirici portalı/cihaz sertifikasyonu gelince mali cihaz adaptörü ve çoklu şubede otomatik downstream katalog senkronizasyonu.

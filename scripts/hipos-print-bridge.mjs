@@ -14,6 +14,7 @@
  *   node scripts/hipos-print-bridge.mjs --config ./hipos-bridge.config.json
  *   node scripts/hipos-print-bridge.mjs --url "https://hipos.hayatisleri.com.tr" --token "<BRIDGE_JWT>"
  *   node scripts/hipos-print-bridge.mjs --list-printers
+ *   node scripts/hipos-print-bridge.mjs --config ./hipos-bridge.config.json --dry-run --preview-dir ./tmp/previews
  */
 
 import net from "node:net";
@@ -183,6 +184,19 @@ async function discoverLocalPrinters() {
   return discovered;
 }
 
+if (hasFlag("help") || args.includes("-h")) {
+  console.log(`HIPOS Print Bridge v2.0.0 — Kullanım Seçenekleri:
+  --config <dosya>        Admin > Şubeler sayfasından indirilen hipos-bridge.config.json dosyası
+  --url <adres>           HIPOS API sunucu adresi (varsayılan: http://127.0.0.1:5180)
+  --token <jwt>           Şube köprü belirteci (role="bridge")
+  --firm <id> --branch <id>  --email/--password ile giriş yapıldığında hedef firma/şube
+  --list-printers         Bilgisayara bağlı yerel/USB yazıcıları tarar ve listeler
+  --dry-run               Fiziksel yazıcı olmadan okunabilir ESC/POS fiş önizlemesi üretir
+  --preview-dir <klasor>  --dry-run fiş önizleme dosyalarının yazılacağı klasör
+  --spool-file <dosya>    Başarısız fişlerin yeniden deneneceği yerel kuyruk (spool) JSON dosyası`);
+  process.exit(0);
+}
+
 if (hasFlag("list-printers")) {
   const list = await discoverLocalPrinters();
   console.log("Bulunan Yerel / USB Yazıcılar:");
@@ -229,6 +243,12 @@ const CONFIG = {
     process.env.HIPOS_BRIDGE_ID ||
     fileConfig.bridgeId ||
     os.hostname(),
+  dryRun: hasFlag("dry-run") || process.env.HIPOS_BRIDGE_DRY_RUN === "1",
+  previewDir: getArg("preview-dir") || process.env.HIPOS_BRIDGE_PREVIEW_DIR || null,
+  spoolFile:
+    getArg("spool-file") ||
+    process.env.HIPOS_BRIDGE_SPOOL_FILE ||
+    path.join(os.tmpdir(), `hipos-print-spool-${os.hostname().replace(/[^a-zA-Z0-9._-]/g, "_")}.json`),
   overrides: {
     kitchen: {
       ip: getArg("kitchen-ip") || process.env.KITCHEN_PRINTER_IP || fileConfig.kitchen?.ip || null,
@@ -285,6 +305,7 @@ function getEffectiveTargetConfig(targetKey) {
     name: base.name || key,
     type,
     enabled,
+    fallbackToUsb: Boolean(base.fallbackToUsb),
     ipAddress: ov.ip || base.ipAddress || "127.0.0.1",
     port: ov.port || Number(base.port) || 9100,
     systemPrinterName: ov.systemPrinterName || base.systemPrinterName || null,
@@ -445,10 +466,134 @@ if (-not [HiposRawPrinter]::Send($printer, $bytes)) {
   }
 }
 
-async function deliverEscPosJob(job) {
+const MAX_SPOOL_ITEMS = 50;
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_DELAYS_MS = [5000, 15000, 30000, 60000, 120000];
+let spoolQueue = [];
+let spoolTimer = null;
+let flushingSpool = false;
+
+function loadSpoolQueue() {
+  try {
+    if (fs.existsSync(CONFIG.spoolFile)) {
+      const parsed = JSON.parse(fs.readFileSync(CONFIG.spoolFile, "utf8"));
+      if (Array.isArray(parsed)) {
+        spoolQueue = parsed.slice(0, MAX_SPOOL_ITEMS);
+        if (spoolQueue.length > 0) {
+          console.log(`[SPOOL] Diskten ${spoolQueue.length} bekleyen yazdırma işi yüklendi.`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[WARN] Bekleyen yazdırma kuyruğu okunamadı:", err.message);
+  }
+}
+
+function saveSpoolQueue() {
+  try {
+    const dir = path.dirname(CONFIG.spoolFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (spoolQueue.length === 0) {
+      if (fs.existsSync(CONFIG.spoolFile)) fs.unlinkSync(CONFIG.spoolFile);
+      return;
+    }
+    fs.writeFileSync(CONFIG.spoolFile, JSON.stringify(spoolQueue.slice(0, MAX_SPOOL_ITEMS)), "utf8");
+  } catch (err) {
+    console.warn("[WARN] Bekleyen yazdırma kuyruğu diske kaydedilemedi:", err.message);
+  }
+}
+
+function enqueueFailedJob(job, errMessage, currentAttempts = 0) {
+  const attempts = currentAttempts + 1;
+  if (attempts > MAX_RETRY_ATTEMPTS) {
+    console.error(`[SPOOL] İş kalıcı olarak düşürüldü (maks ${MAX_RETRY_ATTEMPTS} deneme aşıldı): ${job.target ?? "kitchen"} · ${errMessage}`);
+    return false;
+  }
+  const delayMs = RETRY_DELAYS_MS[Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1)];
+  const existingIdx = job.jobId ? spoolQueue.findIndex((item) => item.job?.jobId === job.jobId && item.job?.target === job.target) : -1;
+  const entry = {
+    job,
+    attempts,
+    nextRetryAt: Date.now() + delayMs,
+    lastError: errMessage,
+  };
+  if (existingIdx >= 0) {
+    spoolQueue[existingIdx] = entry;
+  } else {
+    if (spoolQueue.length >= MAX_SPOOL_ITEMS) spoolQueue.shift();
+    spoolQueue.push(entry);
+  }
+  saveSpoolQueue();
+  console.warn(`[SPOOL] İş kuyruğa alındı (${attempts}/${MAX_RETRY_ATTEMPTS}, ${Math.round(delayMs / 1000)}sn sonra tekrar denenecek): ${errMessage}`);
+  return true;
+}
+
+function formatEscPosPreview(rawBuffer) {
+  const hasDrawerKick = rawBuffer.includes(Buffer.from([0x1b, 0x70]));
+  const chunks = [];
+  let i = 0;
+  while (i < rawBuffer.length) {
+    const b = rawBuffer[i];
+    if (b === 0x1b) {
+      const next = rawBuffer[i + 1];
+      if (next === 0x70) {
+        chunks.push("[RJ11-CEKMECE-AC]");
+        i += 5;
+        continue;
+      }
+      if (next === 0x42) {
+        i += 4;
+        continue;
+      }
+      if (next === 0x40 || next === 0x64) {
+        i += next === 0x64 ? 3 : 2;
+        continue;
+      }
+      if (next === 0x61 || next === 0x45 || next === 0x74) {
+        i += 3;
+        continue;
+      }
+      i += 2;
+      continue;
+    }
+    if (b === 0x1d) {
+      const next = rawBuffer[i + 1];
+      if (next === 0x56) {
+        chunks.push("\n--- [KAGIT KESME] ---\n");
+        i += rawBuffer[i + 2] === 0x42 ? 4 : 3;
+        continue;
+      }
+      if (next === 0x21) {
+        i += 3;
+        continue;
+      }
+      i += 2;
+      continue;
+    }
+    if (b === 0x0a || b === 0x0d || b === 0x09 || (b >= 0x20 && b <= 0x7e) || b >= 0x80) {
+      chunks.push(String.fromCharCode(b));
+    }
+    i += 1;
+  }
+  return { hasDrawerKick, text: chunks.join("").replace(/\r\n/g, "\n").trim() };
+}
+
+function writePreviewArtifact(targetKey, rawBuffer, textPreview) {
+  if (!CONFIG.previewDir) return;
+  try {
+    fs.mkdirSync(CONFIG.previewDir, { recursive: true });
+    const stamp = `${Date.now()}-${targetKey}`;
+    fs.writeFileSync(path.join(CONFIG.previewDir, `${stamp}.bin`), rawBuffer);
+    fs.writeFileSync(path.join(CONFIG.previewDir, `${stamp}.txt`), textPreview + "\n", "utf8");
+  } catch (err) {
+    console.warn("[WARN] Önizleme dosyası yazılamadı:", err.message);
+  }
+}
+
+async function deliverEscPosJob(job, attemptsSoFar = 0) {
   const targetKey = job.target || "kitchen";
   const cfg = getEffectiveTargetConfig(targetKey);
-  if (!job.rawEscPosBase64) return;
+  if (!job.rawEscPosBase64) return true;
 
   const rawBuffer = Buffer.from(job.rawEscPosBase64, "base64");
   const targetLabel = targetKey === "cashier"
@@ -469,19 +614,38 @@ async function deliverEscPosJob(job) {
       at: new Date().toISOString(),
     };
     void sendHeartbeat(false);
-    return;
+    return true;
   }
 
-  console.log(`[İŞ] ${targetLabel} (${rawBuffer.length} bayt) -> ${cfg.type} [${cfg.type === "Usb" ? (cfg.systemPrinterName || "Otomatik USB") : `${cfg.ipAddress}:${cfg.port}`}]`);
+  console.log(`[İŞ] ${targetLabel} (${rawBuffer.length} bayt) -> ${CONFIG.dryRun ? "DryRun" : cfg.type} [${cfg.type === "Usb" ? (cfg.systemPrinterName || "Otomatik USB") : `${cfg.ipAddress}:${cfg.port}`}]`);
 
   try {
     let transportLabel;
-    if (cfg.type === "Usb") {
+    if (CONFIG.dryRun) {
+      const preview = formatEscPosPreview(rawBuffer);
+      writePreviewArtifact(targetKey, rawBuffer, preview.text);
+      console.log(`\n========== [DRY-RUN ${targetLabel}] ==========\n${preview.text}\n===============================================\n`);
+      transportLabel = preview.hasDrawerKick ? "DryRun (+RJ11 Drawer Kick)" : "DryRun";
+    } else if (cfg.type === "Usb") {
       transportLabel = await sendLocalUsbRaw(cfg.systemPrinterName, rawBuffer);
     } else if (cfg.type === "Console") {
       transportLabel = "Console";
     } else {
-      transportLabel = await sendTcpRaw(cfg.ipAddress, cfg.port, rawBuffer);
+      try {
+        transportLabel = await sendTcpRaw(cfg.ipAddress, cfg.port, rawBuffer);
+      } catch (tcpErr) {
+        if (cfg.fallbackToUsb) {
+          console.warn(`[FALLBACK] Ağ yazıcısı (${cfg.ipAddress}:${cfg.port}) başarısız (${tcpErr.message}); USB yedeği deneniyor...`);
+          transportLabel = `${await sendLocalUsbRaw(cfg.systemPrinterName, rawBuffer)} (USB Yedek)`;
+        } else {
+          throw tcpErr;
+        }
+      }
+    }
+
+    if (CONFIG.previewDir && !CONFIG.dryRun) {
+      const preview = formatEscPosPreview(rawBuffer);
+      writePreviewArtifact(targetKey, rawBuffer, preview.text);
     }
 
     console.log(`[OK] ${targetLabel} başarıyla basıldı! (${transportLabel})`);
@@ -493,8 +657,11 @@ async function deliverEscPosJob(job) {
       message: `${targetLabel} yazdırıldı`,
       at: new Date().toISOString(),
     };
+    void sendHeartbeat(false);
+    return true;
   } catch (err) {
     console.error(`[HATA] ${targetLabel} yazdırılamadı:`, err.message);
+    enqueueFailedJob(job, err.message, attemptsSoFar);
     lastJobResult = {
       jobId: job.jobId ?? null,
       target: targetKey,
@@ -503,9 +670,26 @@ async function deliverEscPosJob(job) {
       message: err.message,
       at: new Date().toISOString(),
     };
+    void sendHeartbeat(false);
+    return false;
   }
+}
 
-  void sendHeartbeat(false);
+async function flushRetrySpool(forceNow = false) {
+  if (flushingSpool || spoolQueue.length === 0) return;
+  flushingSpool = true;
+  try {
+    const now = Date.now();
+    const pending = [...spoolQueue];
+    for (const item of pending) {
+      if (!forceNow && item.nextRetryAt > now) continue;
+      spoolQueue = spoolQueue.filter((q) => q !== item);
+      saveSpoolQueue();
+      await deliverEscPosJob(item.job, item.attempts);
+    }
+  } finally {
+    flushingSpool = false;
+  }
 }
 
 console.log("==================================================");
@@ -665,6 +849,7 @@ function handleSseEvent(rawBlock) {
     if (eventType === "printer.config.updated") {
       applyRemoteConfig(parsed?.data ?? parsed);
       console.log("[SYNC] Panelden yazıcı ayarı güncellendi — yeni hedefler uygulandı.");
+      void flushRetrySpool(true);
       return;
     }
 
@@ -733,11 +918,15 @@ async function connectSseLoop() {
 }
 
 await ensureAuthenticated();
+loadSpoolQueue();
+if (spoolTimer) clearInterval(spoolTimer);
+spoolTimer = setInterval(() => void flushRetrySpool(false), 5000);
 availablePrinters = await discoverLocalPrinters();
-console.log(`  Algılanan Yerel Yazıcı Sayısı: ${availablePrinters.length}`);
+console.log(`  Algılanan Yerel Yazıcı Sayısı: ${availablePrinters.length}${CONFIG.dryRun ? " [DRY-RUN MODU]" : ""}`);
 for (const p of availablePrinters) {
   console.log(`    • ${p.name} [${p.port}]`);
 }
 await syncPrinterConfig();
+await flushRetrySpool(true);
 await sendHeartbeat(false);
 await connectSseLoop();

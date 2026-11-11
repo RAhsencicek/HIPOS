@@ -8,13 +8,13 @@
 
 ---
 
-> [!WARNING]
-> ### ⚠️ Çevrimdışı ve Senkronizasyon Uygulama Durumu
-> * **LAN hedefi:** planlandı
-> * **Yerel Mini PC:** uygulanmadı
-> * **sync.outbox:** yok
-> * **Merkezi eşitleme:** yok
-> * **Çakışma çözümü:** yok
+> [!NOTE]
+> ### ✅ Çevrimdışı ve Senkronizasyon Uygulama Durumu (Faz 13 — 11 Kasım 2026)
+> * **LAN Hub Şablonu:** `compose.lan.yaml` eklendi ve izole PostgreSQL ile test edildi
+> * **`sync` Şeması (`SyncDbContext`):** `sync.outbox`, `sync.inbound_events`, `sync.branch_sync_status` aktif (`20261111193513_InitSync`)
+> * **Merkezi Eşitleme:** `SyncBackgroundWorker` + `POST /api/v1/sync/batch` (`X-Sync-Token` / JWT) çalışıyor
+> * **İdempotency / Çakışma Koruması:** `event_id` + `payload_hash` doğrulaması (`duplicate: true` / `IDEMPOTENCY_CONFLICT`) + `POST /sync/outbox/{eventId}/retry` çalışıyor
+> * **Sınırlama:** Çok şubeli merkezi katalog değişikliklerinin LAN Hub'lara otomatik downstream dağıtımı ayrı aşamaya bırakılmıştır.
 
 ---
 
@@ -104,15 +104,12 @@ Bağlantı göstergesi en az üç bağımsız bilgiyi tutmalıdır:
 
 ## 7. Oturum ve offline auth
 
-Ürün kararı: garson için ayrı PIN yok; cihazda açık HIPOS oturumu var. Teknik sözleşme yine şu maddeleri kapsamalı:
+Faz 2 ve Faz 10 kararlarıyla ürün yönü netleşmiştir:
 
-- Yerel API internet yokken oturumu hangi kanıtla doğrular (signed JWT/JWKS cache, local identity gateway veya server-managed session)?
-- Token/oturum süresi internet yokken hangi sınırla geçerlidir ve iptal/rol değişikliği LAN'a nasıl ulaşır?
-- Tarayıcıda credential saklanmaz; mevcut auth belgesi güvenli cookie + CSRF adayını tanımlar. Local service için aynı-origin/proxy veya güvenli cihaz token'ı tercihine ADR gerekir.
-- İlk sürümde garson PIN'i yapılmaz. Paylaşılan cihaz oturumu kişi bazlı denetim iddiasında bulunamaz; kullanıcı oturum açan hesap audit edilir.
-- Yerel sunucu cihazları ve merkeze sync service ayrı servis kimliği/secret ile yetkilendirilir; geliştirici test header'ı üretime geçmez.
-
-Bu seçim auth mühendisi ile operasyon mühendisi tarafından birlikte yapılmalıdır. Güvenli açık oturum ile internetsiz yetki kontrolü arasında süre/iptal politikası belirlenmeden kodda “offline auth hazır” işareti konmaz.
+- **Personel PIN ve JWT Kapsamı Aktiftir:** Garson, kasiyer ve mutfak terminalleri `auth.pin_codes` (BCrypt hash) üzerinden `POST /api/v1/auth/pin-login` ile giriş yapar; her terminal şube/rol kapsamlı imzalı JWT (`HIPOS_JWT_SECRET`) taşır ve tüm audit kayıtları ilgili personel adına işlenir.
+- **Yerel LAN Hub Doğrulaması (Faz 13):** Şube içindeki yerel sunucu (`compose.lan.yaml`), internet kesildiğinde kendi `auth.pin_codes` ve `HIPOS_JWT_SECRET` kopyasıyla JWT imzasını ve 4 haneli PIN girişlerini internet gerektirmeden yerel olarak doğrular.
+- **Servis & Senkronizasyon Yetkisi:** `POST /api/v1/sync/batch` yalnızca geçerli `HIPOS_CLOUD_SYNC_TOKEN` veya yetkili firma/şube kapsamındaki imzalı JWT ile çalışır; geliştirici `X-Demo-Actor` başlığı üretimde (`HIPOS_ALLOW_DEMO_ACTOR=false`) kapalıdır.
+- **Terminal Sınırı (Browser-only vs LAN Hub):** Masaüstü/tablet tarayıcısında yerel sunucu tamamen kapalıyken `localStorage` üzerinden sahte sipariş kuyruğu üretilmez; bağlantı yoksa UI kullanıcıyı `🔴 Bağlantı Yok` uyarısıyla bloklar.
 
 ## 8. Recovery ve işletim
 
@@ -139,10 +136,22 @@ Bu seçim auth mühendisi ile operasyon mühendisi tarafından birlikte yapılma
 
 ## 10. ADR bekleyen kararlar
 
-1. Merkezi veritabanı ve yerel DB'nin otorite rolü; online yazma yolu.
-2. Yerel sunucu donanımı/OS/container dağıtımı, DB yedeği, yükseltme ve LAN keşfi.
-3. Sync protokolü (outbox API, event endpoint, batch/ACK) ve event ordering partition key'i.
-4. Auth token/session'in yerel servisle internet olmadan doğrulanması ve rol iptal SLA'sı.
+1. Merkezi veritabanı ve yerel DB'nin otorite rolü; online yazma yolu. (**Faz 13 uygulandı:** Şube LAN Hub'ı yerel PostgreSQL'i yazma otoritesi kullanıp `sync.outbox` ile bulut `sync.inbound_events` defterine eşitler; çoklu şube çapında ana katalog otoritesi buluttadır.)
+2. Yerel sunucu donanımı/OS/container dağıtımı, DB yedeği, yükseltme ve LAN keşfi. (**Faz 13 uygulandı:** `compose.lan.yaml` şablonu.)
+3. Sync protokolü (outbox API, event endpoint, batch/ACK) ve event ordering partition key'i. (**Faz 13 uygulandı:** `GET /sync/status`, `GET /sync/outbox`, `POST /sync/flush`, `POST /sync/batch`, `partition_key` + `payload_hash`.)
+4. Auth token/session'in yerel servisle internet olmadan doğrulanması ve rol iptal SLA'sı. (**Faz 10 + Faz 13 uygulandı:** Ortak `HIPOS_JWT_SECRET` + `auth.pin_codes`.)
 5. Uygulamanın başta hangi operasyonları yerel sunucuda çalıştıracağı; POS ödeme/mali cihaz sağlayıcılarının internet bağımlılığı.
-6. Server/LAN tamamen yokken cihaz içi offline desteğin ürün kapsamı.
-7. Conflict resolution operatör ekranı ve destek/audit akışı.
+6. Server/LAN tamamen yokken cihaz içi offline desteğin ürün kapsamı. (Browser-only kuyruk kapsam dışıdır.)
+7. Conflict resolution operatör ekranı ve destek/audit akışı. (**Faz 13 kısmi:** `blocked` olayları ve operatör yeniden deneme ucu `POST /sync/outbox/{eventId}/retry`.)
+
+## 11. Faz 13 — Uygulanan Mimari Özeti (`sync` Şeması ve Hibrit Topoloji)
+
+- **Veritabanı (`SyncDbContext`, `sync` şeması):** `sync.outbox`, `sync.inbound_events` ve `sync.branch_sync_status` tabloları.
+- **API Uçları:**
+  - `GET /api/v1/firms/{firmId}/branches/{branchId}/sync/status` — UI bağlantı rozeti için `nodeMode`, `localApiReachable`, `cloudReachable`, `pendingCount`, `blockedCount`, `oldestPendingAt`, `lastAckAt`, `uiState`.
+  - `GET /api/v1/firms/{firmId}/branches/{branchId}/sync/outbox` — Bekleyen, eşitlenen veya `blocked` durumdaki olayların denetimi.
+  - `POST /api/v1/firms/{firmId}/branches/{branchId}/sync/flush` — Manuel bulut senkronizasyonu ve sağlık kontrolü tetikleyici.
+  - `POST /api/v1/firms/{firmId}/branches/{branchId}/sync/outbox/{eventId}/retry` — `blocked` olayını yeniden kuyruğa alma.
+  - `POST /api/v1/sync/batch` — Bulut idempotent alıcı uç (`eventId` + `payloadHash` denetimi, uyumsuz içerikte `IDEMPOTENCY_CONFLICT`).
+- **Arka Plan İşçisi (`SyncBackgroundWorker`):** `HIPOS_CLOUD_SYNC_URL` tanımlı yerel LAN sunucularında periyodik olarak bekleyen outbox partilerini merkeze iletir ve katlanarak artan yeniden deneme (`exponential backoff`) uygular.
+- **UI Bağlantı Rozeti (`OperationalApps.tsx`):** Kasa, Garson ve Mutfak başlıklarında 3 durumlu rozet (`🟢 Bulut Bağlı`, `🟡 Yerel Ağda · Bulut Bekliyor`, `🔴 Bağlantı Yok` ve varsa `⚠️ Eşitleme Durdu`).

@@ -245,6 +245,206 @@ public static class EscPosBuilder
         return ms.ToArray();
     }
 
+    public static byte[] BuildCashDrawerKick()
+    {
+        return new byte[] { 0x1B, 0x40, 0x1B, 0x70, 0x00, 0x19, 0xFA };
+    }
+
+    public static byte[] BuildKitchenVoidTicket(
+        string tableName,
+        string actorName,
+        string orderNumber,
+        DateTimeOffset cancelledAt,
+        IReadOnlyList<(string ProductName, int Quantity)> items,
+        string reason,
+        string stationHeader = "HIPOS MUTFAK",
+        string? branchTitle = null)
+    {
+        var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+
+        bw.Write(new byte[] { 0x1B, 0x40 }); // ESC @
+        bw.Write(new byte[] { 0x1B, 0x74, 0x3D }); // PC857
+
+        SetAlignment(bw, 1);
+        SetDoubleSize(bw, true);
+        SetBold(bw, true);
+        WriteText(bw, "*** IPTAL BILETI ***\n");
+        SetDoubleSize(bw, false);
+        WriteText(bw, $"{stationHeader}\n");
+        SetBold(bw, false);
+        if (!string.IsNullOrWhiteSpace(branchTitle))
+        {
+            WriteText(bw, $"{branchTitle}\n");
+        }
+        WriteText(bw, "================================================\n");
+
+        SetAlignment(bw, 0);
+        WriteText(bw, $"Masa   : {tableName.ToUpperInvariant()}\n");
+        WriteText(bw, $"Islem  : {actorName}\n");
+        WriteText(bw, $"Saat   : {cancelledAt.ToLocalTime():HH:mm:ss}\n");
+        WriteText(bw, $"Siparis: #{orderNumber}\n");
+        WriteText(bw, "------------------------------------------------\n");
+
+        foreach (var (productName, quantity) in items)
+        {
+            SetDoubleSize(bw, true);
+            SetBold(bw, true);
+            WriteText(bw, $"IPTAL -{quantity}x {productName}\n");
+            SetDoubleSize(bw, false);
+            SetBold(bw, false);
+        }
+
+        WriteText(bw, "------------------------------------------------\n");
+        SetBold(bw, true);
+        WriteText(bw, $"GEREKCE: {(string.IsNullOrWhiteSpace(reason) ? "Belirtilmedi" : reason)}\n");
+        SetBold(bw, false);
+        WriteText(bw, "================================================\n");
+
+        WriteText(bw, "\n\n\n\n\n");
+        bw.Write(new byte[] { 0x1D, 0x56, 0x42, 0x00 }); // Cut
+        bw.Write(new byte[] { 0x1B, 0x42, 0x03, 0x02 }); // Urgent 3x beep
+
+        return ms.ToArray();
+    }
+
+    public static byte[] BuildZReportReceipt(
+        string firmTitle,
+        string branchTitle,
+        Cash.ZReportView report)
+    {
+        var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+
+        bw.Write(new byte[] { 0x1B, 0x40 }); // ESC @
+        bw.Write(new byte[] { 0x1B, 0x74, 0x3D }); // PC857
+
+        SetAlignment(bw, 1);
+        SetDoubleSize(bw, true);
+        WriteText(bw, $"{firmTitle}\n");
+        SetDoubleSize(bw, false);
+        WriteText(bw, $"{branchTitle}\n");
+        SetBold(bw, true);
+        WriteText(bw, report.ReportType == "Z" ? "GUN SONU Z-RAPORU\n" : "GUN ICI X-RAPORU\n");
+        SetBold(bw, false);
+        WriteText(bw, "================================================\n");
+
+        SetAlignment(bw, 0);
+        WriteText(bw, $"Rapor No : {report.ReportNumber}\n");
+        WriteText(bw, $"Kasa     : {report.RegisterName} ({report.RegisterCode})\n");
+        WriteText(bw, $"Acilis   : {report.OpenedAt.ToLocalTime():dd.MM.yyyy HH:mm} ({report.OpenedBy})\n");
+        if (report.ClosedAt is { } closedAt)
+        {
+            WriteText(bw, $"Kapanis  : {closedAt.ToLocalTime():dd.MM.yyyy HH:mm} ({report.ClosedBy ?? "-"})\n");
+        }
+        else
+        {
+            WriteText(bw, $"Rapor Ani: {report.GeneratedAt.ToLocalTime():dd.MM.yyyy HH:mm} (ACIK VARDIYA)\n");
+        }
+        WriteText(bw, "================================================\n");
+
+        static string LineRow(string label, string value)
+        {
+            var safeLabel = label.Length > 28 ? label[..28] : label;
+            return $"{safeLabel,-28}{value,20}\n";
+        }
+
+        SetBold(bw, true);
+        WriteText(bw, "SATIS VE CIRO OZETI\n");
+        SetBold(bw, false);
+        WriteText(bw, LineRow("Tamamlanan Adisyon", $"{report.Sales.CheckCount} adet"));
+        WriteText(bw, LineRow("Brut Satis", FormatMoney(report.Sales.GrossSalesMinor)));
+        SetBold(bw, true);
+        WriteText(bw, LineRow("NET CIRO", FormatMoney(report.Sales.NetSalesMinor)));
+        SetBold(bw, false);
+        WriteText(bw, "------------------------------------------------\n");
+
+        SetBold(bw, true);
+        WriteText(bw, "ODEME KANALLARI DAGILIMI\n");
+        SetBold(bw, false);
+        if (report.Tenders.Count == 0)
+        {
+            WriteText(bw, "Odeme hareketi bulunmuyor.\n");
+        }
+        else
+        {
+            foreach (var tender in report.Tenders)
+            {
+                WriteText(bw, LineRow($"{tender.Label} ({tender.TransactionCount}x)", FormatMoney(tender.AmountMinor)));
+            }
+        }
+        if (report.Taxes.Count > 0)
+        {
+            WriteText(bw, "------------------------------------------------\n");
+            foreach (var tax in report.Taxes)
+            {
+                WriteText(bw, LineRow($"KDV %{tax.TaxRatePercent} (Matrah {FormatMoney(tax.TaxBaseMinor)})", FormatMoney(tax.TaxAmountMinor)));
+            }
+        }
+        WriteText(bw, "================================================\n");
+
+        SetBold(bw, true);
+        WriteText(bw, "KASA CEKMECESI MUTABAKATI\n");
+        SetBold(bw, false);
+        WriteText(bw, LineRow("Acilis Avansi", FormatMoney(report.CashDrawer.OpeningFloatMinor)));
+        WriteText(bw, LineRow("Nakit Satislar (+)", FormatMoney(report.CashDrawer.CashSalesMinor)));
+        if (report.CashDrawer.CashInMinor > 0)
+            WriteText(bw, LineRow("Manuel Nakit Giris (+)", FormatMoney(report.CashDrawer.CashInMinor)));
+        if (report.CashDrawer.CashOutMinor > 0)
+            WriteText(bw, LineRow("Masraf / Tediye Cikis (-)", FormatMoney(report.CashDrawer.CashOutMinor)));
+        SetBold(bw, true);
+        WriteText(bw, LineRow("BEKLENEN NAKIT", FormatMoney(report.CashDrawer.ExpectedCashMinor)));
+        SetBold(bw, false);
+        if (report.CashDrawer.CountedCashMinor is { } counted)
+        {
+            WriteText(bw, LineRow("SAYILAN FIZIKI NAKIT", FormatMoney(counted)));
+        }
+        if (report.CashDrawer.DifferenceMinor is { } diff)
+        {
+            var diffLabel = diff == 0 ? "KASA FARKI (DENK)" : diff > 0 ? "KASA FAZLASI" : "KASA ACIGI";
+            SetBold(bw, true);
+            WriteText(bw, LineRow(diffLabel, FormatMoney(diff)));
+            SetBold(bw, false);
+        }
+        if (report.CashDrawer.RetainedFloatMinor is { } retained)
+        {
+            WriteText(bw, LineRow("Yarina Devreden Avans", FormatMoney(retained)));
+        }
+        if (report.CashDrawer.DroppedRevenueMinor is { } dropped)
+        {
+            SetBold(bw, true);
+            WriteText(bw, LineRow("Teslim Hasılati (Safe Drop)", FormatMoney(dropped)));
+            SetBold(bw, false);
+        }
+
+        if (report.Denominations.Count > 0)
+        {
+            WriteText(bw, "------------------------------------------------\n");
+            SetBold(bw, true);
+            WriteText(bw, "KUPUR SAYIMI\n");
+            SetBold(bw, false);
+            foreach (var d in report.Denominations)
+            {
+                WriteText(bw, LineRow($"{FormatMoney(d.DenominationMinor)} x {d.Quantity}", FormatMoney(d.TotalMinor)));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.CloseNote))
+        {
+            WriteText(bw, "------------------------------------------------\n");
+            WriteText(bw, $"Not: {report.CloseNote}\n");
+        }
+
+        WriteText(bw, "================================================\n");
+        SetAlignment(bw, 1);
+        WriteText(bw, "MALI DEGERI YOKTUR - VARDIYA TUTANAGI\n");
+        WriteText(bw, "================================================\n");
+        WriteText(bw, "\n\n\n\n\n");
+        bw.Write(new byte[] { 0x1D, 0x56, 0x42, 0x00 }); // Cut
+
+        return ms.ToArray();
+    }
+
     private static void SetAlignment(BinaryWriter bw, byte align) // 0=left, 1=center, 2=right
     {
         bw.Write(new byte[] { 0x1B, 0x61, align });

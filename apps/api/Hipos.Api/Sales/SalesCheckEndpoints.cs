@@ -7,6 +7,7 @@ using Hipos.Api.Features;
 using Hipos.Api.Printing;
 using Hipos.Api.Realtime;
 using Hipos.Api.Service;
+using Hipos.Api.Sync;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -66,7 +67,7 @@ public static class SalesCheckEndpoints
 
         group.MapPost("", async (string firmId, string branchId, CreateSalesCheck command,
             HttpContext context, SalesDbContext db, SalesOrders sales, FeatureNewWorkGate gate, IRestaurantEventHub eventHub,
-            [FromServices] PrintingService printing, [FromServices] IServiceScopeFactory scopeFactory) =>
+            [FromServices] PrintingService printing, [FromServices] SyncService sync, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -100,6 +101,29 @@ public static class SalesCheckEndpoints
                 eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "occupied" });
             }
 
+            if (result.Created)
+            {
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: check.Id.ToString(),
+                    eventType: "check.created",
+                    payload: new
+                    {
+                        checkId = check.Id,
+                        firstOrderId = command.FirstOrderId,
+                        tableId = check.TableId,
+                        customerId = check.CustomerId,
+                        waiterId = check.WaiterId,
+                        totalMinor = persisted.TotalMinor,
+                        status = persisted.Status,
+                        createdAt = persisted.CreatedAt,
+                    },
+                    idempotencyKey: $"check.created:{command.RequestId}",
+                    cancellationToken: context.RequestAborted);
+            }
+
             if ((await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
             {
                 var orderGuid = command.FirstOrderId;
@@ -125,7 +149,7 @@ public static class SalesCheckEndpoints
 
         group.MapPost("/{checkId:guid}/orders", async (string firmId, string branchId, Guid checkId,
             CreatePosOrder command, HttpContext context, SalesDbContext db, SalesOrders sales, IRestaurantEventHub eventHub,
-            [FromServices] PrintingService printing, [FromServices] IServiceScopeFactory scopeFactory) =>
+            [FromServices] PrintingService printing, [FromServices] SyncService sync, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -135,6 +159,25 @@ public static class SalesCheckEndpoints
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
             eventHub.Publish("check.updated", firmId, branchId, new { checkId, orderId = command.OrderId });
             eventHub.Publish("order.created", firmId, branchId, new { orderId = command.OrderId, checkId });
+
+            if (result.Created)
+            {
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: checkId.ToString(),
+                    eventType: "order.added",
+                    payload: new
+                    {
+                        checkId,
+                        orderId = command.OrderId,
+                        itemCount = command.Items?.Count ?? 0,
+                        totalMinor = detail?.TotalMinor,
+                    },
+                    idempotencyKey: $"order.added:{command.OrderId}",
+                    cancellationToken: context.RequestAborted);
+            }
 
             if ((await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
             {
@@ -159,7 +202,7 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("/{checkId:guid}/split", async (string firmId, string branchId, Guid checkId,
-            SplitSalesCheck command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate) =>
+            SplitSalesCheck command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -272,6 +315,15 @@ public static class SalesCheckEndpoints
                     TargetCheckId = targetId, FirmId = firmId, BranchId = branchId, Fingerprint = fingerprint, CreatedAt = now });
                 await db.SaveChangesAsync(context.RequestAborted);
                 await transaction.CommitAsync(context.RequestAborted);
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: checkId.ToString(),
+                    eventType: "check.split",
+                    payload: new { sourceCheckId = checkId, targetCheckId = targetId, items = normalized, version = source.Version, occurredAt = now },
+                    idempotencyKey: $"check.split:{command.RequestId}",
+                    cancellationToken: context.RequestAborted);
                 return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{targetId}",
                     new { repeated = false, sourceCheckId = checkId, source = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted), check = await DetailAsync(db, firmId, branchId, targetId, context.RequestAborted) });
             }
@@ -299,7 +351,9 @@ public static class SalesCheckEndpoints
 
         group.MapPost("/{checkId:guid}/adjustments", async (string firmId, string branchId, Guid checkId,
             CreateCheckAdjustment command, HttpContext context, SalesDbContext db, FeatureNewWorkGate gate,
-            [FromServices] AuthDbContext? authDb) =>
+            FeatureRuntimeCapabilities runtime, IRestaurantEventHub eventHub,
+            [FromServices] AuthDbContext? authDb, [FromServices] PrintingService printing,
+            [FromServices] SyncService sync, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -441,6 +495,24 @@ public static class SalesCheckEndpoints
                         command.Quantity, reason.Length == 0 ? "Mutfağa iptal bildirimi" : $"Mutfağa iptal bildirimi · Gerekçe: {reason}",
                         System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(line.OptionsJson) ?? [])));
                 orderForLine.Version++;
+
+                var priorVoidedQty = priorAdjustments
+                    .Where(a => a.OrderLineId == line.Id && a.Action == "void")
+                    .Sum(a => a.Quantity);
+                if (runtime.KitchenReady && priorVoidedQty + command.Quantity >= line.Quantity)
+                {
+                    await CancelKitchenTasksAsync(
+                        db.Database.GetDbConnection(),
+                        transaction.GetDbTransaction()!,
+                        firmId,
+                        branchId,
+                        auditActor: approvedBy != null ? $"{actor} (Onaylayan: {approvedBy})" : actor,
+                        reason: string.IsNullOrWhiteSpace(reason) ? "Satıştan iptal edildi" : reason,
+                        now,
+                        orderLineId: line.Id,
+                        orderIds: null,
+                        context.RequestAborted);
+                }
             }
             check.Version++;
             var auditActor = approvedBy != null ? $"{actor} (Onaylayan: {approvedBy})" : actor;
@@ -448,6 +520,62 @@ public static class SalesCheckEndpoints
                 Actor = auditActor, Action = $"{command.Action}_applied", Version = check.Version, OccurredAt = now });
             await db.SaveChangesAsync(context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
+
+            eventHub.Publish("check.updated", firmId, branchId, new { checkId, tableId = check.TableId, action = command.Action });
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "check",
+                aggregateId: checkId.ToString(),
+                eventType: "check.adjusted",
+                payload: new
+                {
+                    checkId,
+                    requestId = command.RequestId,
+                    action = command.Action,
+                    amountMinor = amount,
+                    orderLineId = command.OrderLineId,
+                    quantity = command.Quantity,
+                    reason,
+                    actor = auditActor,
+                    version = check.Version,
+                    occurredAt = now,
+                },
+                idempotencyKey: $"check.adjusted:{command.RequestId}",
+                cancellationToken: context.RequestAborted);
+            if (command.Action == "void" && line is not null)
+            {
+                eventHub.Publish("kitchen.updated", firmId, branchId, new
+                {
+                    checkId,
+                    tableId = check.TableId,
+                    status = "cancelled",
+                    action = "void",
+                    productName = line.ProductName,
+                    quantity = command.Quantity,
+                    reason = string.IsNullOrWhiteSpace(reason) ? "İptal edildi" : reason,
+                });
+
+                if ((await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
+                {
+                    var voidItemList = new[] { (line.ProductId, line.ProductName, command.Quantity) };
+                    var voidReason = string.IsNullOrWhiteSpace(reason) ? "Müşteri/Kasiyer iptali" : reason;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var scope = scopeFactory.CreateScope();
+                            var scopedPrinting = scope.ServiceProvider.GetRequiredService<PrintingService>();
+                            await scopedPrinting.PrintKitchenVoidItemsAsync(firmId, branchId, checkId, actor, voidReason, voidItemList);
+                        }
+                        catch
+                        {
+                            // Logged in PrinterTransport
+                        }
+                    });
+                }
+            }
+
             return Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/adjustments/{row.RequestId}",
                 new { repeated = false, adjustment = ToAdjustmentView(row), check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
@@ -491,7 +619,7 @@ public static class SalesCheckEndpoints
         });
 
         group.MapPost("/{checkId:guid}/payment-attempts", async (string firmId, string branchId, Guid checkId,
-            StartCheckPayment command, HttpContext context, SalesDbContext db, PaymentSimulator payments) =>
+            StartCheckPayment command, HttpContext context, SalesDbContext db, PaymentSimulator payments, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -504,13 +632,38 @@ public static class SalesCheckEndpoints
                 context.RequestAborted, requireCheckCapability: true);
             if (payment.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
+            if (payment.Created && payment.Attempt is not null)
+            {
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: checkId.ToString(),
+                    eventType: "payment.recorded",
+                    payload: new
+                    {
+                        checkId,
+                        orderId = command.OrderId,
+                        attemptId = command.AttemptId,
+                        amountMinor = payment.Attempt.AmountMinor,
+                        method = payment.Attempt.Method,
+                        status = payment.Attempt.Status,
+                        checkStatus = detail?.Status,
+                        paymentStatus = detail?.PaymentStatus,
+                        paidMinor = detail?.PaidMinor,
+                        remainingMinor = detail?.RemainingMinor,
+                        occurredAt = payment.Attempt.UpdatedAt,
+                    },
+                    idempotencyKey: $"payment.recorded:{command.AttemptId}:v{payment.Attempt.Version}",
+                    cancellationToken: context.RequestAborted);
+            }
             return payment.Created ? Results.Created($"/api/v1/firms/{firmId}/branches/{branchId}/sales/checks/{checkId}/payment-attempts/{command.AttemptId}",
                 new { attempt = payment.Attempt, check = detail }) : Results.Ok(new { attempt = payment.Attempt, check = detail });
         });
 
         group.MapPost("/{checkId:guid}/payment-attempts/{attemptId:guid}/resolve", async (string firmId,
             string branchId, Guid checkId, Guid attemptId, ResolveSimulatedPayment command, HttpContext context,
-            SalesDbContext db, PaymentSimulator payments) =>
+            SalesDbContext db, PaymentSimulator payments, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -521,13 +674,38 @@ public static class SalesCheckEndpoints
                 DemoAccess.Resolve(context)!.Name, context.RequestAborted);
             if (result.Failure is { } failure) return Fail(context, failure.Code, failure.Status, failure.Message);
             var detail = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted);
+            if (result.Attempt is not null)
+            {
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: checkId.ToString(),
+                    eventType: "payment.recorded",
+                    payload: new
+                    {
+                        checkId,
+                        orderId = attempt.OrderId,
+                        attemptId,
+                        amountMinor = result.Attempt.AmountMinor,
+                        method = result.Attempt.Method,
+                        status = result.Attempt.Status,
+                        checkStatus = detail?.Status,
+                        paymentStatus = detail?.PaymentStatus,
+                        paidMinor = detail?.PaidMinor,
+                        remainingMinor = detail?.RemainingMinor,
+                        occurredAt = result.Attempt.UpdatedAt,
+                    },
+                    idempotencyKey: $"payment.recorded:{attemptId}:v{result.Attempt.Version}",
+                    cancellationToken: context.RequestAborted);
+            }
             return Results.Ok(new { attempt = result.Attempt, check = detail });
         });
 
         // Ödenecek tutarı sıfır olan (tamamı ikram/iptal/indirim veya boş) adisyonu tahsilat olmadan kapatır.
         group.MapPost("/{checkId:guid}/close-zero-balance", async (string firmId, string branchId, Guid checkId,
             CloseZeroBalanceCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement,
-            IRestaurantEventHub eventHub) =>
+            IRestaurantEventHub eventHub, [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -576,13 +754,24 @@ public static class SalesCheckEndpoints
                 eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
             }
 
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "check",
+                aggregateId: checkId.ToString(),
+                eventType: "check.closed",
+                payload: new { checkId, tableId = check.TableId, actor, reason = "zero_balance", version = check.Version, closedAt = now },
+                idempotencyKey: $"check.closed:{checkId}:v{check.Version}",
+                cancellationToken: context.RequestAborted);
+
             return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
 
         // Açık adisyonu (ödeme alınmamışsa) gerekçeli ve opsiyonel yönetici onayıyla iptal eder.
         group.MapPost("/{checkId:guid}/cancel", async (string firmId, string branchId, Guid checkId,
             CancelSalesCheck command, HttpContext context, SalesDbContext db, PaidCheckTableSettlement settlement,
-            [FromServices] AuthDbContext? authDb, IRestaurantEventHub eventHub) =>
+            FeatureRuntimeCapabilities runtime, [FromServices] AuthDbContext? authDb, IRestaurantEventHub eventHub,
+            [FromServices] PrintingService printing, [FromServices] SyncService sync, [FromServices] IServiceScopeFactory scopeFactory) =>
         {
             var denied = Guard(context, firmId, branchId, salesReady, true);
             if (denied is not null) return denied;
@@ -633,7 +822,7 @@ public static class SalesCheckEndpoints
             if (check.Version != command.ExpectedVersion)
                 return Fail(context, "VERSION_CONFLICT", 409, "Adisyon başka bir işlemle değişti; yeniden yükleyin.");
 
-            var orders = await db.Orders.AsNoTracking().Include(row => row.PaymentAttempts)
+            var orders = await db.Orders.AsNoTracking().Include(row => row.PaymentAttempts).Include(row => row.Lines)
                 .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
                 .ToArrayAsync(context.RequestAborted);
 
@@ -653,19 +842,167 @@ public static class SalesCheckEndpoints
                 Action = "check_cancelled", Version = check.Version, OccurredAt = now,
             });
 
+            if (runtime.KitchenReady && orders.Length > 0)
+            {
+                await CancelKitchenTasksAsync(
+                    db.Database.GetDbConnection(),
+                    transaction.GetDbTransaction()!,
+                    firmId,
+                    branchId,
+                    auditActor,
+                    reason,
+                    now,
+                    orderLineId: null,
+                    orderIds: orders.Select(o => o.Id).ToArray(),
+                    context.RequestAborted);
+            }
+
             await db.SaveChangesAsync(context.RequestAborted);
             if (check.TableId is not null)
                 await settlement.ReleaseAfterPaymentAsync(check.TableId, firmId, branchId, actor, now, context.RequestAborted);
             await transaction.CommitAsync(context.RequestAborted);
 
             eventHub.Publish("check.cancelled", firmId, branchId, new { checkId, tableId = check.TableId });
+            eventHub.Publish("kitchen.updated", firmId, branchId, new
+            {
+                checkId,
+                tableId = check.TableId,
+                status = "cancelled",
+                action = "check_cancelled",
+                reason,
+            });
             if (check.TableId is not null)
             {
                 eventHub.Publish("table.updated", firmId, branchId, new { tableId = check.TableId, status = "vacant" });
             }
 
+            await sync.TryEnqueueAsync(
+                firmId,
+                branchId,
+                aggregateType: "check",
+                aggregateId: checkId.ToString(),
+                eventType: "check.cancelled",
+                payload: new
+                {
+                    checkId,
+                    tableId = check.TableId,
+                    reason,
+                    actor,
+                    approvedBy,
+                    version = check.Version,
+                    cancelledAt = now,
+                },
+                idempotencyKey: $"check.cancelled:{checkId}:v{check.Version}",
+                cancellationToken: context.RequestAborted);
+
+            var cancelledLines = orders
+                .SelectMany(o => o.Lines)
+                .GroupBy(l => (l.ProductId, l.ProductName))
+                .Select(g => (g.Key.ProductId, g.Key.ProductName, Quantity: g.Sum(x => x.Quantity)))
+                .Where(x => x.Quantity > 0)
+                .ToArray();
+
+            if (cancelledLines.Length > 0 &&
+                (await printing.GetConfigAsync(firmId, branchId, context.RequestAborted)).AutoPrintKitchenOnOrder)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var scopedPrinting = scope.ServiceProvider.GetRequiredService<PrintingService>();
+                        await scopedPrinting.PrintKitchenVoidItemsAsync(firmId, branchId, checkId, actor, reason, cancelledLines);
+                    }
+                    catch
+                    {
+                        // Logged in PrinterTransport
+                    }
+                });
+            }
+
             return Results.Ok(new { repeated = false, check = await DetailAsync(db, firmId, branchId, checkId, context.RequestAborted) });
         });
+    }
+
+    private static async Task CancelKitchenTasksAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string firmId,
+        string branchId,
+        string auditActor,
+        string reason,
+        DateTimeOffset now,
+        long? orderLineId,
+        Guid[]? orderIds,
+        CancellationToken cancellationToken)
+    {
+        if (orderLineId is null && (orderIds is null || orderIds.Length == 0))
+            return;
+
+        var safeReason = reason.Length > 240 ? reason[..240] : reason;
+        var safeActor = auditActor.Length > 100 ? auditActor[..100] : auditActor;
+
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = transaction;
+        cmd.CommandText = orderLineId is not null
+            ? """
+              WITH cancelled AS (
+                  UPDATE kitchen.tasks
+                  SET status = 'cancelled',
+                      cancelled_at = @at,
+                      cancellation_reason = @reason,
+                      cancelled_by = @actor,
+                      version = version + 1
+                  WHERE order_line_id = @lineId
+                    AND firm_id = @firm
+                    AND branch_id = @branch
+                    AND status IN ('submitted', 'preparing', 'ready')
+                  RETURNING id, version
+              )
+              INSERT INTO kitchen.task_audit
+                  (request_id, task_id, firm_id, branch_id, actor, action, status, version, occurred_at)
+              SELECT gen_random_uuid(), id, @firm, @branch, @actor, 'cancelled_from_sales', 'cancelled', version, @at
+              FROM cancelled
+              """
+            : """
+              WITH cancelled AS (
+                  UPDATE kitchen.tasks
+                  SET status = 'cancelled',
+                      cancelled_at = @at,
+                      cancellation_reason = @reason,
+                      cancelled_by = @actor,
+                      version = version + 1
+                  WHERE order_id = ANY(@orderIds)
+                    AND firm_id = @firm
+                    AND branch_id = @branch
+                    AND status IN ('submitted', 'preparing', 'ready')
+                  RETURNING id, version
+              )
+              INSERT INTO kitchen.task_audit
+                  (request_id, task_id, firm_id, branch_id, actor, action, status, version, occurred_at)
+              SELECT gen_random_uuid(), id, @firm, @branch, @actor, 'cancelled_from_sales', 'cancelled', version, @at
+              FROM cancelled
+              """;
+
+        void AddParam(string name, object? val)
+        {
+            var p = cmd.CreateParameter();
+            p.ParameterName = name;
+            p.Value = val ?? DBNull.Value;
+            cmd.Parameters.Add(p);
+        }
+
+        AddParam("at", now);
+        AddParam("reason", safeReason);
+        AddParam("actor", safeActor);
+        AddParam("firm", firmId);
+        AddParam("branch", branchId);
+        if (orderLineId is not null)
+            AddParam("lineId", orderLineId.Value);
+        else
+            AddParam("orderIds", orderIds!);
+
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<SalesCheckDetail?> DetailAsync(SalesDbContext db, string firmId,

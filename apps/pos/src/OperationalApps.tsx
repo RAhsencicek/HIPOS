@@ -99,11 +99,16 @@ function useRestaurantRealtime(
           "payment.settled",
           "kitchen.updated",
           "order.created",
+          "sync.status_updated",
+          "sync.batch_applied",
         ];
 
         eventTypes.forEach((type) => {
           eventSource?.addEventListener(type, (e: MessageEvent) => {
             console.log(`⚡ [SSE] Anlık olay: ${type}`, e.data);
+            if (type === "sync.status_updated" || type === "sync.batch_applied") {
+              window.dispatchEvent(new CustomEvent("hipos:sync-updated"));
+            }
             try {
               const parsed = JSON.parse(e.data);
               onEvent({ type, data: parsed.data ?? parsed });
@@ -134,6 +139,159 @@ function useRestaurantRealtime(
       eventSource?.close();
     };
   }, [onEvent, enabled, authToken, scope.firmId, scope.branchId, appKind]);
+}
+
+type BranchSyncStatus = {
+  firmId: string;
+  branchId: string;
+  nodeMode: string;
+  localApiReachable: boolean;
+  cloudReachable: boolean;
+  pendingCount: number;
+  blockedCount: number;
+  oldestPendingAt?: string | null;
+  lastAckAt?: string | null;
+  lastCloudCheckAt?: string | null;
+  lastError?: string | null;
+  uiState: string;
+  originNodeId: string;
+};
+
+function useBranchSyncStatus(firmId: string, branchId: string, enabled: boolean, actor: string) {
+  const [syncStatus, setSyncStatus] = useState<BranchSyncStatus | null>(null);
+  const [localReachable, setLocalReachable] = useState(true);
+  const [flushing, setFlushing] = useState(false);
+
+  const refreshSyncStatus = useCallback(async () => {
+    if (!enabled) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setLocalReachable(false);
+      return;
+    }
+    try {
+      const data = await request<BranchSyncStatus>(
+        `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/sync/status`,
+        actor
+      );
+      setSyncStatus(data);
+      setLocalReachable(true);
+    } catch (cause) {
+      const err = cause as ApiRequestError | undefined;
+      if (!err?.status) setLocalReachable(false);
+    }
+  }, [enabled, firmId, branchId, actor]);
+
+  const triggerFlush = useCallback(async () => {
+    if (!enabled || flushing) return;
+    if (syncStatus?.nodeMode !== "lan_hub") {
+      await refreshSyncStatus();
+      return;
+    }
+    setFlushing(true);
+    try {
+      await request(
+        `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/sync/flush`,
+        actor,
+        {}
+      );
+    } catch {
+      // Hata durumunda refreshSyncStatus mevcut outbox/bulut durumunu yansıtır
+    } finally {
+      setFlushing(false);
+      void refreshSyncStatus();
+    }
+  }, [enabled, flushing, syncStatus?.nodeMode, firmId, branchId, actor, refreshSyncStatus]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void refreshSyncStatus();
+    const interval = window.setInterval(() => {
+      void refreshSyncStatus();
+    }, 10_000);
+    const onSyncEvt = () => { void refreshSyncStatus(); };
+    const onOnline = () => {
+      setLocalReachable(true);
+      void refreshSyncStatus();
+    };
+    const onOffline = () => { setLocalReachable(false); };
+    window.addEventListener("hipos:sync-updated", onSyncEvt);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("hipos:sync-updated", onSyncEvt);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [enabled, refreshSyncStatus]);
+
+  return { syncStatus, localReachable, flushing, refreshSyncStatus, triggerFlush };
+}
+
+function SyncStatusPill({
+  syncStatus,
+  localReachable,
+  apiOffline,
+  apiLoading,
+  flushing,
+  onTrigger,
+}: {
+  syncStatus: BranchSyncStatus | null;
+  localReachable: boolean;
+  apiOffline?: boolean;
+  apiLoading?: boolean;
+  flushing: boolean;
+  onTrigger: () => void;
+}) {
+  let stateClass = "online";
+  let dataState = "online_synced";
+  let label = syncStatus?.nodeMode === "lan_hub" ? "Bulut Bağlı (LAN)" : "Bulut Bağlı";
+  let title = syncStatus?.lastAckAt
+    ? `Bulut senkronizasyonu güncel (Son aktarım: ${new Date(syncStatus.lastAckAt).toLocaleTimeString("tr-TR")})`
+    : "Bulut bağlantısı aktif";
+
+  if (!localReachable || apiOffline) {
+    stateClass = "offline";
+    dataState = "offline";
+    label = "Bağlantı Yok";
+    title = "Yerel POS sunucusuna ulaşılamıyor. Ağ ve sunucu durumunu kontrol edin.";
+  } else if (syncStatus?.uiState === "sync_blocked" || (syncStatus?.blockedCount ?? 0) > 0) {
+    const blocked = syncStatus?.blockedCount ?? 0;
+    stateClass = "blocked";
+    dataState = "sync_blocked";
+    label = `Eşitleme Durdu (${blocked})`;
+    title = syncStatus?.lastError || "Çakışan veya engellenen senkronizasyon kayıtları var; yeniden denemek için tıklayın.";
+  } else if (
+    syncStatus?.uiState === "lan_pending" ||
+    (syncStatus?.nodeMode === "lan_hub" && (!syncStatus.cloudReachable || syncStatus.pendingCount > 0))
+  ) {
+    const pending = syncStatus?.pendingCount ?? 0;
+    stateClass = "lan-pending";
+    dataState = "lan_pending";
+    label = pending > 0 ? `Yerel Ağda · Bulut Bekliyor (${pending})` : "Yerel Ağda · Bulut Bekliyor";
+    title = syncStatus?.lastError
+      ? `Yerel ağda çalışıyor (${syncStatus.lastError}). Şimdi buluta eşitlemek için tıklayın.`
+      : "Siparişler yerel sunucuda güvende, internet bağlantısı gelince buluta aktarılır. Tıklayarak hemen deneyin.";
+  } else if (apiLoading && !syncStatus) {
+    stateClass = "checking";
+    dataState = "checking";
+    label = "Bağlanıyor";
+    title = "Sunucu ve senkronizasyon durumu kontrol ediliyor…";
+  }
+
+  return (
+    <button
+      type="button"
+      className={`pos-sync-pill ${stateClass}`}
+      data-sync-state={dataState}
+      disabled={flushing}
+      onClick={onTrigger}
+      title={title}
+    >
+      <i className="sync-dot" aria-hidden="true" />
+      <span>{flushing ? "Eşitleniyor…" : label}</span>
+    </button>
+  );
 }
 type OpenCheck = { id: string; status: string; paymentStatus?: string; tableId?: string | null; version: number; totalMinor: number; paidMinor?: number; remainingMinor?: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[]; payments: Array<{ id: string; amountMinor?: number; status?: string }>; orders: Array<{ id: string; version?: number; remainingMinor?: number; items: Array<{ id: number; productName: string; quantity: number; unitPriceMinor: number; note?: string | null }> }> };
 type KitchenStatus = "pending" | "preparing" | "ready" | "served" | "cancelled";
@@ -272,6 +430,12 @@ export function CashierApp() {
   const [stationError, setStationError] = useState("");
   const initialStationChecked = useRef(false);
   const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
+  const { syncStatus, localReachable, flushing: syncFlushing, triggerFlush: triggerSyncFlush } = useBranchSyncStatus(
+    firmId,
+    branchId,
+    Boolean(cashierSession),
+    "pos-single"
+  );
 
   useEffect(() => {
     if (!cashierSession) return;
@@ -313,6 +477,8 @@ export function CashierApp() {
   const [morningDismissed, setMorningDismissed] = useState(false);
   const [retainedFloatInput, setRetainedFloatInput] = useState("");
   const [activeZReport, setActiveZReport] = useState<ZReport | null>(null);
+  const [zReportPrinting, setZReportPrinting] = useState(false);
+  const [drawerOpening, setDrawerOpening] = useState(false);
   const zReportDialogRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = zReportDialogRef.current;
@@ -329,6 +495,46 @@ export function CashierApp() {
       setActiveZReport(res.report);
     } catch (cause) {
       setCashNotice(cause instanceof Error ? cause.message : "Z-Raporu alınamadı.");
+    }
+  }
+
+  async function printZReport(shiftId: string) {
+    if (zReportPrinting) return;
+    setZReportPrinting(true);
+    try {
+      const res = await request<{ success: boolean; shiftId: string; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/cash/shifts/${encodeURIComponent(shiftId)}/print-z-report`,
+        "pos-single",
+        {}
+      );
+      showPrintToast(
+        `${activeZReport?.reportType === "Z" ? "Z-Raporu" : "X-Raporu"} Yazdırıldı`,
+        `Kasa termal yazıcısı (${res.transportUsed})`,
+        "🧾"
+      );
+      setCashNotice(`🧾 ${activeZReport?.reportType === "Z" ? "Z-Raporu" : "X-Raporu"} kasa yazıcısına gönderildi (${res.transportUsed}).`);
+    } catch (cause) {
+      showPrintToast("Z-Raporu Yazdırılamadı", cause instanceof Error ? cause.message : "Yazıcı hatası", "⚠️");
+      setCashNotice(cause instanceof Error ? `Yazıcı hatası: ${cause.message}` : "Z-Raporu yazdırılamadı.");
+    } finally {
+      setZReportPrinting(false);
+    }
+  }
+
+  async function openCashDrawer() {
+    if (drawerOpening) return;
+    setDrawerOpening(true);
+    try {
+      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
+        `/api/v1/firms/${firmId}/branches/${branchId}/printing/open-drawer`,
+        "pos-single",
+        {}
+      );
+      showPrintToast("Nakit Çekmecesi Açıldı", `RJ11 sinyali gönderildi (${res.transportUsed})`, "💵");
+    } catch (cause) {
+      showPrintToast("Çekmece Açılamadı", cause instanceof Error ? cause.message : "Yazıcı/Köprü bağlantısı yok", "⚠️");
+    } finally {
+      setDrawerOpening(false);
     }
   }
 
@@ -1251,6 +1457,116 @@ export function CashierApp() {
     return selectedQuickCat === "all" || product.category.id === selectedQuickCat;
   });
 
+  // USB HID Barkod Okuyucu dinleyicisi (Hızlı Satış ekranında SKU/barkod eşleşmesi)
+  const barcodeBufferRef = useRef("");
+  const barcodeLastKeyRef = useRef(0);
+  const barcodeOptionCacheRef = useRef(new Map<string, boolean>());
+  const barcodeProductsRef = useRef(catalogProducts);
+  barcodeProductsRef.current = catalogProducts;
+  const barcodeBlockedRef = useRef(false);
+  barcodeBlockedRef.current = Boolean(
+    !cashierSession ||
+    cashierMode !== "quick" ||
+    pendingQuick ||
+    stationModalOpen ||
+    cashDialog ||
+    activeZReport ||
+    printerSettingsOpen ||
+    quickOptionProduct ||
+    parkDialogOpen ||
+    cancellingCheck
+  );
+
+  useEffect(() => {
+    function handleScannedBarcode(rawCode: string) {
+      const code = rawCode.trim().toLowerCase();
+      if (!code) return;
+      const match = barcodeProductsRef.current.find((p) => (p.sku ?? "").trim().toLowerCase() === code);
+      if (!match) {
+        showPrintToast("Barkod Bulunamadı", `Kod: ${rawCode.trim()}`, "⚠️");
+        return;
+      }
+      if (match.isOutOfStock) {
+        setQuickError(`${match.name} tükendi. Mutfak stoğunda ${match.limitingIngredientName || "hammadde"} bulunmuyor.`);
+        return;
+      }
+      void (async () => {
+        try {
+          let hasOptions = barcodeOptionCacheRef.current.get(match.id);
+          if (hasOptions === undefined) {
+            const res = await posFetch(
+              `/api/v1/firms/${encodeURIComponent(firmId)}/branches/${encodeURIComponent(branchId)}/catalog/products/${encodeURIComponent(match.id)}/option-groups`,
+              { demoActor: "pos-single" }
+            );
+            if (res.ok) {
+              const data = (await res.json()) as { items?: unknown[] };
+              hasOptions = Array.isArray(data.items) && data.items.length > 0;
+              barcodeOptionCacheRef.current.set(match.id, hasOptions);
+            } else {
+              hasOptions = false;
+            }
+          }
+          if (hasOptions) {
+            setQuickOptionSelection(null);
+            setQuickOptionProduct(match);
+            return;
+          }
+          setQuickSuccess(null);
+          setQuickNotice("");
+          setQuickCart((current) => {
+            const idx = current.findIndex((item) => item.product.id === match.id && item.options.length === 0);
+            if (idx >= 0) {
+              return current.map((item, i) => (i === idx ? { ...item, quantity: item.quantity + 1 } : item));
+            }
+            return [...current, { id: createRequestId(), product: match, quantity: 1, options: [] }];
+          });
+          showPrintToast("Barkod Okundu", `${match.name} sepete eklendi`, "📷");
+        } catch {
+          setQuickOptionSelection(null);
+          setQuickOptionProduct(match);
+        }
+      })();
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (barcodeBlockedRef.current) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const now = performance.now();
+      if (event.key === "Enter") {
+        const scanned = barcodeBufferRef.current;
+        const delta = now - barcodeLastKeyRef.current;
+        barcodeBufferRef.current = "";
+        barcodeLastKeyRef.current = 0;
+        if (scanned.length >= 4 && delta <= 140) {
+          event.preventDefault();
+          handleScannedBarcode(scanned);
+        }
+        return;
+      }
+      if (event.key.length === 1) {
+        if (now - barcodeLastKeyRef.current > 75) {
+          barcodeBufferRef.current = event.key;
+        } else {
+          barcodeBufferRef.current += event.key;
+        }
+        barcodeLastKeyRef.current = now;
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [firmId, branchId]);
+
   if (!cashierSession) {
     return (
       <PinPadModal
@@ -1381,6 +1697,16 @@ export function CashierApp() {
           <button
             type="button"
             className="cashier-header-btn"
+            disabled={drawerOpening}
+            onClick={() => void openCashDrawer()}
+            title="Nakit çekmecesini aç (RJ11)"
+          >
+            {drawerOpening ? "Açılıyor…" : "💵 Çekmece"}
+          </button>
+
+          <button
+            type="button"
+            className="cashier-header-btn"
             onClick={() => setPrinterSettingsOpen(true)}
             title="Şube yazıcıları (Kasa, Mutfak, Bar) ve Print Bridge durumu"
           >
@@ -1411,14 +1737,15 @@ export function CashierApp() {
           </button>
         </div>
 
-        {/* Bağlantı Durumu */}
-        <span
-          className={`cashier-conn-dot ${error ? "offline" : loading ? "checking" : "online"}`}
-          title={error ? "Sunucu bağlantısı yok" : loading ? "Bağlanıyor…" : "Sisteme bağlı"}
-        >
-          <i />
-          <span>{error ? "Çevrimdışı" : loading ? "Bağlanıyor" : "Bağlı"}</span>
-        </span>
+        {/* Hibrit Bağlantı & Bulut Eşitleme Durumu */}
+        <SyncStatusPill
+          syncStatus={syncStatus}
+          localReachable={localReachable}
+          apiOffline={Boolean(error)}
+          apiLoading={loading}
+          flushing={syncFlushing}
+          onTrigger={() => void triggerSyncFlush()}
+        />
       </div>
     </header>
     {!cashLoading && !isShiftOpen && morningDismissed && <section className="cashier-shift-closed-banner" aria-label="Vardiya kapalı">
@@ -2688,12 +3015,11 @@ export function CashierApp() {
             <button
               type="button"
               className="ops-primary"
-              onClick={() => {
-                showPrintToast("Z-Raporu Yazdırıldı", "Kasa termal yazıcısına aktarıldı", "🧾");
-              }}
+              disabled={zReportPrinting}
+              onClick={() => void printZReport(activeZReport.shiftId)}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              🖨️ Fiş Yazdır
+              {zReportPrinting ? "⏳ Yazdırılıyor…" : "🖨️ Fiş Yazdır"}
             </button>
             <button type="button" className="waiter-cancel-custom" onClick={() => setActiveZReport(null)}>
               Kapat
@@ -2997,6 +3323,16 @@ export function WaiterApp() {
   const [configuredFloors, setConfiguredFloors] = useState<string[]>([]);
   const [kitchenItems, setKitchenItems] = useState<KitchenStatusItem[]>([]);
   const [kitchenNotice, setKitchenNotice] = useState("");
+  const kitchenNoticeTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (kitchenNoticeTimer.current) window.clearTimeout(kitchenNoticeTimer.current);
+  }, []);
+  const { syncStatus, localReachable, flushing: syncFlushing, triggerFlush: triggerSyncFlush } = useBranchSyncStatus(
+    firmId,
+    branchId,
+    Boolean(waiterSession),
+    "pos-single"
+  );
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [tableId, setTableId] = useState("");
   const [waiterId, setWaiterId] = useState("");
@@ -3180,6 +3516,15 @@ export function WaiterApp() {
   useRestaurantRealtime(
     useCallback(
       (evt) => {
+        if (evt.type === "kitchen.updated" && evt.data?.status === "ready") {
+          const tableLabel = evt.data.tableName ? `${evt.data.tableName} · ` : "";
+          const qtyLabel = evt.data.quantity ? `${evt.data.quantity}× ` : "";
+          const productLabel = evt.data.productName ?? "Sipariş";
+          setKitchenNotice(`🔔 HAZIR: ${tableLabel}${qtyLabel}${productLabel} servise hazır!`);
+          if (kitchenNoticeTimer.current) window.clearTimeout(kitchenNoticeTimer.current);
+          kitchenNoticeTimer.current = window.setTimeout(() => setKitchenNotice(""), 12000);
+          playKitchenChime();
+        }
         if (tableStatusSaving || saving || operationSaving) return;
         console.log("⚡ [WaiterApp] Anlık masa/adisyon güncellemesi alındı:", evt.type);
         void reload();
@@ -3700,7 +4045,14 @@ export function WaiterApp() {
         <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>
         <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => setPrinterSettingsOpen(true)}>⚙️ Yazıcı Ayarları</button>
         {selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}
-        <span className={`waiter-connection ${connectionState}`}><i />{connectionState === "connected" ? "Bağlı" : connectionState === "checking" ? "Bağlanıyor" : "Veri alınamıyor"}</span>
+        <SyncStatusPill
+          syncStatus={syncStatus}
+          localReachable={localReachable}
+          apiOffline={connectionState === "unavailable"}
+          apiLoading={connectionState === "checking"}
+          flushing={syncFlushing}
+          onTrigger={() => void triggerSyncFlush()}
+        />
       </div>
     </header>
     {!selectedTable && notice && <p className="ops-success" role="status" style={{ margin: "12px 16px", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}</p>}
@@ -4002,6 +4354,12 @@ export function KitchenApp() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [savingTaskId, setSavingTaskId] = useState("");
+  const { syncStatus, localReachable, flushing: syncFlushing, triggerFlush: triggerSyncFlush } = useBranchSyncStatus(
+    firmId,
+    branchId,
+    Boolean(kitchenSession),
+    "pos-single"
+  );
   const [kitchenToast, setKitchenToast] = useState<{ title: string; subtitle?: string; icon?: string } | null>(null);
   const kitchenToastTimer = useRef<number | null>(null);
 
@@ -4285,7 +4643,14 @@ export function KitchenApp() {
   return <main className="ops-shell kitchen-shell">
     <header className="ops-header">
       <a href={buildPosTerminalHref("/kitchen", terminalScope)} className="ops-brand">HIPOS <span>MUTFAK</span></a>
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+        <SyncStatusPill
+          syncStatus={syncStatus}
+          localReachable={localReachable}
+          apiOffline={Boolean(error)}
+          flushing={syncFlushing}
+          onTrigger={() => void triggerSyncFlush()}
+        />
         <a className="ops-link" href={buildPosTerminalHref("/waiter", terminalScope)}>Garson ekranı</a>
         <button
           onClick={() => {

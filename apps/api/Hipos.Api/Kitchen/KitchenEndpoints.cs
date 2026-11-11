@@ -2,6 +2,8 @@ using Hipos.Api.Features;
 using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
+using Hipos.Api.Sync;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -120,7 +122,9 @@ public static class KitchenEndpoints
         });
 
         group.MapPost("/{taskId}/status", async (string firmId, string branchId, string taskId,
-            ChangeKitchenTaskStatus command, HttpContext context, KitchenDbContext db, IRestaurantEventHub eventHub) =>
+            ChangeKitchenTaskStatus command, HttpContext context, KitchenDbContext db,
+            ServiceDbContext service, SalesDbContext sales, IRestaurantEventHub eventHub,
+            [FromServices] SyncService sync) =>
         {
             var denied = Guard(context, firmId, branchId, ready, true);
             if (denied is not null) return denied;
@@ -158,7 +162,61 @@ public static class KitchenEndpoints
             });
             try {
                 await db.SaveChangesAsync(context.RequestAborted);
-                eventHub.Publish("kitchen.updated", firmId, branchId, new { taskId = task.Id, status = task.Status });
+                string? tableId = null;
+                string? tableName = null;
+                var checkId = await sales.Orders.AsNoTracking()
+                    .Where(o => o.Id == task.OrderId && o.FirmId == firmId && o.BranchId == branchId)
+                    .Select(o => (Guid?)o.CheckId)
+                    .FirstOrDefaultAsync(context.RequestAborted);
+                if (checkId is { } cid)
+                {
+                    tableId = await sales.Checks.AsNoTracking()
+                        .Where(c => c.Id == cid && c.FirmId == firmId && c.BranchId == branchId)
+                        .Select(c => c.TableId)
+                        .FirstOrDefaultAsync(context.RequestAborted);
+                    if (tableId is not null)
+                    {
+                        tableName = await service.Tables.AsNoTracking()
+                            .Where(t => t.Id == tableId && t.FirmId == firmId && t.BranchId == branchId)
+                            .Select(t => t.Name)
+                            .FirstOrDefaultAsync(context.RequestAborted);
+                    }
+                    else
+                    {
+                        tableName = "Hızlı Satış (Gel-Al)";
+                    }
+                }
+                eventHub.Publish("kitchen.updated", firmId, branchId, new
+                {
+                    taskId = task.Id,
+                    orderId = task.OrderId,
+                    status = task.Status,
+                    productName = task.ProductName,
+                    quantity = task.Quantity,
+                    tableId,
+                    tableName,
+                });
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "kitchen_task",
+                    aggregateId: task.Id.ToString(),
+                    eventType: "kitchen.task.updated",
+                    payload: new
+                    {
+                        taskId = task.Id,
+                        orderId = task.OrderId,
+                        orderLineId = task.OrderLineId,
+                        productName = task.ProductName,
+                        quantity = task.Quantity,
+                        status = task.Status,
+                        version = task.Version,
+                        actor = actor.Name,
+                        tableId,
+                        tableName,
+                    },
+                    idempotencyKey: $"kitchen.task.updated:{command.RequestId}",
+                    cancellationToken: context.RequestAborted);
             }
             catch (DbUpdateConcurrencyException)
             { return Fail(context, "VERSION_CONFLICT", 409, "Görev başka bir cihazda değişti; listeyi yenileyin."); }
