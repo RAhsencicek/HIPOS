@@ -316,100 +316,244 @@ public sealed class PrintingService(
             return new PrintResult(false, cfg.CashierPrinter.Name, "None", "Adisyon bulunamadı.");
         }
 
+        return await PrintChecksBillCoreAsync(
+            firmId, branchId, [check], tableNameOverride: null, ct,
+            openCashDrawer: openCashDrawer, paymentMethod: paymentMethod);
+    }
+
+    public async Task<(IReadOnlyList<string> TableIds, string TableName)> ResolveTableScopeAsync(
+        string firmId,
+        string branchId,
+        string tableId,
+        CancellationToken ct = default)
+    {
+        var table = await serviceDb.Tables.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == tableId && row.FirmId == firmId && row.BranchId == branchId, ct);
+        if (table is null)
+        {
+            return ([tableId], "Masa");
+        }
+
+        if (table.TableGroupId is { } groupId)
+        {
+            var group = await serviceDb.TableGroups.AsNoTracking()
+                .FirstOrDefaultAsync(row => row.Id == groupId && row.FirmId == firmId &&
+                    row.BranchId == branchId && row.ClosedAt == null, ct);
+            if (group is { TableIds.Length: > 0 })
+            {
+                var groupTables = await serviceDb.Tables.AsNoTracking()
+                    .Where(row => row.FirmId == firmId && row.BranchId == branchId && group.TableIds.Contains(row.Id))
+                    .OrderBy(row => row.Number).ThenBy(row => row.Name)
+                    .ToListAsync(ct);
+                var groupName = groupTables.Count > 0
+                    ? string.Join(" + ", groupTables.Select(t => t.Name))
+                    : table.Name;
+                return (group.TableIds, groupName);
+            }
+        }
+
+        return ([tableId], table.Name);
+    }
+
+    public async Task<PrintResult> PrintCashierTableBillAsync(
+        string firmId,
+        string branchId,
+        string tableId,
+        CancellationToken ct = default,
+        bool openCashDrawer = false,
+        string paymentMethod = "NAKIT",
+        IReadOnlyList<ReceiptLineInput>? paidItemsOverride = null,
+        bool isAlmanReceipt = false,
+        IReadOnlyList<Guid>? checkIdsOverride = null)
+    {
+        var cfg = await GetConfigAsync(firmId, branchId, ct);
+        var (tableIds, tableName) = await ResolveTableScopeAsync(firmId, branchId, tableId, ct);
+
+        List<SalesCheckRow> checks;
+        if (checkIdsOverride is { Count: > 0 })
+        {
+            checks = await salesDb.Checks
+                .AsNoTracking()
+                .Where(row => checkIdsOverride.Contains(row.Id) && row.FirmId == firmId && row.BranchId == branchId)
+                .OrderBy(row => row.CreatedAt).ThenBy(row => row.Id)
+                .ToListAsync(ct);
+        }
+        else
+        {
+            checks = await salesDb.Checks
+                .AsNoTracking()
+                .Where(row => row.FirmId == firmId && row.BranchId == branchId &&
+                    row.TableId != null && tableIds.Contains(row.TableId) && row.Status == "open")
+                .OrderBy(row => row.CreatedAt).ThenBy(row => row.Id)
+                .ToListAsync(ct);
+        }
+
+        if (checks.Count == 0)
+        {
+            logger.LogWarning("Masa hesap fişi için açık adisyon bulunamadı: {TableId}", tableId);
+            return new PrintResult(false, cfg.CashierPrinter.Name, "None", "Bu masada yazdırılacak adisyon bulunamadı.");
+        }
+
+        return await PrintChecksBillCoreAsync(
+            firmId, branchId, checks, tableNameOverride: tableName, ct,
+            openCashDrawer: openCashDrawer,
+            paymentMethod: paymentMethod,
+            paidItemsOverride: paidItemsOverride,
+            isAlmanReceipt: isAlmanReceipt);
+    }
+
+    private async Task<PrintResult> PrintChecksBillCoreAsync(
+        string firmId,
+        string branchId,
+        IReadOnlyList<SalesCheckRow> checks,
+        string? tableNameOverride,
+        CancellationToken ct = default,
+        bool openCashDrawer = false,
+        string paymentMethod = "NAKIT",
+        IReadOnlyList<ReceiptLineInput>? paidItemsOverride = null,
+        bool isAlmanReceipt = false)
+    {
+        var cfg = await GetConfigAsync(firmId, branchId, ct);
+        var primaryCheck = checks[0];
+        var checkIds = checks.Select(c => c.Id).ToArray();
+
         var orders = await salesDb.Orders
             .AsNoTracking()
             .Include(row => row.Lines)
             .Include(row => row.PaymentAttempts)
-            .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId && row.Status != "cancelled")
+            .Where(row => checkIds.Contains(row.CheckId) && row.FirmId == firmId && row.BranchId == branchId && row.Status != "cancelled")
             .ToListAsync(ct);
 
         var lines = orders.SelectMany(o => o.Lines).ToList();
-        var (tableName, waiterName) = await ResolveCheckTableAndWaiterAsync(firmId, branchId, check, ct, fallbackWaiter: "Kasiyer", quickTableLabel: "Paket / Gel-Al");
+        var (resolvedTableName, waiterName) = await ResolveCheckTableAndWaiterAsync(
+            firmId, branchId, primaryCheck, ct, fallbackWaiter: "Kasiyer", quickTableLabel: "Paket / Gel-Al");
+        var tableName = !string.IsNullOrWhiteSpace(tableNameOverride) ? tableNameOverride : resolvedTableName;
 
-        var adjustments = await salesDb.CheckAdjustments
-            .AsNoTracking()
-            .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
-            .ToListAsync(ct);
-
-        var voidQtyByLineId = adjustments
-            .Where(a => a.Action == "void" && a.OrderLineId != null)
-            .GroupBy(a => a.OrderLineId!.Value)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
-
-        var activeLines = new List<(string ProductName, int Quantity, long UnitPriceMinor, long LineTotalMinor)>();
-        foreach (var l in lines)
-        {
-            var voided = voidQtyByLineId.GetValueOrDefault(l.Id, 0);
-            var remainingQty = Math.Max(0, l.Quantity - voided);
-            if (remainingQty <= 0) continue;
-            var ratioTotal = remainingQty == l.Quantity ? l.LineTotalMinor : checked(remainingQty * l.UnitPriceMinor);
-            activeLines.Add((l.ProductName, remainingQty, l.UnitPriceMinor, ratioTotal));
-        }
-
-        var consolidated = activeLines
-            .GroupBy(l => l.ProductName)
-            .Select(g => new CashierReceiptItem(
-                ProductName: g.Key,
-                Quantity: g.Sum(x => x.Quantity),
-                UnitPriceMinor: g.First().UnitPriceMinor,
-                LineTotalMinor: g.Sum(x => x.LineTotalMinor)))
-            .ToList();
-
-        long activeGrossTotal = consolidated.Sum(x => x.LineTotalMinor);
-        long discountMinor = adjustments.Where(a => a.Action is "discount" or "comp").Sum(a => a.AmountMinor);
-        long grossFromOrders = orders.Sum(o => o.TotalMinor);
-        long totalAdjustmentMinor = adjustments.Sum(a => a.AmountMinor);
-        long netTotal = Math.Max(0, grossFromOrders - totalAdjustmentMinor);
-        long grossTotal = Math.Max(activeGrossTotal, netTotal + discountMinor);
+        List<CashierReceiptItem> consolidated;
+        long grossTotal;
+        long discountMinor;
+        long netTotal;
+        long paidMinor;
+        long remainingMinor;
 
         var successfulPayments = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").ToList();
-        long paidMinor = successfulPayments.Sum(p => p.AmountMinor);
-        long remainingMinor = Math.Max(0, netTotal - paidMinor);
 
-        if (successfulPayments.Count > 1)
+        if (paidItemsOverride is { Count: > 0 })
         {
-            var parts = successfulPayments.Select(p =>
+            consolidated = paidItemsOverride
+                .Where(item => item.Quantity > 0 && item.LineTotalMinor >= 0)
+                .GroupBy(item => item.ProductName)
+                .Select(g =>
+                {
+                    var totalQty = g.Sum(x => x.Quantity);
+                    var totalMinor = g.Sum(x => x.LineTotalMinor);
+                    return new CashierReceiptItem(
+                        ProductName: g.Key,
+                        Quantity: totalQty,
+                        UnitPriceMinor: totalQty > 0 ? totalMinor / totalQty : 0,
+                        LineTotalMinor: totalMinor);
+                })
+                .ToList();
+
+            grossTotal = consolidated.Sum(x => x.LineTotalMinor);
+            discountMinor = 0;
+            netTotal = grossTotal;
+            paidMinor = netTotal;
+            remainingMinor = 0;
+        }
+        else
+        {
+            var adjustments = await salesDb.CheckAdjustments
+                .AsNoTracking()
+                .Where(row => checkIds.Contains(row.CheckId) && row.FirmId == firmId && row.BranchId == branchId)
+                .ToListAsync(ct);
+
+            var voidQtyByLineId = adjustments
+                .Where(a => a.Action == "void" && a.OrderLineId != null)
+                .GroupBy(a => a.OrderLineId!.Value)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+            var activeLines = new List<(string ProductName, int Quantity, long UnitPriceMinor, long LineTotalMinor)>();
+            foreach (var l in lines)
             {
-                var label = !string.IsNullOrWhiteSpace(p.Provider)
+                var voided = voidQtyByLineId.GetValueOrDefault(l.Id, 0);
+                var remainingQty = Math.Max(0, l.Quantity - voided);
+                if (remainingQty <= 0) continue;
+                var ratioTotal = remainingQty == l.Quantity ? l.LineTotalMinor : checked(remainingQty * l.UnitPriceMinor);
+                activeLines.Add((l.ProductName, remainingQty, l.UnitPriceMinor, ratioTotal));
+            }
+
+            consolidated = activeLines
+                .GroupBy(l => l.ProductName)
+                .Select(g => new CashierReceiptItem(
+                    ProductName: g.Key,
+                    Quantity: g.Sum(x => x.Quantity),
+                    UnitPriceMinor: g.First().UnitPriceMinor,
+                    LineTotalMinor: g.Sum(x => x.LineTotalMinor)))
+                .ToList();
+
+            long activeGrossTotal = consolidated.Sum(x => x.LineTotalMinor);
+            discountMinor = adjustments.Where(a => a.Action is "discount" or "comp").Sum(a => a.AmountMinor);
+            long grossFromOrders = orders.Sum(o => o.TotalMinor);
+            long totalAdjustmentMinor = adjustments.Sum(a => a.AmountMinor);
+            netTotal = Math.Max(0, grossFromOrders - totalAdjustmentMinor);
+            grossTotal = Math.Max(activeGrossTotal, netTotal + discountMinor);
+            paidMinor = successfulPayments.Sum(p => p.AmountMinor);
+            remainingMinor = Math.Max(0, netTotal - paidMinor);
+
+            if (successfulPayments.Count > 1 && remainingMinor == 0)
+            {
+                var parts = successfulPayments.Select(p =>
+                {
+                    var label = !string.IsNullOrWhiteSpace(p.Provider)
+                        ? p.Provider
+                        : p.Method switch
+                        {
+                            "cash" => "Nakit",
+                            "card" => "Kredi Kartı",
+                            "meal" => "Yemek Kartı",
+                            "transfer" => "Havale",
+                            "cari" => "Cari",
+                            _ => p.Method
+                        };
+                    return $"{label}: {p.AmountMinor / 100.0:F2} TL";
+                });
+                paymentMethod = string.Join(" | ", parts);
+            }
+            else if (successfulPayments.Count == 1 && string.IsNullOrWhiteSpace(paymentMethod))
+            {
+                var p = successfulPayments[0];
+                paymentMethod = !string.IsNullOrWhiteSpace(p.Provider)
                     ? p.Provider
                     : p.Method switch
                     {
-                        "cash" => "Nakit",
-                        "card" => "Kredi Kartı",
-                        "meal" => "Yemek Kartı",
-                        "transfer" => "Havale",
-                        "cari" => "Cari",
-                        _ => p.Method
+                        "cash" => "NAKİT",
+                        "card" => "KREDİ KARTI",
+                        "meal" => "YEMEK KARTI",
+                        "transfer" => "HAVALE / EFT",
+                        "cari" => "CARİ / VERESİYE",
+                        _ => p.Method.ToUpperInvariant()
                     };
-                return $"{label}: {p.AmountMinor / 100.0:F2} TL";
-            });
-            paymentMethod = string.Join(" | ", parts);
-        }
-        else if (successfulPayments.Count == 1 && string.IsNullOrWhiteSpace(paymentMethod))
-        {
-            var p = successfulPayments[0];
-            paymentMethod = !string.IsNullOrWhiteSpace(p.Provider)
-                ? p.Provider
-                : p.Method switch
-                {
-                    "cash" => "NAKİT",
-                    "card" => "KREDİ KARTI",
-                    "meal" => "YEMEK KARTI",
-                    "transfer" => "HAVALE / EFT",
-                    "cari" => "CARİ / VERESİYE",
-                    _ => p.Method.ToUpperInvariant()
-                };
+            }
         }
 
         var (firmTitle, branchTitle) = await ResolveFirmAndBranchTitlesAsync(firmId, branchId, ct);
-        var receiptKindLabel = check.TableId is null ? $"{branchTitle} · GEL-AL HESAP FISI" : $"{branchTitle} · SALON HESAP FISI";
+        var receiptKindLabel = isAlmanReceipt
+            ? $"{branchTitle} · ALMAN HESABI FISI"
+            : primaryCheck.TableId is null
+                ? $"{branchTitle} · GEL-AL HESAP FISI"
+                : $"{branchTitle} · SALON HESAP FISI";
+
+        var checkNumberLabel = checks.Count > 1
+            ? $"{primaryCheck.Id.ToString()[..8].ToUpperInvariant()}+{checks.Count - 1}"
+            : primaryCheck.Id.ToString()[..8].ToUpperInvariant();
 
         var receiptBytes = EscPosBuilder.BuildCashierReceipt(
             firmTitle: firmTitle,
             branchTitle: receiptKindLabel,
             tableName: tableName,
             waiterName: waiterName,
-            checkNumber: check.Id.ToString()[..8].ToUpperInvariant(),
+            checkNumber: checkNumberLabel,
             checkTime: DateTimeOffset.UtcNow,
             items: consolidated,
             grossTotalMinor: grossTotal,
@@ -430,11 +574,13 @@ public sealed class PrintingService(
             escPosBytes: receiptBytes,
             payloadMetadata: new
             {
-                checkId = check.Id,
+                checkId = primaryCheck.Id,
+                checkIds,
                 tableName,
                 waiterName,
                 openCashDrawer,
-                paymentMethod
+                paymentMethod,
+                isAlmanReceipt
             },
             ct: ct);
     }
@@ -930,13 +1076,13 @@ public sealed class PrintingService(
             string waiterName = "Garson";
 
             var table = await serviceDb.Tables.AsNoTracking()
-                .FirstOrDefaultAsync(row => row.Id == assignment.TableId, ct);
+                .FirstOrDefaultAsync(row => row.Id == assignment.TableId && row.FirmId == firmId && row.BranchId == branchId, ct);
             if (table is not null) tableName = table.Name;
 
             if (assignment.WaiterId is not null)
             {
                 var waiter = await serviceDb.Employees.AsNoTracking()
-                    .FirstOrDefaultAsync(row => row.Id == assignment.WaiterId, ct);
+                    .FirstOrDefaultAsync(row => row.Id == assignment.WaiterId && row.FirmId == firmId && row.BranchId == branchId, ct);
                 if (waiter is not null) waiterName = waiter.Name;
             }
 
@@ -944,7 +1090,7 @@ public sealed class PrintingService(
         }
 
         var check = await salesDb.Checks.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == checkId, ct);
+            .FirstOrDefaultAsync(row => row.Id == checkId && row.FirmId == firmId && row.BranchId == branchId, ct);
 
         if (check is null)
         {
@@ -968,14 +1114,14 @@ public sealed class PrintingService(
         if (check.TableId is not null)
         {
             var table = await serviceDb.Tables.AsNoTracking()
-                .FirstOrDefaultAsync(row => row.Id == check.TableId, ct);
+                .FirstOrDefaultAsync(row => row.Id == check.TableId && row.FirmId == firmId && row.BranchId == branchId, ct);
             if (table is not null) tableName = table.Name;
         }
 
         if (check.WaiterId is not null)
         {
             var waiter = await serviceDb.Employees.AsNoTracking()
-                .FirstOrDefaultAsync(row => row.Id == check.WaiterId, ct);
+                .FirstOrDefaultAsync(row => row.Id == check.WaiterId && row.FirmId == firmId && row.BranchId == branchId, ct);
             if (waiter is not null) waiterName = waiter.Name;
         }
         else
@@ -986,7 +1132,7 @@ public sealed class PrintingService(
             if (assignment?.WaiterId is not null)
             {
                 var waiter = await serviceDb.Employees.AsNoTracking()
-                    .FirstOrDefaultAsync(row => row.Id == assignment.WaiterId, ct);
+                    .FirstOrDefaultAsync(row => row.Id == assignment.WaiterId && row.FirmId == firmId && row.BranchId == branchId, ct);
                 if (waiter is not null) waiterName = waiter.Name;
             }
         }

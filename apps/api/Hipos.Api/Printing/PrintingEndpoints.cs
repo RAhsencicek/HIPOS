@@ -3,6 +3,7 @@ using Hipos.Api.Features;
 using Hipos.Api.Realtime;
 using Hipos.Api.Sales;
 using Hipos.Api.Service;
+using Hipos.Api.Sync;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -92,13 +93,12 @@ public static class PrintingEndpoints
                 : Results.BadRequest(new { success = false, result.Error });
         });
 
-        // 3. Masaya Göre Hesap Fişi Yazdır (Ara Bilgi Fişi - Masayı Açık Bırakır)
+        // 3. Masaya Göre Hesap Fişi Yazdır (Ara Bilgi Fişi veya Alman Hesabı Fişi)
         group.MapPost("/service/tables/{tableId}/print-bill", async (
             string firmId,
             string branchId,
             string tableId,
             HttpContext context,
-            [FromServices] SalesDbContext salesDb,
             [FromServices] PrintingService printing,
             bool openCashDrawer = false,
             string paymentMethod = "NAKIT",
@@ -107,19 +107,37 @@ public static class PrintingEndpoints
             var (_, denied) = Guard(context, firmId, branchId, requireOperate: true);
             if (denied is not null) return denied;
 
-            var check = await salesDb.Checks
-                .AsNoTracking()
-                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
-                    row.TableId == tableId && row.Status == "open", ct);
-
-            if (check is null)
+            TablePrintBillRequest? req = null;
+            if (context.Request.HasJsonContentType() && (context.Request.ContentLength is null or > 0))
             {
-                return Results.NotFound(new { success = false, message = "Bu masada açık bir adisyon bulunamadı." });
+                try
+                {
+                    req = await context.Request.ReadFromJsonAsync<TablePrintBillRequest>(ct);
+                }
+                catch
+                {
+                    req = null;
+                }
             }
 
-            var result = await printing.PrintCashierBillAsync(firmId, branchId, check.Id, ct, openCashDrawer, paymentMethod);
+            var result = await printing.PrintCashierTableBillAsync(
+                firmId,
+                branchId,
+                tableId,
+                ct,
+                openCashDrawer: req?.OpenCashDrawer ?? openCashDrawer,
+                paymentMethod: string.IsNullOrWhiteSpace(req?.PaymentMethod) ? paymentMethod : req!.PaymentMethod!,
+                paidItemsOverride: req?.PaidItems,
+                isAlmanReceipt: req?.IsAlmanReceipt ?? false,
+                checkIdsOverride: req?.CheckIds);
+
+            if (!result.Success && string.Equals(result.Error, "Bu masada yazdırılacak adisyon bulunamadı.", StringComparison.Ordinal))
+            {
+                return Results.NotFound(new { success = false, message = result.Error });
+            }
+
             return result.Success
-                ? Results.Ok(new { success = true, checkId = check.Id, result.Target, result.TransportUsed })
+                ? Results.Ok(new { success = true, tableId, result.Target, result.TransportUsed })
                 : Results.BadRequest(new { success = false, result.Error });
         });
 
@@ -128,48 +146,84 @@ public static class PrintingEndpoints
             string firmId,
             string branchId,
             string tableId,
-            SettleTableRequest? req,
             [FromServices] SalesDbContext salesDb,
             [FromServices] PaidCheckTableSettlement settlement,
             [FromServices] PrintingService printing,
             [FromServices] FeatureRuntimeCapabilities runtime,
             [FromServices] IRestaurantEventHub eventHub,
+            [FromServices] SyncService sync,
+            [FromServices] ILoggerFactory loggerFactory,
             HttpContext context,
             CancellationToken ct) =>
         {
             var (actorObj, denied) = Guard(context, firmId, branchId, requireOperate: true);
             if (denied is not null) return denied;
 
-            var paymentMethod = (req?.PaymentMethod ?? context.Request.Query["paymentMethod"].FirstOrDefault() ?? "NAKIT").ToUpperInvariant();
+            SettleTableRequest? req = null;
+            if (context.Request.HasJsonContentType() && (context.Request.ContentLength is null or > 0))
+            {
+                try
+                {
+                    req = await context.Request.ReadFromJsonAsync<SettleTableRequest>(ct);
+                }
+                catch
+                {
+                    req = null;
+                }
+            }
 
-            var check = await salesDb.Checks
-                .FirstOrDefaultAsync(row => row.FirmId == firmId && row.BranchId == branchId &&
-                    row.TableId == tableId && row.Status == "open", ct);
+            var rawMethod = (req?.PaymentMethod ?? context.Request.Query["paymentMethod"].FirstOrDefault() ?? "NAKIT").Trim();
+            var upperMethod = rawMethod.ToUpperInvariant();
+            var (dbMethod, displayMethod, shouldOpenDrawer) = upperMethod switch
+            {
+                "KART" or "CARD" or "KREDI_KARTI" or "KREDİ KARTI" => ("card", "KREDI KARTI", false),
+                "YEMEK" or "YEMEK_KARTI" or "MEAL" => ("meal", "YEMEK KARTI", false),
+                "HAVALE" or "TRANSFER" or "EFT" => ("transfer", "HAVALE / EFT", false),
+                "NAKIT" or "NAKİT" or "CASH" => ("cash", "NAKIT", true),
+                _ => upperMethod.Contains("KART")
+                    ? ("card", "KREDI KARTI", false)
+                    : ("cash", "NAKIT", true)
+            };
 
-            if (check is null)
+            var now = DateTimeOffset.UtcNow;
+            var actor = actorObj!.Name.Length > 128 ? actorObj.Name[..128] : actorObj.Name;
+
+            // 1. Önce veritabanı transaction'ını başlat ve masadaki TÜM açık adisyonları kapat
+            await using var transaction = await salesDb.Database.BeginTransactionAsync(ct);
+
+            string[] tableIds = [tableId];
+            await using (var cmdTable = salesDb.Database.GetDbConnection().CreateCommand())
+            {
+                cmdTable.Transaction = transaction.GetDbTransaction();
+                cmdTable.CommandText = """
+                    SELECT tg.table_ids
+                    FROM service.tables t
+                    LEFT JOIN service.table_groups tg
+                        ON tg.id = t.table_group_id AND tg.firm_id = t.firm_id AND tg.branch_id = t.branch_id AND tg.closed_at IS NULL
+                    WHERE t.id = @table_id AND t.firm_id = @firm_id AND t.branch_id = @branch_id
+                    """;
+                var pTable = cmdTable.CreateParameter(); pTable.ParameterName = "table_id"; pTable.Value = tableId; cmdTable.Parameters.Add(pTable);
+                var pFirm = cmdTable.CreateParameter(); pFirm.ParameterName = "firm_id"; pFirm.Value = firmId; cmdTable.Parameters.Add(pFirm);
+                var pBranch = cmdTable.CreateParameter(); pBranch.ParameterName = "branch_id"; pBranch.Value = branchId; cmdTable.Parameters.Add(pBranch);
+                await using var reader = await cmdTable.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct) && !reader.IsDBNull(0))
+                {
+                    tableIds = (string[])reader.GetValue(0);
+                }
+            }
+
+            var checks = await salesDb.Checks.FromSqlInterpolated($"""
+                SELECT * FROM sales.checks
+                WHERE firm_id = {firmId} AND branch_id = {branchId} AND status = 'open'
+                  AND table_id IS NOT NULL AND table_id = ANY({tableIds})
+                ORDER BY created_at, id
+                FOR UPDATE
+                """).ToListAsync(ct);
+
+            if (checks.Count == 0)
             {
                 return Results.NotFound(new { success = false, message = "Bu masada açık bir adisyon bulunamadı." });
             }
-
-            var checkId = check.Id;
-            var now = DateTimeOffset.UtcNow;
-            var actor = actorObj!.Name;
-
-            // 1. Kasa fişi bas ve nakit ise para çekmecesini aç
-            PrintResult? printResult = null;
-            try
-            {
-                printResult = await printing.PrintCashierBillAsync(firmId, branchId, checkId, ct,
-                    openCashDrawer: paymentMethod == "NAKIT",
-                    paymentMethod: paymentMethod);
-            }
-            catch
-            {
-                // Fiş basılamasa bile hesap kapatma işlemi devam etmeli
-            }
-
-            // 2. Satış ve servis şemalarında transaction ile adisyonu ve siparişleri kapat, masayı boşa düşür
-            await using var transaction = await salesDb.Database.BeginTransactionAsync(ct);
 
             PaymentSimulator.CashShiftLink? cashShift = null;
             if (runtime.CashReady && (req?.PostToCash ?? true))
@@ -183,30 +237,62 @@ public static class PrintingEndpoints
                 }
             }
 
-            var orders = await salesDb.Orders
-                .Include(o => o.PaymentAttempts)
-                .Where(row => row.CheckId == checkId && row.FirmId == firmId && row.BranchId == branchId)
+            var openCheckIds = checks.Select(c => c.Id).ToArray();
+            var orders = await salesDb.Orders.FromSqlInterpolated($"""
+                SELECT * FROM sales.orders
+                WHERE firm_id = {firmId} AND branch_id = {branchId} AND check_id = ANY({openCheckIds})
+                ORDER BY check_id, created_at, id
+                FOR UPDATE
+                """).ToListAsync(ct);
+
+            foreach (var order in orders)
+            {
+                await salesDb.Entry(order).Collection(o => o.PaymentAttempts).LoadAsync(ct);
+            }
+
+            var adjustments = await salesDb.CheckAdjustments.AsNoTracking()
+                .Where(row => openCheckIds.Contains(row.CheckId) && row.FirmId == firmId && row.BranchId == branchId)
                 .ToListAsync(ct);
+
+            var payableByOrder = new Dictionary<Guid, long>();
+            foreach (var check in checks)
+            {
+                var checkOrders = orders.Where(o => o.CheckId == check.Id).ToArray();
+                var checkAdjs = adjustments.Where(a => a.CheckId == check.Id).ToArray();
+                foreach (var kv in PaymentSimulator.CalculatePayableOrderTotals(checkOrders, checkAdjs))
+                {
+                    payableByOrder[kv.Key] = kv.Value;
+                }
+            }
 
             var attemptsToPost = new List<PaymentAttemptRow>();
             foreach (var order in orders)
             {
                 var paidMinor = order.PaymentAttempts.Where(row => row.Status == "succeeded").Sum(row => row.AmountMinor);
-                var remainingMinor = Math.Max(0, order.TotalMinor - paidMinor);
-                if (remainingMinor <= 0) continue;
+                var payableMinor = payableByOrder.GetValueOrDefault(order.Id, order.TotalMinor);
+                var remainingMinor = Math.Max(0, payableMinor - paidMinor);
+                if (remainingMinor <= 0)
+                {
+                    if (order.PaymentStatus != "paid")
+                    {
+                        order.PaymentStatus = "paid";
+                        order.Version++;
+                    }
+                    continue;
+                }
 
                 order.PaymentStatus = "paid";
                 order.Version++;
                 var attempt = new PaymentAttemptRow
                 {
                     Id = Guid.NewGuid(),
-                    CheckId = checkId,
+                    CheckId = order.CheckId,
                     FirmId = firmId,
                     BranchId = branchId,
                     OrderId = order.Id,
                     AmountMinor = remainingMinor,
                     Currency = "TRY",
-                    Method = paymentMethod == "NAKIT" ? "cash" : "card",
+                    Method = dbMethod,
                     Status = "succeeded",
                     RequestedOutcome = "succeeded",
                     Version = 1,
@@ -227,22 +313,36 @@ public static class PrintingEndpoints
                     Version = 1,
                     OccurredAt = now
                 });
+                salesDb.Audit.Add(new SalesOrderAuditRow
+                {
+                    OrderId = order.Id,
+                    FirmId = firmId,
+                    BranchId = branchId,
+                    Actor = actor,
+                    Action = "payment_started",
+                    Version = order.Version,
+                    OccurredAt = now
+                });
                 attemptsToPost.Add(attempt);
             }
 
-            check.Status = "closed";
-            check.ClosedAt = now;
-            check.Version++;
-            salesDb.CheckAudit.Add(new SalesCheckAuditRow
+            foreach (var check in checks)
             {
-                CheckId = check.Id,
-                FirmId = firmId,
-                BranchId = branchId,
-                Actor = actor,
-                Action = "payment_completed_check_closed",
-                Version = check.Version,
-                OccurredAt = now,
-            });
+                check.Status = "closed";
+                check.ClosedAt = now;
+                check.Version++;
+                salesDb.CheckAudit.Add(new SalesCheckAuditRow
+                {
+                    CheckId = check.Id,
+                    FirmId = firmId,
+                    BranchId = branchId,
+                    Actor = actor,
+                    Action = "payment_completed_check_closed",
+                    Version = check.Version,
+                    OccurredAt = now,
+                });
+            }
+
             await salesDb.SaveChangesAsync(ct);
 
             if (cashShift is not null)
@@ -255,22 +355,81 @@ public static class PrintingEndpoints
                 }
             }
 
+            if (runtime.InventoryReady)
+            {
+                foreach (var closedCheckId in openCheckIds)
+                {
+                    await PaymentSimulator.DepleteInventoryForCheckAsync(
+                        salesDb.Database.GetDbConnection(),
+                        transaction.GetDbTransaction(),
+                        closedCheckId, firmId, branchId, actor, now, ct);
+                }
+            }
+
             await settlement.ReleaseAfterPaymentAsync(tableId, firmId, branchId, actor, now, ct);
             await transaction.CommitAsync(ct);
 
-            eventHub.Publish("check.closed", firmId, branchId, new { checkId, tableId });
-            eventHub.Publish("payment.settled", firmId, branchId, new { checkId, tableId, method = paymentMethod });
+            // 2. Commit sonrasında sync kuyruğu, SSE bildirimi ve fiş basımı
+            foreach (var attempt in attemptsToPost)
+            {
+                await sync.TryEnqueueAsync(
+                    firmId,
+                    branchId,
+                    aggregateType: "check",
+                    aggregateId: attempt.CheckId.ToString(),
+                    eventType: "payment.recorded",
+                    payload: new
+                    {
+                        checkId = attempt.CheckId,
+                        orderId = attempt.OrderId,
+                        attemptId = attempt.Id,
+                        amountMinor = attempt.AmountMinor,
+                        method = attempt.Method,
+                        status = attempt.Status,
+                        checkStatus = "closed",
+                        paymentStatus = "paid",
+                        occurredAt = now,
+                    },
+                    idempotencyKey: $"payment.recorded:{attempt.Id}:v{attempt.Version}",
+                    cancellationToken: ct);
+            }
+
+            foreach (var closedCheckId in openCheckIds)
+            {
+                eventHub.Publish("check.closed", firmId, branchId, new { checkId = closedCheckId, tableId });
+                eventHub.Publish("inventory.stock_updated", firmId, branchId, new { checkId = closedCheckId, timestamp = now });
+            }
+            eventHub.Publish("payment.settled", firmId, branchId, new { checkId = checks[0].Id, checkIds = openCheckIds, tableId, method = displayMethod });
             eventHub.Publish("table.updated", firmId, branchId, new { tableId, status = "vacant" });
+
+            PrintResult? printResult = null;
+            try
+            {
+                printResult = await printing.PrintCashierTableBillAsync(
+                    firmId,
+                    branchId,
+                    tableId,
+                    ct,
+                    openCashDrawer: shouldOpenDrawer,
+                    paymentMethod: displayMethod,
+                    checkIdsOverride: openCheckIds);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("Hipos.Api.Printing.Settle").LogWarning(
+                    ex, "Masa kapatma sonrası kasa fişi basılamadı ({FirmId}/{BranchId}/{TableId})", firmId, branchId, tableId);
+            }
 
             return Results.Ok(new
             {
                 success = true,
-                checkId,
+                checkId = checks[0].Id,
+                checkIds = openCheckIds,
                 tableId,
-                paymentMethod,
+                paymentMethod = displayMethod,
                 printed = printResult?.Success ?? false,
                 transportUsed = printResult?.TransportUsed ?? "None",
-                message = $"Hesap başarıyla kapatıldı ({paymentMethod}), fiş basıldı ve masa boşaltıldı."
+                message = $"Hesap başarıyla kapatıldı ({displayMethod}), fiş basıldı ve masa boşaltıldı."
             });
         });
 

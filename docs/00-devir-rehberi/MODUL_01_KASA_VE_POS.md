@@ -22,6 +22,7 @@
 | **Termal Ağ Yazıcısı ve RJ11 Çekmece (Faz 11–12)** | **Çalışıyor** | Kasa tahsilatı bittiğinde Print Bridge v2 / TCP 9100 üzerinden ESC/POS adisyon fişi basılır; nakit ödemelerde ve başlıktaki `"💵 Çekmece"` butonunda (`POST /printing/open-drawer`) RJ11 para çekmecesi darbesi (`ESC p 0 25 250`) tetiklenir. (Fiziksel ÖKC mali yazar kasa entegrasyonu Token/Beko cihazı gelene dek beklenmektedir.) |
 | **Hızlı Satış & USB HID Barkod (Faz 12)** | **Çalışıyor** | Sipariş askıya alma (Park Order / Bekletme), bekleyen paket satışlar paneli, USB HID barkod okuyucu klavye dinleyicisi (SKU eşleştirip sepete otomatik ekleme) ve tek tıkla tahsil etme aktiftir. |
 | **Çoklu Ödeme & POS / Yemek Kartı (Faz 6)** | **Çalışıyor** | Nakit, Kredi Kartı (Ziraat/Garanti/VakıfBank POS), Yemek Kartı (Sodexo/Multinet/Ticket/Setcard/Metropol), Havale ve Cari ödeme alt tipleri veritabanına ve Z-Raporuna tam kayıtlıdır. Parçalı (Split) tahsilat adisyon fişine dökülür; yeni müşteri onboarding sırasında `payments.simulator` kapısı otomatik açık gelir. |
+| **Birleşik Masa Hesabı & Alman Hesabı Tahsilatı** | **Çalışıyor** | Masa taşıma veya adisyon bölme sonrası oluşan birden fazla açık adisyon Kasa ekranında `Adisyon 1 / 2` seçimi olmadan tek birleşik ürün listesi olarak gösterilir. Kasiyer ürüne dokunduğunda Alman Hesabı seçimi otomatik tuş takımına dolar (`POST /service/tables/{tableId}/collect` + `sales.payment_attempts.item_allocations_json`), ödemesi tamamlanan kalemler düşülür ve fiş yalnız tahsil edilen ürünlerle veya birleşik masa toplamıyla basılır. |
 | **Yönetici Raporları & Canlı Ciro Analitiği** | **Çalışıyor** | Mock/demo veri tamamen kaldırıldı. `GET /reports/sales-analytics` üzerinden anlık brüt/net ciro, nakit/kart dağılımı, masa/paket kanalları, en çok satan 10 ürün ve saatlik restoran satış nabzı canlı gösterilir. |
 | **Hibrit LAN Bağlantı Rozeti (Faz 13)** | **Çalışıyor** | Kasa üst çubuğunda `Bulut Bağlı` / `Yerel Ağda · Bulut Bekliyor` / `Eşitleme Durdu` / `Bağlantı Yok` 3 durumlu rozeti gösterilir; tıklandığında `POST /sync/flush` tetiklenir. |
 
@@ -81,8 +82,9 @@ Header: X-Demo-Actor: manager-single
   - `tender_method`: `cash`, `card`, `meal`, `transfer`, `cari`
   - `provider`: Banka POS adı veya yemek kartı firması
   - `description`: `Kasa tahsilatı · {sağlayıcı} · Adisyon {adisyon_id}`
-* **Parçalı Tahsilat (Split Payment):**
+* **Parçalı Tahsilat ve Alman Hesabı:**
   - Müşteri hesabın bir kısmını Kredi Kartı (örn. Garanti POS ₺100), kalan kısmını Yemek Kartı (örn. Sodexo ₺160) ile ödeyebilir.
-  - Her parçalı ödeme atomik olarak adisyon kalan bakiyesinden düşülür ve açık kasa vardiyasına işlenir.
-  - Termal yazıcıdan çıkan adisyon fişinde tahsilat dökümü `Garanti POS: 100.00 TL | Sodexo: 160.00 TL` şeklinde basılır.
+  - Alman hesabında kasiyer masadaki birleşik ürün listesinden tek dokunuşla kalem seçer; `POST /service/tables/{tableId}/collect` ucu seçili kalem paylarını (`item_allocations_json`) tekil anahtar (`CollectAuditKey`) idempotency güvencesiyle birden çok açık adisyona dağıtır.
+  - Her parçalı ödeme atomik olarak adisyon/masa kalan bakiyesinden düşülür, açık kasa vardiyasına işlenir ve bakiye sıfırlanan adisyonlar stok reçete düşümüyle birlikte kapatılır.
+  - Termal yazıcıdan çıkan adisyon fişinde ara hesap uyarısı (`ARA HESAP BILGI FISIDIR`), Alman hesabı ürün dökümü veya birleşik masa toplamı ile ödeme yöntemleri (`Garanti POS: 100.00 TL | Sodexo: 160.00 TL`) eksiksiz basılır.
   - Gün sonu Z-Raporu ve X-Raporunda `tenders` listesi banka kartı ve yemek kartı cirolarını ayrı kalemler olarak sunar.

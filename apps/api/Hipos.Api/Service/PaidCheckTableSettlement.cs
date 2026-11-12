@@ -13,6 +13,8 @@ public sealed class PaidCheckTableSettlement(SalesDbContext sales, ServiceDbCont
     {
         var transaction = sales.Database.CurrentTransaction?.GetDbTransaction()
             ?? throw new InvalidOperationException("Masa kapanışı ödeme transaction'ı içinde çalışmalıdır.");
+        service.ChangeTracker.Clear();
+        await service.Database.CloseConnectionAsync();
         service.Database.SetDbConnection(sales.Database.GetDbConnection(), contextOwnsConnection: false);
         await service.Database.UseTransactionAsync(transaction, cancellationToken);
 

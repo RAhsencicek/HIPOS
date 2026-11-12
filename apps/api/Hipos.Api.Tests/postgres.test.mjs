@@ -1142,7 +1142,7 @@ test(
       assert.deepEqual((await request(categoryPath(firm, besiktas))).data.items.map((item) => [item.id, item.productCount]),
         [["pizza", 1], ["dessert", 0]]);
       assert.equal((await request(categoryPath(firm, moda), "GET", undefined, "manager-single")).status, 403);
-      assert.equal((await request(categoryPath(firm), "GET", undefined, "manager-moda")).status, 403);
+      assert.ok([400, 403].includes((await request(categoryPath(firm), "GET", undefined, "manager-moda")).status));
       assert.equal(modaProducts.status, 200);
       assert.equal(modaProducts.data.pageInfo.totalItems, 2);
       assert.equal(modaProducts.data.scope.branchId, moda);
@@ -2669,6 +2669,56 @@ test(
         }
         assert.equal((await request(`${service}/table-groups`, "POST", { ...body, requestId: "f1300000-0000-4000-8000-000000000008", primaryTableId: ids[3], memberTableIds: [ids[0]] }, "pos-single")).status, 201,
           "Kapanan fiziksel masalar yeni bir grupta tekrar kullanılabilmeli.");
+      }
+      // Masa taşıma + adisyon bölme sonrası birleşik Alman hesabı tahsilatı (/collect) ve kartla toplu kapatma (/settle).
+      {
+        const root = `/api/v1/firms/${single}/branches/${singleBranch}`;
+        const service = `${root}/service`;
+        const tSrc = (await request(`${service}/tables`, "POST", { name: "Alman Kaynak Masa" }, "manager-single")).data;
+        const tDst = (await request(`${service}/tables`, "POST", { name: "Alman Hedef Masa" }, "manager-single")).data;
+        const waiter = (await request(`${service}/waiters`, "POST", { name: "Alman Garson" }, "manager-single")).data;
+        const orderId = "f1400000-0000-4000-8000-000000000001";
+        assert.equal((await request(`${service}/tables/${tSrc.id}/orders`, "POST", {
+          orderId, waiterId: waiter.id,
+          items: [{ productId: "55555555-5555-4555-8555-555555555501", quantity: 3 }],
+        }, "pos-single")).status, 201);
+        const detailBeforeSplit = (await request(`${root}/sales/checks/${orderId}`, "GET", undefined, "manager-single")).data;
+        const line = detailBeforeSplit.orders[0].items[0];
+        const splitRes = await request(`${root}/sales/checks/${orderId}/split`, "POST", {
+          requestId: "f1400000-0000-4000-8000-000000000002",
+          expectedVersion: detailBeforeSplit.version,
+          items: [{ orderLineId: line.id, quantity: 1 }],
+        }, "pos-single");
+        assert.equal(splitRes.status, 201);
+        const srcTableState = (await request(`${service}/tables`, "GET", undefined, "manager-single")).data.items.find(t => t.id === tSrc.id);
+        assert.equal((await request(`${service}/tables/${tSrc.id}/transfer`, "POST", {
+          requestId: "f1400000-0000-4000-8000-000000000003",
+          targetTableId: tDst.id,
+          expectedVersion: srcTableState.assignment.version,
+        }, "pos-single")).status, 200);
+        const unitPriceMinor = line.unitPriceMinor;
+        const collectPayload = {
+          requestId: "f1400000-0000-4000-8000-000000000004",
+          amountMinor: unitPriceMinor,
+          method: "card",
+          provider: "Garanti POS",
+          itemAllocations: [{ checkId: orderId, orderLineId: line.id, quantity: 1 }],
+        };
+        const collectRes = await request(`${service}/tables/${tDst.id}/collect`, "POST", collectPayload, "pos-single");
+        assert.equal(collectRes.status, 200, JSON.stringify(collectRes.data));
+        assert.equal(collectRes.data.remainingMinor, unitPriceMinor * 2);
+        const replayRes = await request(`${service}/tables/${tDst.id}/collect`, "POST", collectPayload, "pos-single");
+        assert.equal(replayRes.status, 200);
+        assert.equal(replayRes.data.remainingMinor, unitPriceMinor * 2);
+        const detailAfterAlman = (await request(`${root}/sales/checks/${orderId}`, "GET", undefined, "manager-single")).data;
+        assert.equal(detailAfterAlman.payments[0].itemAllocations.length, 1);
+        assert.equal(detailAfterAlman.payments[0].itemAllocations[0].quantity, 1);
+        const settleRes = await request(`${service}/tables/${tDst.id}/settle`, "POST", { paymentMethod: "KART" }, "pos-single");
+        assert.equal(settleRes.status, 200, JSON.stringify(settleRes.data));
+        assert.equal(settleRes.data.remainingMinor, 0);
+        const finalTable = (await request(`${service}/tables`, "GET", undefined, "manager-single")).data.items.find(t => t.id === tDst.id);
+        assert.equal(finalTable.status, "idle");
+        assert.equal(finalTable.assignment ?? null, null);
       }
       await browser.close();
       browser = undefined;

@@ -213,6 +213,17 @@ public static class EscPosBuilder
             WriteText(bw, $"ODEME: {paymentMethod.ToUpperInvariant()} (ARA TAHSILAT)\n");
             WriteText(bw, "** KISMI ODEME ARA BILGI FISIDIR **\n");
         }
+        else if (paidMinor == 0 && remainingMinor > 0)
+        {
+            WriteText(bw, "------------------------------------------------\n");
+            SetBold(bw, true);
+            WriteText(bw, $"ODENECEK TUTAR: {FormatMoney(remainingMinor)}\n");
+            SetBold(bw, false);
+            WriteText(bw, "================================================\n");
+            SetAlignment(bw, 1); // Center
+            WriteText(bw, "ODEME DURUMU: BEKLIYOR (HESAP ACIK)\n");
+            WriteText(bw, "** ARA HESAP BILGI FISIDIR **\n");
+        }
         else
         {
             if (paidMinor > 0)

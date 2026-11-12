@@ -1,4 +1,7 @@
 using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Hipos.Api.Features;
 using Hipos.Api.Realtime;
 using Hipos.Api.Service;
@@ -12,6 +15,29 @@ namespace Hipos.Api.Sales;
 public sealed record StartSimulatedPayment(
     Guid AttemptId, long AmountMinor, string Method, string SimulatedOutcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null, string? Provider = null, string? CustomerId = null);
 public sealed record ResolveSimulatedPayment(string Outcome, int ExpectedOrderVersion, bool PostToCash = false, Guid? RegisterId = null);
+public sealed record CollectTableItemAllocationInput(long OrderLineId, int Quantity, long? AmountMinor = null);
+public sealed record CollectTableCommand(
+    Guid RequestId,
+    long AmountMinor,
+    string Method,
+    bool PostToCash = true,
+    Guid? RegisterId = null,
+    string? Provider = null,
+    string? CustomerId = null,
+    IReadOnlyList<CollectTableItemAllocationInput>? ItemAllocations = null);
+public sealed record CollectTableResult(
+    IReadOnlyList<SalesCheckDetail> Checks,
+    IReadOnlyList<Guid> ClosedCheckIds,
+    bool TableReleased,
+    long PaidMinor,
+    long RemainingTableMinor,
+    IReadOnlyList<PaymentAttemptInfo> Attempts,
+    FeatureFailure? Failure,
+    bool Created)
+{
+    public static CollectTableResult Rejected(string code, int status, string detail) =>
+        new([], [], false, 0, 0, [], new FeatureFailure(code, status, detail), false);
+}
 public sealed record PaymentAttemptInfo(
     string Id, string OrderId, long AmountMinor, string Currency, string Method, string? Provider,
     string Status, int Version, bool Simulated, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
@@ -249,9 +275,9 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             ("cari", _) => "Cari / Veresiye",
             _ => attempt.Method
         };
-        var providerValue = string.IsNullOrWhiteSpace(attempt.Provider)
+        var providerValue = Truncate(string.IsNullOrWhiteSpace(attempt.Provider)
             ? (attempt.Method == "cash" ? "hipos-cash" : attempt.Method == "cari" ? "hipos-cari" : "hipos-pos")
-            : attempt.Provider;
+            : attempt.Provider, 80);
 
         await using (var movement = connection.CreateCommand())
         {
@@ -268,10 +294,10 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             AddParameter(movement, "branch_id", attempt.BranchId); AddParameter(movement, "register_id", shift.RegisterId);
             AddParameter(movement, "shift_id", shift.Id); AddParameter(movement, "method", attempt.Method);
             AddParameter(movement, "amount", attempt.AmountMinor);
-            AddParameter(movement, "description", $"Kasa tahsilatı · {tenderTitle} · Adisyon {attempt.CheckId.ToString()[..8]}");
+            AddParameter(movement, "description", Truncate($"Kasa tahsilatı · {tenderTitle} · Adisyon {attempt.CheckId.ToString()[..8]}", 500));
             AddParameter(movement, "provider", providerValue);
-            AddParameter(movement, "external_reference", $"{attempt.CheckId}:{attempt.OrderId}");
-            AddParameter(movement, "event_id", attempt.Id.ToString()); AddParameter(movement, "actor", actor);
+            AddParameter(movement, "external_reference", Truncate($"{attempt.CheckId}:{attempt.OrderId}", 160));
+            AddParameter(movement, "event_id", attempt.Id.ToString()); AddParameter(movement, "actor", Truncate(actor, 128));
             AddParameter(movement, "created_at", now);
             await movement.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -294,8 +320,8 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
             AddParameter(audit, "firm_id", attempt.FirmId); AddParameter(audit, "branch_id", attempt.BranchId);
             AddParameter(audit, "register_id", shift.RegisterId); AddParameter(audit, "shift_id", shift.Id);
             AddParameter(audit, "request_id", attempt.Id); AddParameter(audit, "entity_id", attempt.Id);
-            AddParameter(audit, "actor", actor);
-            AddParameter(audit, "detail", $"pos_sale;method={attempt.Method};provider={attempt.Provider};amountMinor={attempt.AmountMinor};checkId={attempt.CheckId};orderId={attempt.OrderId}");
+            AddParameter(audit, "actor", Truncate(actor, 128));
+            AddParameter(audit, "detail", Truncate($"pos_sale;method={attempt.Method};provider={attempt.Provider};amountMinor={attempt.AmountMinor};checkId={attempt.CheckId};orderId={attempt.OrderId}", 1000));
             AddParameter(audit, "occurred_at", now);
             await audit.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -753,4 +779,451 @@ public sealed class PaymentSimulator(SalesDbContext db, FeatureNewWorkGate gate,
     private static PaymentAttemptInfo ToInfo(PaymentAttemptRow row) =>
         new(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor, row.Currency,
             row.Method, row.Provider, row.Status, row.Version, true, row.CreatedAt, row.UpdatedAt);
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
+
+    private static string CollectAuditKey(Guid requestId) =>
+        $"tc{Convert.ToHexString(SHA256.HashData(requestId.ToByteArray()))[..30]}";
+
+    private static Guid DeterministicAttemptId(Guid requestId, Guid orderId)
+    {
+        Span<byte> buffer = stackalloc byte[32];
+        requestId.TryWriteBytes(buffer[..16]);
+        orderId.TryWriteBytes(buffer[16..32]);
+        var hash = SHA256.HashData(buffer);
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    public async Task<CollectTableResult> CollectTableAsync(
+        string firmId,
+        string branchId,
+        string tableId,
+        CollectTableCommand command,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (command.RequestId == Guid.Empty || string.IsNullOrWhiteSpace(tableId) || command.AmountMinor <= 0 ||
+            command.Method is not ("cash" or "card" or "meal" or "transfer" or "cari"))
+            return CollectTableResult.Rejected("INVALID_PAYMENT", 400, "Tahsilat isteği geçersiz.");
+        if (command.PostToCash && !runtime.CashReady)
+            return CollectTableResult.Rejected("CASH_STORAGE_UNAVAILABLE", 503, "Kasa veritabanı hazır değil; kasa migration'larını uygulayıp API'yi yeniden başlatın.");
+        if (command.Method == "cari" && !runtime.CariReady)
+            return CollectTableResult.Rejected("CARI_STORAGE_UNAVAILABLE", 503, "Cari veritabanı hazır değil; cari migration'larını uygulayıp API'yi yeniden başlatın.");
+
+        var collectKey = CollectAuditKey(command.RequestId);
+        var existingCheckIds = await db.CheckAudit.AsNoTracking()
+            .Where(a => a.FirmId == firmId && a.BranchId == branchId && a.Action == collectKey)
+            .Select(a => a.CheckId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        if (existingCheckIds.Length > 0)
+        {
+            return await BuildReplayCollectResultAsync(firmId, branchId, existingCheckIds, command, cancellationToken);
+        }
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+            transaction.GetDbTransaction(), firmId, branchId, "payments.simulator", cancellationToken);
+        if (blocked is not null) return new CollectTableResult([], [], false, 0, 0, [], blocked, false);
+        blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+            transaction.GetDbTransaction(), firmId, branchId, "sales.checks", cancellationToken);
+        if (blocked is not null) return new CollectTableResult([], [], false, 0, 0, [], blocked, false);
+
+        CashShiftLink? cashShift = null;
+        if (command.PostToCash)
+        {
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "cash.management", cancellationToken);
+            if (blocked is not null) return new CollectTableResult([], [], false, 0, 0, [], blocked, false);
+            var shiftResult = await LockOpenCashShiftAsync(db.Database.GetDbConnection(), firmId, branchId, command.RegisterId, transaction.GetDbTransaction(), cancellationToken);
+            if (shiftResult.Count == 0)
+                return CollectTableResult.Rejected("OPEN_CASH_SHIFT_REQUIRED", 409, command.RegisterId is null ? "Tahsilat için önce yönetim ekranından veya kasadan vardiya açın." : "Seçili kasada açık vardiya yok. Tahsilat için önce kasa açılışını yapın.");
+            if (shiftResult.Count > 1)
+                return CollectTableResult.Rejected("CASH_SHIFT_AMBIGUOUS", 409, "Birden fazla açık kasa vardiyası var. Tahsilattan önce yalnız kullanılacak kasanın vardiyasını açık bırakın.");
+            cashShift = shiftResult[0];
+        }
+
+        if (command.Method == "cari")
+        {
+            blocked = await gate.CheckAndLockAsync(db.Database.GetDbConnection(),
+                transaction.GetDbTransaction(), firmId, branchId, "cari.management", cancellationToken);
+            if (blocked is not null) return new CollectTableResult([], [], false, 0, 0, [], blocked, false);
+        }
+
+        // Masa ve varsa bağlı olduğu aktif masa grubunu çöz.
+        string[] tableIds;
+        await using (var cmdTable = db.Database.GetDbConnection().CreateCommand())
+        {
+            cmdTable.Transaction = transaction.GetDbTransaction();
+            cmdTable.CommandText = """
+                SELECT t.table_group_id, tg.table_ids
+                FROM service.tables t
+                LEFT JOIN service.table_groups tg
+                    ON tg.id = t.table_group_id AND tg.firm_id = t.firm_id AND tg.branch_id = t.branch_id AND tg.closed_at IS NULL
+                WHERE t.id = @table_id AND t.firm_id = @firm_id AND t.branch_id = @branch_id
+                """;
+            AddParameter(cmdTable, "table_id", tableId);
+            AddParameter(cmdTable, "firm_id", firmId);
+            AddParameter(cmdTable, "branch_id", branchId);
+            await using var reader = await cmdTable.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return CollectTableResult.Rejected("TABLE_NOT_FOUND", 404, "Masa bu şubede bulunamadı.");
+            tableIds = reader.IsDBNull(1) ? [tableId] : (string[])reader.GetValue(1);
+        }
+
+        var lockedChecks = await db.Checks.FromSqlInterpolated($"""
+            SELECT * FROM sales.checks
+            WHERE firm_id = {firmId} AND branch_id = {branchId} AND status = 'open'
+              AND table_id IS NOT NULL AND table_id = ANY({tableIds})
+            ORDER BY created_at, id
+            FOR UPDATE
+            """).ToListAsync(cancellationToken);
+
+        existingCheckIds = await db.CheckAudit.AsNoTracking()
+            .Where(a => a.FirmId == firmId && a.BranchId == branchId && a.Action == collectKey)
+            .Select(a => a.CheckId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        if (existingCheckIds.Length > 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return await BuildReplayCollectResultAsync(firmId, branchId, existingCheckIds, command, cancellationToken);
+        }
+
+        if (lockedChecks.Count == 0)
+            return CollectTableResult.Rejected("CHECK_NOT_FOUND", 404, "Bu masada tahsilat yapılacak açık adisyon bulunamadı.");
+
+        string? resolvedCustomerId = string.IsNullOrWhiteSpace(command.CustomerId) ? null : command.CustomerId.Trim();
+        string? resolvedCustomerName = null;
+        if (command.Method == "cari")
+        {
+            if (string.IsNullOrWhiteSpace(resolvedCustomerId))
+                resolvedCustomerId = lockedChecks.Select(c => c.CustomerId).FirstOrDefault(cid => !string.IsNullOrWhiteSpace(cid));
+            if (string.IsNullOrWhiteSpace(resolvedCustomerId))
+                return CollectTableResult.Rejected("CUSTOMER_REQUIRED", 400, "Cariye / veresiye yazmak için lütfen müşteri kartı seçin.");
+
+            await using var cmdParty = db.Database.GetDbConnection().CreateCommand();
+            cmdParty.Transaction = transaction.GetDbTransaction();
+            cmdParty.CommandText = """
+                SELECT name, is_active, types
+                FROM cari.parties
+                WHERE id = @id AND firm_id = @firm_id AND branch_id = @branch_id
+                FOR UPDATE
+                """;
+            AddParameter(cmdParty, "id", resolvedCustomerId);
+            AddParameter(cmdParty, "firm_id", firmId);
+            AddParameter(cmdParty, "branch_id", branchId);
+            await using var reader = await cmdParty.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return CollectTableResult.Rejected("CUSTOMER_NOT_FOUND", 404, "Seçilen cari kartı bulunamadı.");
+            resolvedCustomerName = reader.GetString(0);
+            var isActive = reader.GetBoolean(1);
+            var types = (string[])reader.GetValue(2);
+            if (!isActive)
+                return CollectTableResult.Rejected("CUSTOMER_INACTIVE", 409, "Seçilen müşteri kartı pasif durumda.");
+            if (!types.Contains("customer"))
+                return CollectTableResult.Rejected("CUSTOMER_NOT_ELIGIBLE", 409, "Seçilen cari kartı müşteri türünde değil.");
+        }
+
+        var openCheckIds = lockedChecks.Select(c => c.Id).ToArray();
+        var lockedOrders = await db.Orders.FromSqlInterpolated($"""
+            SELECT * FROM sales.orders
+            WHERE firm_id = {firmId} AND branch_id = {branchId} AND check_id = ANY({openCheckIds})
+            ORDER BY check_id, created_at, id
+            FOR UPDATE
+            """).ToListAsync(cancellationToken);
+
+        foreach (var order in lockedOrders)
+        {
+            await LoadOrderDetailsAsync(order, cancellationToken);
+        }
+
+        if (lockedOrders.Any(o => o.PaymentAttempts.Any(a => a.Status is "pending" or "unknown")))
+            return CollectTableResult.Rejected("PAYMENT_UNRESOLVED", 409, "Bekleyen veya belirsiz ödeme sonuçlanmadan yeni tahsilat alınamaz.");
+
+        var allAdjustments = await db.CheckAdjustments.AsNoTracking()
+            .Where(row => openCheckIds.Contains(row.CheckId) && row.FirmId == firmId && row.BranchId == branchId)
+            .OrderBy(row => row.CreatedAt).ThenBy(row => row.RequestId)
+            .ToListAsync(cancellationToken);
+
+        var payableByOrder = new Dictionary<Guid, long>();
+        var remainingByOrder = new Dictionary<Guid, long>();
+        foreach (var check in lockedChecks)
+        {
+            var checkOrders = lockedOrders.Where(o => o.CheckId == check.Id).ToArray();
+            var checkAdjs = allAdjustments.Where(a => a.CheckId == check.Id).ToArray();
+            var checkPayable = CalculatePayableOrderTotals(checkOrders, checkAdjs);
+            foreach (var o in checkOrders)
+            {
+                var pTotal = checkPayable.GetValueOrDefault(o.Id, 0);
+                payableByOrder[o.Id] = pTotal;
+                remainingByOrder[o.Id] = Math.Max(0, pTotal - PaidMinor(o));
+            }
+        }
+
+        long totalRemainingBefore = remainingByOrder.Values.Sum();
+        if (command.AmountMinor > totalRemainingBefore)
+            return CollectTableResult.Rejected("AMOUNT_EXCEEDS_REMAINING", 409, "Tahsilat tutarı masanın kalan bakiyesini aşıyor.");
+
+        var allocatedByOrder = new Dictionary<Guid, long>();
+        var itemAllocationsByOrder = new Dictionary<Guid, List<CheckPaymentItemAllocation>>();
+        long remainingToAllocate = command.AmountMinor;
+
+        if (command.ItemAllocations is { Count: > 0 })
+        {
+            var lineById = lockedOrders.SelectMany(o => o.Lines).ToDictionary(l => l.Id);
+            foreach (var input in command.ItemAllocations)
+            {
+                if (input.Quantity < 1)
+                    return CollectTableResult.Rejected("INVALID_PAYMENT", 400, "Seçilen ürün adedi en az 1 olmalıdır.");
+                if (!lineById.TryGetValue(input.OrderLineId, out var line))
+                    return CollectTableResult.Rejected("ORDER_LINE_NOT_FOUND", 404, "Seçilen ürünlerden biri artık bu masanın açık adisyonlarında değil.");
+
+                long lineSlice = input.AmountMinor ?? checked(input.Quantity * line.UnitPriceMinor);
+                if (lineSlice <= 0)
+                    return CollectTableResult.Rejected("INVALID_PAYMENT", 400, "Seçilen ürün tutarı pozitif olmalıdır.");
+
+                if (remainingToAllocate <= 0) break;
+                var orderCapacity = Math.Max(0, remainingByOrder[line.OrderId] - allocatedByOrder.GetValueOrDefault(line.OrderId, 0));
+                var applyMinor = Math.Min(lineSlice, Math.Min(remainingToAllocate, orderCapacity));
+                if (applyMinor <= 0) continue;
+
+                allocatedByOrder[line.OrderId] = allocatedByOrder.GetValueOrDefault(line.OrderId, 0) + applyMinor;
+                remainingToAllocate -= applyMinor;
+
+                if (!itemAllocationsByOrder.TryGetValue(line.OrderId, out var list))
+                {
+                    list = [];
+                    itemAllocationsByOrder[line.OrderId] = list;
+                }
+                list.Add(new CheckPaymentItemAllocation(line.Id, line.ProductName, input.Quantity, applyMinor));
+            }
+        }
+
+        if (remainingToAllocate > 0)
+        {
+            foreach (var order in lockedOrders)
+            {
+                if (remainingToAllocate <= 0) break;
+                var capacity = Math.Max(0, remainingByOrder[order.Id] - allocatedByOrder.GetValueOrDefault(order.Id, 0));
+                if (capacity <= 0) continue;
+                var apply = Math.Min(remainingToAllocate, capacity);
+                allocatedByOrder[order.Id] = allocatedByOrder.GetValueOrDefault(order.Id, 0) + apply;
+                remainingToAllocate -= apply;
+            }
+        }
+
+        if (allocatedByOrder.Values.Sum() != command.AmountMinor)
+            return CollectTableResult.Rejected("AMOUNT_EXCEEDS_REMAINING", 409, "Tahsilat tutarı masanın ödenebilir sipariş bakiyesine dağıtılamadı.");
+
+        var now = DateTimeOffset.UtcNow;
+        var baseProvider = string.IsNullOrWhiteSpace(command.Provider) ? null : command.Provider.Trim();
+        if (command.Method == "cari" && resolvedCustomerName is not null)
+        {
+            baseProvider = baseProvider is not null && baseProvider.Contains(resolvedCustomerName)
+                ? baseProvider
+                : $"Cari: {resolvedCustomerName}";
+        }
+        baseProvider = baseProvider is null ? null : Truncate(baseProvider, 80);
+
+        var createdAttempts = new List<PaymentAttemptRow>();
+        var touchedCheckIds = new HashSet<Guid>();
+        foreach (var order in lockedOrders)
+        {
+            if (!allocatedByOrder.TryGetValue(order.Id, out var allocMinor) || allocMinor <= 0) continue;
+
+            string? allocJson = itemAllocationsByOrder.TryGetValue(order.Id, out var itemList) && itemList.Count > 0
+                ? JsonSerializer.Serialize(itemList)
+                : null;
+
+            var attempt = new PaymentAttemptRow
+            {
+                Id = DeterministicAttemptId(command.RequestId, order.Id),
+                CheckId = order.CheckId,
+                FirmId = firmId,
+                BranchId = branchId,
+                OrderId = order.Id,
+                AmountMinor = allocMinor,
+                Currency = "TRY",
+                Method = command.Method,
+                Provider = baseProvider,
+                Status = "succeeded",
+                RequestedOutcome = "succeeded",
+                ItemAllocationsJson = allocJson,
+                Version = 1,
+                Actor = Truncate(actor, 128),
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            order.PaymentAttempts.Add(attempt);
+            db.Entry(attempt).State = EntityState.Added;
+            UpdateOrderPaymentStatus(order, payableByOrder[order.Id]);
+            order.Version++;
+            AddAudit(attempt, order, Truncate(actor, 128), "started", now);
+            createdAttempts.Add(attempt);
+            touchedCheckIds.Add(order.CheckId);
+        }
+
+        if (command.Method == "cari" && resolvedCustomerId is not null)
+        {
+            foreach (var check in lockedChecks.Where(c => touchedCheckIds.Contains(c.Id) && string.IsNullOrWhiteSpace(c.CustomerId)))
+            {
+                check.CustomerId = resolvedCustomerId;
+                check.Version++;
+            }
+        }
+
+        // Idempotency için audit kaydı ekle (masadaki tüm açık adisyonlara bağlanır)
+        foreach (var check in lockedChecks)
+        {
+            db.CheckAudit.Add(new SalesCheckAuditRow
+            {
+                CheckId = check.Id,
+                FirmId = firmId,
+                BranchId = branchId,
+                Actor = Truncate(actor, 128),
+                Action = collectKey,
+                Version = check.Version,
+                OccurredAt = now,
+            });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+
+            foreach (var attempt in createdAttempts)
+            {
+                if (attempt.Method == "cari" && resolvedCustomerId is not null && resolvedCustomerName is not null)
+                    await AddCariChargeAsync(db.Database.GetDbConnection(), transaction.GetDbTransaction()!, firmId, branchId, resolvedCustomerId, resolvedCustomerName, attempt.CheckId, attempt.OrderId, attempt, actor, now, cancellationToken);
+                if (command.PostToCash && cashShift is not null)
+                    await AddCashMovementAsync(db.Database.GetDbConnection(), cashShift, attempt, actor, now, transaction.GetDbTransaction(), cancellationToken);
+            }
+
+            var closedCheckIds = new List<Guid>();
+            foreach (var check in lockedChecks)
+            {
+                var checkOrders = lockedOrders.Where(o => o.CheckId == check.Id).ToArray();
+                var checkAdjs = allAdjustments.Where(a => a.CheckId == check.Id).ToArray();
+                var due = Math.Max(0, checkOrders.Sum(o => o.TotalMinor) - checkAdjs.Sum(a => a.AmountMinor));
+                var paid = checkOrders.SelectMany(o => o.PaymentAttempts).Where(a => a.Status == "succeeded").Sum(a => a.AmountMinor);
+                if (paid >= due && checkOrders.Length > 0)
+                {
+                    check.Status = "closed";
+                    check.ClosedAt = now;
+                    check.Version++;
+                    db.CheckAudit.Add(new SalesCheckAuditRow
+                    {
+                        CheckId = check.Id,
+                        FirmId = firmId,
+                        BranchId = branchId,
+                        Actor = Truncate(actor, 128),
+                        Action = "payment_completed_check_closed",
+                        Version = check.Version,
+                        OccurredAt = now,
+                    });
+                    closedCheckIds.Add(check.Id);
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            if (runtime.InventoryReady)
+            {
+                foreach (var closedCheckId in closedCheckIds)
+                {
+                    await DepleteInventoryForCheckAsync(db.Database.GetDbConnection(),
+                        db.Database.CurrentTransaction?.GetDbTransaction(),
+                        closedCheckId, firmId, branchId, actor, now, cancellationToken);
+                }
+            }
+
+            if (closedCheckIds.Count > 0)
+            {
+                await settlement.ReleaseAfterPaymentAsync(tableId, firmId, branchId, actor, now, cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+
+            var remainingAfter = Math.Max(0, totalRemainingBefore - command.AmountMinor);
+            var tableReleased = remainingAfter == 0 && closedCheckIds.Count == lockedChecks.Count;
+
+            foreach (var attempt in createdAttempts)
+            {
+                eventHub?.Publish("payment.settled", firmId, branchId, new { attemptId = attempt.Id, orderId = attempt.OrderId, checkId = attempt.CheckId, tableId });
+            }
+            if (command.Method == "cari" && resolvedCustomerId is not null)
+            {
+                eventHub?.Publish("cari.updated", firmId, branchId, new { partyId = resolvedCustomerId, partyName = resolvedCustomerName, deltaMinor = command.AmountMinor, tableId });
+            }
+            foreach (var closedCheckId in closedCheckIds)
+            {
+                eventHub?.Publish("check.closed", firmId, branchId, new { checkId = closedCheckId, tableId });
+                eventHub?.Publish("inventory.stock_updated", firmId, branchId, new { checkId = closedCheckId, timestamp = now });
+            }
+            if (tableReleased)
+            {
+                eventHub?.Publish("table.updated", firmId, branchId, new { tableId, status = "vacant" });
+            }
+
+            var detailViews = lockedChecks
+                .Select(check =>
+                {
+                    var checkOrders = lockedOrders.Where(o => o.CheckId == check.Id).ToArray();
+                    var checkAdjs = allAdjustments.Where(a => a.CheckId == check.Id).ToArray();
+                    return SalesCheckEndpoints.ToDetail(check, checkOrders, checkAdjs);
+                })
+                .ToArray();
+
+            return new CollectTableResult(
+                Checks: detailViews,
+                ClosedCheckIds: closedCheckIds,
+                TableReleased: tableReleased,
+                PaidMinor: command.AmountMinor,
+                RemainingTableMinor: remainingAfter,
+                Attempts: createdAttempts.Select(ToInfo).ToArray(),
+                Failure: null,
+                Created: true);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return CollectTableResult.Rejected("VERSION_CONFLICT", 409, "Sipariş veya adisyon başka bir işlemle değişti.");
+        }
+        catch (DbUpdateException error) when (error.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return await BuildReplayCollectResultAsync(firmId, branchId, openCheckIds, command, cancellationToken);
+        }
+    }
+
+    private async Task<CollectTableResult> BuildReplayCollectResultAsync(
+        string firmId,
+        string branchId,
+        IReadOnlyList<Guid> checkIds,
+        CollectTableCommand command,
+        CancellationToken cancellationToken)
+    {
+        var checks = await db.Checks.AsNoTracking()
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.Id))
+            .OrderBy(row => row.CreatedAt).ThenBy(row => row.Id)
+            .ToArrayAsync(cancellationToken);
+        var orders = await db.Orders.AsNoTracking().AsSplitQuery().Include(row => row.Lines).Include(row => row.PaymentAttempts)
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.CheckId))
+            .OrderBy(row => row.CreatedAt).ThenBy(row => row.Id)
+            .ToArrayAsync(cancellationToken);
+        var adjustments = await db.CheckAdjustments.AsNoTracking()
+            .Where(row => row.FirmId == firmId && row.BranchId == branchId && checkIds.Contains(row.CheckId))
+            .OrderBy(row => row.CreatedAt).ThenBy(row => row.RequestId)
+            .ToArrayAsync(cancellationToken);
+
+        var matchedIds = orders.Select(o => DeterministicAttemptId(command.RequestId, o.Id)).ToHashSet();
+        var attempts = orders.SelectMany(o => o.PaymentAttempts).Where(a => matchedIds.Contains(a.Id)).ToArray();
+        if (attempts.Length == 0 || attempts.Sum(a => a.AmountMinor) != command.AmountMinor || attempts.Any(a => a.Method != command.Method))
+            return CollectTableResult.Rejected("PAYMENT_ID_CONFLICT", 409, "Tahsilat istek kimliği farklı bir ödeme için kullanılmış.");
+
+        var details = checks.Select(c => SalesCheckEndpoints.ToDetail(c, orders.Where(o => o.CheckId == c.Id).ToArray(), adjustments.Where(a => a.CheckId == c.Id).ToArray())).ToArray();
+        var closedIds = checks.Where(c => c.Status == "closed").Select(c => c.Id).ToArray();
+        var remaining = details.Sum(d => d.RemainingMinor);
+        return new CollectTableResult(details, closedIds, checks.All(c => c.Status == "closed"), command.AmountMinor, remaining, attempts.Select(ToInfo).ToArray(), null, false);
+    }
 }

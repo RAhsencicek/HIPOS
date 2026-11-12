@@ -93,6 +93,20 @@ public sealed record UpdatePrinterConfigRequest(
     bool? AutoPrintKitchenOnOrder = null,
     bool? AutoSplitKitchenByStation = null);
 
-public sealed record SettleTableRequest(string? PaymentMethod = "NAKIT", Guid? RegisterId = null, bool PostToCash = true);
+public sealed record ReceiptLineInput(
+    string ProductName,
+    int Quantity,
+    long UnitPriceMinor,
+    long LineTotalMinor);
+
+public sealed record TablePrintBillRequest(
+    bool OpenCashDrawer = false,
+    string? PaymentMethod = null,
+    IReadOnlyList<Guid>? CheckIds = null,
+    IReadOnlyList<ReceiptLineInput>? PaidItems = null,
+    long? PaidAmountMinor = null,
+    bool IsAlmanReceipt = false);
+
+public sealed record SettleTableRequest(string? PaymentMethod = null, Guid? RegisterId = null, bool PostToCash = true);
 
 public sealed record PrintResult(bool Success, string Target, string TransportUsed, string? Error = null);

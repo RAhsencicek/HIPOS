@@ -146,14 +146,14 @@ if (serviceOnly) {
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM sales.orders WHERE id = ${sqlString(order.id)} AND firm_id = ${firm} AND branch_id = ${branch} AND source = 'demo_service' AND request_fingerprint = ${sqlString(fingerprint)}) THEN RAISE EXCEPTION 'Demo sipariş kimliği farklı içerikle kullanılıyor: ${order.id}'; END IF; END $$;`);
     for (const item of order.items) {
       const product = demo.products.find((entry) => entry.id === item.productId);
-      statements.push(`INSERT INTO sales.order_lines (order_id,product_id,product_name,sku,quantity,base_unit_price_minor,unit_price_minor,line_total_minor,currency) SELECT ${sqlString(order.id)},${sqlString(product.id)},${sqlString(product.name)},${sqlString(product.sku)},${item.quantity},${product.priceMinor},${product.priceMinor},${product.priceMinor * item.quantity},'TRY' WHERE NOT EXISTS (SELECT 1 FROM sales.order_lines WHERE order_id = ${sqlString(order.id)} AND product_id = ${sqlString(product.id)});`);
+      statements.push(`INSERT INTO sales.order_lines (order_id,product_id,product_name,sku,quantity,base_unit_price_minor,unit_price_minor,line_total_minor,currency) SELECT ${sqlString(order.id)},${sqlString(product.id)},${sqlString(product.name)},${sqlString(product.sku)},${item.quantity},${product.priceMinor},${product.priceMinor},${product.priceMinor * item.quantity},'TRY' WHERE NOT EXISTS (SELECT 1 FROM sales.order_lines WHERE order_id = ${sqlString(order.id)} AND product_id = ${sqlString(product.id)}) AND EXISTS (SELECT 1 FROM sales.orders WHERE id = ${sqlString(order.id)} AND version = 1) AND NOT EXISTS (SELECT 1 FROM sales.check_splits WHERE source_check_id = ${sqlString(order.id)});`);
     }
   }
   for (const assignment of demo.serviceDemo.assignments) {
     const order = demo.serviceDemo.orders.find((row) => row.id === assignment.orderId);
     const tableId = `table-${String(assignment.tableNumber).padStart(2, "0")}`;
     statements.push(`INSERT INTO service.assignments (id,check_id,firm_id,branch_id,table_id,order_id,waiter_id,opened_at,closed_at,version,created_by,closed_by) VALUES (${sqlString(assignment.id)},${sqlString(order.id)},${firm},${branch},${sqlString(tableId)},${sqlString(order.id)},${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"},${sqlString(order.createdAt)},NULL,1,'demo-seed',NULL) ON CONFLICT (id) DO NOTHING;`);
-    statements.push(`UPDATE sales.checks SET table_id=${sqlString(tableId)},waiter_id=${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"} WHERE id=${sqlString(order.id)} AND firm_id=${firm} AND branch_id=${branch};`);
+    statements.push(`UPDATE sales.checks SET table_id=${sqlString(tableId)},waiter_id=${assignment.waiterId ? sqlString(assignment.waiterId) : "NULL"} WHERE id=${sqlString(order.id)} AND firm_id=${firm} AND branch_id=${branch} AND status='open' AND version=1 AND table_id IS NULL;`);
   }
 } else if (cariOnly) {
   for (const party of demo.parties) {

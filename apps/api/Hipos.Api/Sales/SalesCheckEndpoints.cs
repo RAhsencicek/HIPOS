@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Hipos.Api.Auth;
 using Hipos.Api.Cari;
 using Hipos.Api.Features;
@@ -26,8 +27,19 @@ public sealed record CreateCheckAdjustment(Guid RequestId, int ExpectedVersion, 
     int? Value, long? OrderLineId, int Quantity, string Reason, string? ManagerPin = null);
 public sealed record CheckAdjustmentView(Guid RequestId, string Action, string? ValueType, int? Value,
     long? OrderLineId, int Quantity, long AmountMinor, string Reason, string Actor, string ApprovalMode, DateTimeOffset CreatedAt, Guid? OriginalCheckId = null);
+public sealed record CheckPaymentItemAllocation(long OrderLineId, string ProductName, int Quantity, long AmountMinor);
 public sealed record CheckPaymentView(string Id, string OrderId, long AmountMinor, string Currency,
-    string Method, string? Provider, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    string Method, string? Provider, string Status, int Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    IReadOnlyList<CheckPaymentItemAllocation>? ItemAllocations = null);
+public sealed record CollectTablePayment(
+    Guid RequestId,
+    long AmountMinor,
+    string Method,
+    bool PostToCash = true,
+    Guid? RegisterId = null,
+    string? Provider = null,
+    string? CustomerId = null,
+    IReadOnlyList<CollectTableItemAllocationInput>? ItemAllocations = null);
 public sealed record SalesCheckDetail(string Id, string FirmId, string BranchId, string Status,
     string? CustomerId, string? TableId, string? WaiterId, string? MergedIntoCheckId, string Currency, long TotalMinor,
     long PaidMinor, long RemainingMinor, string PaymentStatus, DateTimeOffset CreatedAt, int Version,
@@ -661,6 +673,85 @@ public static class SalesCheckEndpoints
                 new { attempt = payment.Attempt, check = detail }) : Results.Ok(new { attempt = payment.Attempt, check = detail });
         });
 
+        app.MapPost("/api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/collect", async (
+            string firmId,
+            string branchId,
+            string tableId,
+            CollectTablePayment command,
+            HttpContext context,
+            PaymentSimulator payments,
+            [FromServices] SyncService sync) =>
+        {
+            var denied = Guard(context, firmId, branchId, salesReady, true);
+            if (denied is not null) return denied;
+            if (!serviceReady) return Fail(context, "SERVICE_STORAGE_UNAVAILABLE", 503, "Servis migration'ı uygulanmalı.");
+
+            var actorName = DemoAccess.Resolve(context)!.Name;
+            var result = await payments.CollectTableAsync(
+                firmId,
+                branchId,
+                tableId,
+                new CollectTableCommand(
+                    command.RequestId,
+                    command.AmountMinor,
+                    command.Method,
+                    command.PostToCash,
+                    command.RegisterId,
+                    command.Provider,
+                    command.CustomerId,
+                    command.ItemAllocations),
+                actorName,
+                context.RequestAborted);
+
+            if (result.Failure is { } failure)
+                return Fail(context, failure.Code, failure.Status, failure.Message);
+
+            if (result.Created)
+            {
+                var checkByOrderId = result.Checks
+                    .SelectMany(c => c.Orders.Select(o => (OrderId: o.Id, Check: c)))
+                    .ToDictionary(x => x.OrderId, x => x.Check, StringComparer.Ordinal);
+
+                foreach (var attempt in result.Attempts)
+                {
+                    if (!checkByOrderId.TryGetValue(attempt.OrderId, out var checkDetail)) continue;
+                    await sync.TryEnqueueAsync(
+                        firmId,
+                        branchId,
+                        aggregateType: "check",
+                        aggregateId: checkDetail.Id,
+                        eventType: "payment.recorded",
+                        payload: new
+                        {
+                            checkId = checkDetail.Id,
+                            orderId = attempt.OrderId,
+                            attemptId = attempt.Id,
+                            amountMinor = attempt.AmountMinor,
+                            method = attempt.Method,
+                            status = attempt.Status,
+                            checkStatus = checkDetail.Status,
+                            paymentStatus = checkDetail.PaymentStatus,
+                            paidMinor = checkDetail.PaidMinor,
+                            remainingMinor = checkDetail.RemainingMinor,
+                            occurredAt = attempt.UpdatedAt,
+                        },
+                        idempotencyKey: $"payment.recorded:{attempt.Id}:v{attempt.Version}",
+                        cancellationToken: context.RequestAborted);
+                }
+            }
+
+            return Results.Ok(new
+            {
+                tableId,
+                checks = result.Checks,
+                closedCheckIds = result.ClosedCheckIds.Select(id => id.ToString()).ToArray(),
+                tableReleased = result.TableReleased,
+                paidMinor = result.PaidMinor,
+                remainingTableMinor = result.RemainingTableMinor,
+                attempts = result.Attempts,
+            });
+        });
+
         group.MapPost("/{checkId:guid}/payment-attempts/{attemptId:guid}/resolve", async (string firmId,
             string branchId, Guid checkId, Guid attemptId, ResolveSimulatedPayment command, HttpContext context,
             SalesDbContext db, PaymentSimulator payments, [FromServices] SyncService sync) =>
@@ -1020,7 +1111,7 @@ public static class SalesCheckEndpoints
         return ToDetail(check, orders, adjustments);
     }
 
-    private static SalesCheckDetail ToDetail(SalesCheckRow check, IReadOnlyList<SalesOrderRow> orders,
+    internal static SalesCheckDetail ToDetail(SalesCheckRow check, IReadOnlyList<SalesOrderRow> orders,
         IReadOnlyList<SalesCheckAdjustmentRow> adjustments)
     {
         var attempts = orders.SelectMany(row => row.PaymentAttempts).OrderBy(row => row.CreatedAt).ThenBy(row => row.Id).ToArray();
@@ -1039,8 +1130,22 @@ public static class SalesCheckEndpoints
                 return detail with { RemainingMinor = Math.Max(0, payableByOrder.GetValueOrDefault(order.Id) - detail.PaidMinor) };
             }).ToArray(),
             attempts.Select(row => new CheckPaymentView(row.Id.ToString(), row.OrderId.ToString(), row.AmountMinor,
-                row.Currency, row.Method, row.Provider, row.Status, row.Version, row.CreatedAt, row.UpdatedAt)).ToArray(),
+                row.Currency, row.Method, row.Provider, row.Status, row.Version, row.CreatedAt, row.UpdatedAt,
+                ParseItemAllocations(row.ItemAllocationsJson))).ToArray(),
             gross, adjustmentMinor, adjustments.Select(ToAdjustmentView).ToArray());
+    }
+
+    private static IReadOnlyList<CheckPaymentItemAllocation>? ParseItemAllocations(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<CheckPaymentItemAllocation>>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static CheckAdjustmentView ToAdjustmentView(SalesCheckAdjustmentRow row) =>

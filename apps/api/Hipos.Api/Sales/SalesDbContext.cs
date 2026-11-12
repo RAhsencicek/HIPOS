@@ -35,6 +35,7 @@ public sealed class PaymentAttemptRow
     public string? Provider { get; set; }
     public string Status { get; set; } = "pending";
     public string RequestedOutcome { get; set; } = "pending";
+    public string? ItemAllocationsJson { get; set; }
     public int Version { get; set; } = 1;
     public string Actor { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
@@ -280,6 +281,7 @@ public sealed class SalesDbContext(DbContextOptions<SalesDbContext> options) : D
             entity.Property(row => row.Provider).HasColumnName("provider").HasMaxLength(80);
             entity.Property(row => row.Status).HasColumnName("status").HasMaxLength(16);
             entity.Property(row => row.RequestedOutcome).HasColumnName("requested_outcome").HasMaxLength(16);
+            entity.Property(row => row.ItemAllocationsJson).HasColumnName("item_allocations_json").HasColumnType("jsonb");
             entity.Property(row => row.Version).HasColumnName("version").IsConcurrencyToken();
             entity.Property(row => row.Actor).HasColumnName("actor").HasMaxLength(128);
             entity.Property(row => row.CreatedAt).HasColumnName("created_at");
@@ -377,6 +379,7 @@ public sealed class SalesDbContextFactory : IDesignTimeDbContextFactory<SalesDbC
     {
         await db.Database.ExecuteSqlRawAsync("""
             ALTER TABLE sales.payment_attempts ADD COLUMN IF NOT EXISTS provider character varying(80);
+            ALTER TABLE sales.payment_attempts ADD COLUMN IF NOT EXISTS item_allocations_json jsonb;
             ALTER TABLE sales.payment_attempts DROP CONSTRAINT IF EXISTS ck_payment_method;
             ALTER TABLE sales.payment_attempts ADD CONSTRAINT ck_payment_method CHECK (method::text = ANY (ARRAY['cash'::text, 'card'::text, 'meal'::text, 'transfer'::text, 'cari'::text]));
             """, cancellationToken);

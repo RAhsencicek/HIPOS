@@ -24,6 +24,7 @@
   - Garson ekranından (`/waiter`) masaya sipariş girilmesi ve ortak adisyon açılması
   - Adisyona birden fazla sipariş eklenmesi ve API'ye kaydedilmesi
   - Garson masa detayında açık adisyon, taşıma, birleştirme ve miktar bazlı adisyon bölme akışları
+  - **Birleşik Masa Hesabı, Alman Hesabı ve Atomik Masa Kapatma:** Masa taşıma veya adisyon bölme sonrasında masaya ait tüm açık adisyonlar Kasa (`/cashier`) ekranında ayrı `Adisyon 1 / 2` seçimi olmadan tek ürün listesinde birleşir; ara hesap ve kapanış fişleri masa kapsamındaki tüm açık adisyonları toplar (`PrintCashierTableBillAsync`) ve Garson ekranındaki `Nakit İle Kapat` / `Kart İle Kapat` işlemleri atomik `POST /service/tables/{tableId}/settle` üzerinden tüm açık adisyonları kapatıp stok düşümü + masayı boşaltmayı birlikte tamamlar.
   - Sipariş kaleminde not ve demo hazırlama tercihlerinin mutfak görünümüne taşınması
   - **Server-Sent Events (SSE) LAN Canlı Eşzamanlılık:** Garson masaya sipariş girdiğinde, Kasa tahsilat yapıp hesabı kapattığında veya Mutfak bir kalemi `HAZIR` yaptığında, el terminalleri (`HAZIR` anlık toast bildirimi dahil), kasalar ve mutfak ekranları sub-10ms gecikmeyle güncellenir (`RestaurantEventHub`, `GET /events/stream`).
   - **Kalem İptali & Tam Adisyon İptali → KDS + Mutfak İptal Bileti (Faz 12):** Garson ekranından yapılan kalem iptali (`POST /sales/checks/{id}/adjustments` `void`) ve tam adisyon iptali (`POST /sales/checks/{id}/cancel`) bağlı `kitchen.tasks` satırlarını `cancelled` durumuna çeker ve Mutfak/Bar yazıcılarına ESC/POS `IPTAL BILETI` gönderir.

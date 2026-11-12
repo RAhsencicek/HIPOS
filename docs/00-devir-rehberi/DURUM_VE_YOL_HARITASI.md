@@ -602,6 +602,20 @@ Fiziksel restoran donanımlarıyla (fiş yazıcı, RJ11 çekmece, USB HID barkod
 
 ---
 
+### 🔷 CANLI SAHA DÜZELTMESİ: Birleşik Masa Hesabı, Alman Hesabı Tek Tıkla Tahsilat ve `/settle` Sertleştirmesi (✅ DOĞRULANDI - 12 KASIM 2026)
+
+Canlı desk/cihaz testinde bildirilen (1) masa taşıma ve adisyon bölme sonrasında yanlış/eksik ödeme fişi basılması, (2) Kasa ekranındaki `Adisyon 1 / Adisyon 2` seçimi yerine müşterinin söylediği ürüne basarak tek tıkla Alman Hesabı tahsilatı ihtiyacı ve (3) Garson `Kart İle Kapat` (`/settle`) işleminde oluşan HTTP 500 ile demo seed çakışması giderildi:
+1. **Atomik Çoklu-Adisyon Tahsilatı & Alman Hesabı ([`PaymentSimulator.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/PaymentSimulator.cs), [`SalesDbContext.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesDbContext.cs), [`SalesCheckEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Sales/SalesCheckEndpoints.cs)):**
+   - `sales.payment_attempts.item_allocations_json` (`jsonb`) ve `POST /api/v1/firms/{firmId}/branches/{branchId}/service/tables/{tableId}/collect` eklendi; seçili ürün payları veya genel masa tutarı tek işlemde kilitlenip tüm açık adisyonlara dağıtılır, idempotent replay (`CollectAuditKey`) desteklenir, vardiya kasa hareketi + cari borç + stok reçete düşümü + masa serbest bırakma + SSE güncellemeleri birlikte yürütülür.
+2. **Birleşik Masa Fişi & `/settle` HTTP 500 Düzeltmesi ([`PrintingService.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingService.cs), [`PrintingEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/PrintingEndpoints.cs), [`EscPosBuilder.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Printing/EscPosBuilder.cs), [`PaidCheckTableSettlement.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Service/PaidCheckTableSettlement.cs), [`seed-demo.mjs`](file:///Users/mac/HIPOS/scripts/seed-demo.mjs)):**
+   - `ResolveTableScopeAsync` ve `PrintCashierTableBillAsync` ile taşınmış/bölünmüş/gruplanmış masadaki tüm açık adisyonlar tek ara hesap veya Alman/kapanış fişinde toplanır; ödenmemiş ara fişlere `ARA HESAP BILGI FISIDIR` altlığı eklenir.
+   - `POST /service/tables/{tableId}/settle` boş/opsiyonel JSON gövdesi (`HasJsonContentType()`), çoklu açık adisyon/sipariş kilidi (`FOR UPDATE`), `CalculatePayableOrderTotals` ve EF Core `ChangeTracker` / bağlantı temizliği (`ReleaseAfterPaymentAsync`) ile sertleştirildi; fiş baskısı kalıcı commit sonrasına taşındı.
+   - `seed-demo.mjs` üzerinde taşınmış/bölünmüş/kapanmış demo adisyonların yeniden dağıtımda bozulmasını önleyen sürüm/kayıt koruması eklendi.
+3. **Kasa Birleşik Ürün Listesi Arayüzü ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`operational.css`](file:///Users/mac/HIPOS/apps/pos/src/operational.css)):**
+   - `Adisyon 1 / Adisyon 2` seçicisi kaldırıldı; masadaki tüm açık adisyon kalemleri ödenen miktarlar düşülerek tek tıklanabilir listede birleştirildi. Kasiyer kaleme dokunduğunda seçili tutar otomatik tuş takımına yüklenir, kalan kalemler canlı güncellenir.
+
+---
+
 ## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ
 
 Faz 1–13 kapsamındaki geliştirmeler PostgreSQL veritabanında test edilmiş, Playwright tarayıcı otomasyonu ile doğrulanmış ve dokümanlarla eşlenmiştir:
