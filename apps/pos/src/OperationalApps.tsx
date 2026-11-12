@@ -37,6 +37,7 @@ type Table = { id: string; number: number; name: string; isActive: boolean; floo
   id: string; orderId: string; orderIds?: string[]; waiterId: string | null; waiterName: string | null; totalMinor: number;
   paymentStatus: string; version: number; grossTotalMinor: number; adjustmentMinor: number; adjustments: CheckAdjustment[];
   items: Array<{ productId: string; productName: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number; orderLineId: number; note?: string | null; options?: ProductOption[] }>;
+  paidMinor?: number; remainingMinor?: number;
 } | null };
 
 function normalizeFloorName(floor?: string | null): string {
@@ -2465,12 +2466,22 @@ export function CashierApp() {
                         <strong>{table.name}</strong>
                         <span className="waiter-table-status">{label}</span>
                         {table.group && <small className="waiter-group-card-label">Ana masa: {table.group.tableNames[0]}</small>}
-                        {tableChecks.length > 0 && (
-                          <>
-                            <span className="waiter-table-owner">{tableChecks.length} açık adisyon{table.group ? " · ortak" : ""}</span>
-                            <b>{money(tableChecks.reduce((sum, check) => sum + check.totalMinor, 0))}</b>
-                          </>
-                        )}
+                        {tableChecks.length > 0 && (() => {
+                          const gross = tableChecks.reduce((sum, check) => sum + check.totalMinor, 0);
+                          const paid = tableChecks.reduce((sum, check) => sum + check.paidMinor, 0);
+                          const remaining = Math.max(0, gross - paid);
+                          return (
+                            <>
+                              <span className="waiter-table-owner">{tableChecks.length} açık adisyon{table.group ? " · ortak" : ""}</span>
+                              <b>{money(paid > 0 ? remaining : gross)}</b>
+                              {paid > 0 && (
+                                <small style={{ color: "#059669", fontSize: "11px", fontWeight: 700, marginTop: "2px" }}>
+                                  {money(paid)} ödendi
+                                </small>
+                              )}
+                            </>
+                          );
+                        })()}
                       </button>
                     );
                   })}
@@ -4402,7 +4413,15 @@ export function WaiterApp() {
       return <button type="button" className={`waiter-table-card ${visualStatus}`} key={item.id} onClick={() => { setTableId(item.group?.primaryTableId ?? item.id); setCart([]); setNotice(""); setTableActionNotice(""); setDetailSyncNotice(""); setTableStatusError(""); setReservationDate(item.reservedFor ? new Date(new Date(item.reservedFor).getTime() - new Date(item.reservedFor).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : ""); setRetryOrderId(null); }}>
       <svg className="waiter-table-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="3" /><path d="M9 3h6M9 21h6M2 10v4M22 10v4" /></svg><strong>{item.name}</strong><span className="waiter-table-status">{statusLabel}</span>
       {item.group && <small className="waiter-group-card-label">{item.group.tableIds.length} masa · {item.group.guestCount} kişi<br />Ana masa: {item.group.tableNames[0]}</small>}
-      {item.assignment && <><span className="waiter-table-owner">{item.assignment.waiterName ?? "Açık adisyon"}</span><b>{money(item.assignment.totalMinor)}</b></>}
+      {item.assignment && <>
+        <span className="waiter-table-owner">{item.assignment.waiterName ?? "Açık adisyon"}</span>
+        <b>{money(item.assignment.totalMinor)}</b>
+        {(item.assignment.paidMinor ?? 0) > 0 && (
+          <small style={{ color: "#059669", fontSize: "11px", fontWeight: 700, marginTop: "2px" }}>
+            {money(item.assignment.paidMinor!)} ödendi
+          </small>
+        )}
+      </>}
       {status === "reserved" && item.reservedFor && <small className="waiter-reserved-time">{new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.reservedFor))}</small>}
     </button>;
     })}</div></section>;
@@ -4445,7 +4464,11 @@ export function WaiterApp() {
       {getTableStatus(selectedTable) !== "reserved" && !selectedTable.assignment && cartRows.length > 0 && <p className="waiter-inline-hint">Masa veya rezervasyon işlemleri için önce sepeti boşaltın ya da siparişi gönderin.</p>}
       {tableStatusError && !reservationOpen && <p className="ops-error" role="alert">{tableStatusError}</p>}
       {detailSyncNotice && <p className="ops-message" role="status">{detailSyncNotice}</p>}
-      {selectedTable.assignment && <div className="waiter-open-check"><div><strong>Açık adisyon · {selectedTable.assignment.waiterName ?? "Garson atanmamış"}</strong><span>Mevcut sipariş</span></div><b>{money(selectedTable.assignment.totalMinor)}</b>
+      {selectedTable.assignment && <div className="waiter-open-check"><div><strong>Açık adisyon · {selectedTable.assignment.waiterName ?? "Garson atanmamış"}</strong><span>{(selectedTable.assignment.paidMinor ?? 0) > 0 ? "Kalan masa tutarı" : "Mevcut sipariş"}</span></div><b>{money(selectedTable.assignment.totalMinor)}</b>
+        {(selectedTable.assignment.paidMinor ?? 0) > 0 && <div className="waiter-open-check-breakdown" aria-label="Adisyon ödeme dökümü">
+          <div><span>Masa toplamı</span><b>{money(selectedTable.assignment.grossTotalMinor)}</b></div>
+          <div style={{ color: "#059669" }}><span>Tahsil edilen</span><b>{money(selectedTable.assignment.paidMinor!)}</b></div>
+        </div>}
         {selectedTable.assignment.adjustmentMinor > 0 && <div className="waiter-open-check-breakdown" aria-label="Adisyon tutar dökümü">
           <div><span>İşlemler öncesi ara toplam</span><b>{money(selectedTable.assignment.grossTotalMinor)}</b></div>
           {checkAdjustmentTotals.discount > 0 && <div><span>İndirim</span><b>−{money(checkAdjustmentTotals.discount)}</b></div>}

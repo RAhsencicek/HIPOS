@@ -748,4 +748,22 @@ public sealed class InventoryDbContextFactory : IDesignTimeDbContextFactory<Inve
             .UseNpgsql(connection, npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", "inventory"))
             .Options);
     }
+
+    public static async Task EnsureInventorySchemaAsync(InventoryDbContext db, CancellationToken cancellationToken)
+    {
+        await using var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync(cancellationToken);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_inventory_movement_kind') THEN
+                    ALTER TABLE inventory.movements DROP CONSTRAINT ck_inventory_movement_kind;
+                END IF;
+                ALTER TABLE inventory.movements ADD CONSTRAINT ck_inventory_movement_kind
+                    CHECK (kind IN ('opening', 'manual_in', 'manual_out', 'count_adjustment', 'receiving', 'purchase_correction', 'supplier_return', 'waste_loss', 'recipe_consumption', 'pos_sale'));
+            END $$;
+            """;
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
 }

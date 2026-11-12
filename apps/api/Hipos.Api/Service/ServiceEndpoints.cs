@@ -37,7 +37,8 @@ public sealed record ServiceAdjustmentView(string Action, long AmountMinor, stri
 public sealed record ServiceAssignmentView(string Id, string OrderId, string? WaiterId, string? WaiterName,
     DateTimeOffset OpenedAt, DateTimeOffset OrderCreatedAt, string OrderStatus, string PaymentStatus,
     long TotalMinor, int Version, ServiceLineView[] Items, string[] OrderIds,
-    long GrossTotalMinor, long AdjustmentMinor, ServiceAdjustmentView[] Adjustments);
+    long GrossTotalMinor, long AdjustmentMinor, ServiceAdjustmentView[] Adjustments,
+    long PaidMinor = 0, long RemainingMinor = 0);
 public sealed record ServiceTableView(string Id, int Number, string Name, bool IsActive, ServiceAssignmentView? Assignment,
     ServiceTableGroupView? Group, string Status = "idle", DateTimeOffset? ReservedFor = null, int Version = 1, string? ReservationGuestName = null, string? Floor = null);
 public sealed record ServiceWaiterView(string Id, string Name, bool IsActive);
@@ -80,10 +81,15 @@ public static class ServiceEndpoints
                 .ToListAsync(context.RequestAborted);
             var adjustments = await sales.CheckAdjustments.AsNoTracking().Where(row => row.FirmId == firmId &&
                 row.BranchId == branchId && checkIds.Contains(row.CheckId)).ToListAsync(context.RequestAborted);
+            var payments = await sales.PaymentAttempts.AsNoTracking().Where(row => row.FirmId == firmId &&
+                row.BranchId == branchId && checkIds.Contains(row.CheckId) && row.Status == "succeeded")
+                .ToListAsync(context.RequestAborted);
             var ordersByCheck = orders.GroupBy(row => row.CheckId)
                 .ToDictionary(group => group.Key, group => group.ToArray());
             var adjustmentsByCheck = adjustments.GroupBy(row => row.CheckId)
                 .ToDictionary(group => group.Key, group => group.ToArray());
+            var paymentsByCheck = payments.GroupBy(row => row.CheckId)
+                .ToDictionary(group => group.Key, group => group.Sum(row => row.AmountMinor));
             var byTable = assignments.ToDictionary(row => row.TableId);
             var activeGroups = await db.TableGroups.AsNoTracking().Where(row => row.FirmId == firmId &&
                 row.BranchId == branchId && row.ClosedAt == null).ToDictionaryAsync(row => row.Id, context.RequestAborted);
@@ -96,7 +102,8 @@ public static class ServiceEndpoints
                 byTable.TryGetValue(primaryId, out var assignment) && checkIdsByTable.TryGetValue(primaryId, out var tableChecks)
                     ? ToView(assignment, tableChecks.SelectMany(checkId => ordersByCheck.TryGetValue(checkId, out var checkOrders)
                         ? checkOrders : []).ToArray(), tableChecks.SelectMany(checkId => adjustmentsByCheck.TryGetValue(checkId, out var checkAdjustments)
-                        ? checkAdjustments : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null)
+                        ? checkAdjustments : []).ToArray(), assignment.WaiterId is not null && waiters.TryGetValue(assignment.WaiterId, out var waiter) ? waiter.Name : null,
+                        tableChecks.Sum(checkId => paymentsByCheck.TryGetValue(checkId, out var p) ? p : 0))
                     : null, tableGroup is null ? null : GroupView(tableGroup, tablesById), table.Status, table.ReservedFor, table.Version, table.ReservationGuestName, NormalizeFloorName(table.Floor));
             }).ToArray();
             var floors = await EnsureBranchFloorsAsync(db, firmId, branchId, tables, context.RequestAborted);
@@ -1263,21 +1270,23 @@ public static class ServiceEndpoints
         new(row.Id, row.PrimaryTableId, row.TableIds, row.TableIds.Select(id => tables[id].Name).ToArray(), row.GuestCount, row.Version, row.ClosedAt);
 
     private static ServiceAssignmentView ToView(ServiceAssignmentRow assignment, IReadOnlyList<SalesOrderRow> orders,
-        IReadOnlyList<SalesCheckAdjustmentRow> adjustments, string? waiterName)
+        IReadOnlyList<SalesCheckAdjustmentRow> adjustments, string? waiterName, long paidMinor = 0)
     {
         var primaryOrder = orders.FirstOrDefault(order => order.Id == assignment.OrderId) ?? orders[0];
         var gross = orders.Sum(order => order.TotalMinor);
         var reduction = adjustments.Sum(row => row.AmountMinor);
+        var remaining = Math.Max(0, gross - reduction - paidMinor);
         return new ServiceAssignmentView(assignment.Id.ToString(), assignment.OrderId.ToString(), assignment.WaiterId, waiterName,
             assignment.OpenedAt, primaryOrder.CreatedAt, primaryOrder.Status, primaryOrder.PaymentStatus,
-            Math.Max(0, gross - reduction), assignment.Version,
+            remaining, assignment.Version,
             orders.SelectMany(order => order.Lines).OrderBy(line => line.Id)
                 .Select(line => new ServiceLineView(line.ProductId.ToString(), line.ProductName, line.Quantity,
                     line.BaseUnitPriceMinor, line.UnitPriceMinor, line.LineTotalMinor, line.Note,
                     System.Text.Json.JsonSerializer.Deserialize<SalesOrderOptionSnapshot[]>(line.OptionsJson) ?? [], line.Id)).ToArray(),
             orders.Select(order => order.Id.ToString()).ToArray(), gross, reduction,
             adjustments.Select(row => new ServiceAdjustmentView(row.Action, row.AmountMinor, row.Reason, row.CreatedAt,
-                row.OrderLineId, row.Quantity)).ToArray());
+                row.OrderLineId, row.Quantity)).ToArray(),
+            paidMinor, remaining);
     }
 
     private static async Task<Dictionary<string, ServiceTableRow>?> LockTablesAsync(ServiceDbContext db,

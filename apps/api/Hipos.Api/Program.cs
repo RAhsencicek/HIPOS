@@ -137,6 +137,10 @@ if (storage == "postgres")
         migration.EndsWith("ServiceAssignmentsRequireCheckLinks", StringComparison.Ordinal));
     var inventoryDb = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
     inventoryReady = catalogReady && !(await inventoryDb.Database.GetPendingMigrationsAsync()).Any();
+    if (inventoryReady)
+    {
+        await InventoryDbContextFactory.EnsureInventorySchemaAsync(inventoryDb, CancellationToken.None);
+    }
     var cashDb = scope.ServiceProvider.GetRequiredService<CashDbContext>();
     cashReady = !(await cashDb.Database.GetPendingMigrationsAsync()).Any();
     if (cashReady)
