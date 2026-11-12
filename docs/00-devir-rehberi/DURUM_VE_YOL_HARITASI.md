@@ -613,6 +613,9 @@ Canlı desk/cihaz testinde bildirilen (1) masa taşıma ve adisyon bölme sonras
    - `seed-demo.mjs` üzerinde taşınmış/bölünmüş/kapanmış demo adisyonların yeniden dağıtımda bozulmasını önleyen sürüm/kayıt koruması eklendi.
 3. **Kasa Birleşik Ürün Listesi Arayüzü ([`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx), [`operational.css`](file:///Users/mac/HIPOS/apps/pos/src/operational.css)):**
    - `Adisyon 1 / Adisyon 2` seçicisi kaldırıldı; masadaki tüm açık adisyon kalemleri ödenen miktarlar düşülerek tek tıklanabilir listede birleştirildi. Kasiyer kaleme dokunduğunda seçili tutar otomatik tuş takımına yüklenir, kalan kalemler canlı güncellenir.
+4. **Masa Kartı Kalan Bakiye Gösterimi ve Stok `ck_inventory_movement_kind` Düzeltmesi ([`ServiceEndpoints.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Service/ServiceEndpoints.cs), [`InventoryDbContext.cs`](file:///Users/mac/HIPOS/apps/api/Hipos.Api/Inventory/InventoryDbContext.cs), [`OperationalApps.tsx`](file:///Users/mac/HIPOS/apps/pos/src/OperationalApps.tsx)):**
+   - Kasa ve Garson salon planlarında (`waiter-table-card`) parçalı ödeme yapılmış masalarda brüt tutar yerine gerçek kalan masa bakiyesi (`Math.Max(0, gross - paid)`) ve yeşil `{ödenen} ödendi` etiketi gösterildi; masa detayına girildiğinde görülen bakiye ile ana menüdeki tutar eşitlendi.
+   - Son ürün ödendiğinde adisyon kapanışında tetiklenen reçete stok düşümünde (`pos_sale`), PostgreSQL `ck_inventory_movement_kind` kısıtının eksik tür nedeniyle patlaması (`500`) giderildi ve API başlangıcında `EnsureInventorySchemaAsync` ile kural otomatik güvenceye alındı; Masa 06 canlı ortamda kalan ₺260,00 tahsil edilerek başarıyla kapatıldı ve boşaltıldı.
 
 ---
 
