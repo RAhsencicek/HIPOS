@@ -15,7 +15,7 @@
 
 | Alan / Özellik | Durum | Açıklama |
 | :--- | :--- | :--- |
-| **Reçete Tanımlama** | **Çalışıyor** | Ürün bazlı hammadde gramajları ve sürümleme PostgreSQL'de kalıcıdır. |
+| **Reçete Tanımlama** | **Çalışıyor** | Ürün bazlı hammadde gramajları ve sürümleme PostgreSQL'de kalıcıdır. Menüdeki tüm ürünler (%100 - San Sebastian ve Karışık Pizza dahil) reçetelidir. |
 | **Stok Hareketi** | **Çalışıyor** | `inventory.movements` manuel giriş/çıkış, mal kabul ve fire kayıtları çalışır. |
 | **Sayım ve Düzeltme** | **Çalışıyor** | Taslak sayım, fark analizi ve tekil düzeltme hareketi çalışır. |
 | **Satıştan Otomatik Tüketim** | **Çalışıyor (FAZ 1 - 9 Kasım 2026)** | Adisyon kapandığında reçetedeki hammadde miktarları `inventory.movements` tablosuna `kind: pos_sale` olarak yazılır ve depodan otomatik düşer. |

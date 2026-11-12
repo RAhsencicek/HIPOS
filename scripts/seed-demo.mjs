@@ -73,6 +73,30 @@ function validate() {
     if (products.get(recipe.productId)?.recipeId !== recipe.id || recipe.version < 1) throw new Error(`Reçete geçersiz: ${recipe.id}`);
     for (const line of recipe.lines) if (!ingredients.has(line.ingredientId) || line.quantity <= 0) throw new Error(`Reçete kalemi geçersiz: ${recipe.id}`);
   }
+  if (demo.purchaseOrders) {
+    unique(demo.purchaseOrders, "id");
+    unique(demo.purchaseOrders, "orderNumber");
+    for (const po of demo.purchaseOrders) {
+      if (!parties.has(po.supplierCariId) || !parties.get(po.supplierCariId).types.includes("supplier"))
+        throw new Error(`Sipariş tedarikçisi geçersiz: ${po.id}`);
+      for (const line of po.lines) {
+        if (!ingredients.has(line.ingredientId) || line.quantity <= 0)
+          throw new Error(`Sipariş kalemi geçersiz: ${po.id}`);
+      }
+    }
+  }
+  if (demo.purchases) {
+    unique(demo.purchases, "id");
+    unique(demo.purchases, "documentNumber");
+    for (const p of demo.purchases) {
+      if (!parties.has(p.supplierCariId) || !parties.get(p.supplierCariId).types.includes("supplier"))
+        throw new Error(`Mal kabul tedarikçisi geçersiz: ${p.id}`);
+      for (const line of p.lines) {
+        if (!ingredients.has(line.ingredientId) || line.quantity <= 0 || line.unitPriceMinor <= 0)
+          throw new Error(`Mal kabul kalemi geçersiz: ${p.id}`);
+      }
+    }
+  }
   for (const movement of demo.partyMovements) {
     const typedDelta = movement.entryType === "customer_charge" || movement.entryType === "supplier_debt" ? movement.deltaMinor > 0
       : movement.entryType === "customer_collection" || movement.entryType === "supplier_payment" ? movement.deltaMinor < 0 : movement.entryType === "legacy_manual";
@@ -199,13 +223,49 @@ if (serviceOnly) {
       statements.push(`INSERT INTO inventory.recipe_lines (recipe_id,ingredient_id,quantity,unit) VALUES (${recipeId},${sqlString(line.ingredientId)},${line.quantity},${sqlString(unit)}) ON CONFLICT (recipe_id,ingredient_id) DO NOTHING;`);
     }
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM inventory.recipes WHERE id=${recipeId} AND firm_id=${firm} AND branch_id=${branch} AND product_id=${productId} AND version=${recipe.version} AND portion=${portion}) OR (SELECT count(*) FROM inventory.recipe_lines WHERE recipe_id=${recipeId}) <> ${recipe.lines.length} THEN RAISE EXCEPTION 'Demo reçete kimliği farklı içerikle kullanılıyor: ${recipe.id}'; END IF; END $$;`);
+    statements.push(`UPDATE catalog.products SET recipe_linked=true WHERE id=${productId} AND firm_id=${firm};`);
+  }
+  if (demo.purchaseOrders) {
+    for (const order of demo.purchaseOrders) {
+      const orderId = sqlString(order.id);
+      const supplierCariId = sqlString(order.supplierCariId);
+      const orderNumber = sqlString(order.orderNumber);
+      const orderDate = sqlString(order.orderDate);
+      const status = sqlString(order.status);
+      const approvedAt = order.status === "approved" ? sqlString(now) : "NULL";
+      const approvedBy = order.status === "approved" ? sqlString("demo-seed") : "NULL";
+      const approvalRequestId = order.status === "approved" ? sqlString(`${order.id}-app`) : "NULL";
+      statements.push(`INSERT INTO inventory.purchase_orders (id,firm_id,branch_id,warehouse_id,supplier_cari_id,order_number,order_date,status,version,created_at,created_by,approved_at,approved_by,approval_request_id) VALUES (${orderId},${firm},${branch},${warehouseId},${supplierCariId},${orderNumber},${orderDate},${status},1,${sqlString(now)},'demo-seed',${approvedAt},${approvedBy},${approvalRequestId}) ON CONFLICT (id) DO NOTHING;`);
+      for (const line of order.lines) {
+        statements.push(`INSERT INTO inventory.purchase_order_lines (id,purchase_order_id,ingredient_id,quantity,unit) VALUES (${sqlString(line.id)},${orderId},${sqlString(line.ingredientId)},${line.quantity},${sqlString(line.unit)}) ON CONFLICT (id) DO NOTHING;`);
+      }
+    }
+  }
+  if (demo.purchases) {
+    for (const purchase of demo.purchases) {
+      const purchaseId = sqlString(purchase.id);
+      const supplierCariId = sqlString(purchase.supplierCariId);
+      const documentNumber = sqlString(purchase.documentNumber);
+      const documentDate = sqlString(purchase.documentDate);
+      const status = sqlString(purchase.status);
+      const approvedAt = purchase.status === "approved" ? sqlString(now) : "NULL";
+      const approvedBy = purchase.status === "approved" ? sqlString("demo-seed") : "NULL";
+      const approvalRequestId = purchase.status === "approved" ? sqlString(`${purchase.id}-app`) : "NULL";
+      statements.push(`INSERT INTO inventory.purchases (id,firm_id,branch_id,warehouse_id,supplier_cari_id,purchase_order_id,document_number,document_date,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,version,created_at,created_by,approved_at,approved_by,approval_request_id) VALUES (${purchaseId},${firm},${branch},${warehouseId},${supplierCariId},NULL,${documentNumber},${documentDate},${status},'TRY',${purchase.subtotalMinor},${purchase.discountMinor},${purchase.taxMinor},${purchase.totalMinor},1,${sqlString(now)},'demo-seed',${approvedAt},${approvedBy},${approvalRequestId}) ON CONFLICT (id) DO NOTHING;`);
+      for (const line of purchase.lines) {
+        statements.push(`INSERT INTO inventory.purchase_lines (id,purchase_id,ingredient_id,quantity,unit,unit_price_minor,discount_rate_bps,tax_rate_bps,subtotal_minor,discount_minor,net_minor,tax_minor,total_minor) VALUES (${sqlString(line.id)},${purchaseId},${sqlString(line.ingredientId)},${line.quantity},${sqlString(line.unit)},${line.unitPriceMinor},${line.discountRateBps},${line.taxRateBps},${line.subtotalMinor},${line.discountMinor},${line.netMinor},${line.taxMinor},${line.totalMinor}) ON CONFLICT (id) DO NOTHING;`);
+      }
+    }
   }
   for (const movement of demo.stockMovements) {
-    const kind = movement.source === "opening_demo" ? "opening" : movement.source === "purchase_demo" ? "manual_in" : "manual_out";
-    const description = movement.source === "opening_demo" ? "Açılış bakiyesi · demo" : movement.source === "purchase_demo" ? "Örnek stok girişi · demo" : "Örnek stok kullanımı";
+    const isPurchase = movement.source === "purchase_demo";
+    const kind = movement.source === "opening_demo" ? "opening" : isPurchase ? "receiving" : "manual_out";
+    const linkedPurchase = isPurchase ? (demo.purchases?.find((p) => p.lines.some((l) => l.id === movement.id))?.id ?? null) : null;
+    const purchaseIdVal = linkedPurchase ? sqlString(linkedPurchase) : "NULL";
+    const description = movement.source === "opening_demo" ? "Açılış bakiyesi · demo" : isPurchase ? `Mal kabul · ${demo.purchases?.find((p) => p.id === linkedPurchase)?.documentNumber ?? "irsaliye"}` : "Örnek stok kullanımı";
     const id = sqlString(movement.id);
     const unit = sqlString(demo.ingredients.find((ingredient) => ingredient.id === movement.ingredientId).unit);
-    statements.push(`INSERT INTO inventory.movements (id,firm_id,branch_id,warehouse_id,ingredient_id,delta,unit,kind,description,count_id,created_at,actor) VALUES (${id},${firm},${branch},${warehouseId},${sqlString(movement.ingredientId)},${movement.delta},${unit},${sqlString(kind)},${sqlString(description)},NULL,${sqlString(now)},'demo-seed') ON CONFLICT (id) DO NOTHING;`);
+    statements.push(`INSERT INTO inventory.movements (id,firm_id,branch_id,warehouse_id,ingredient_id,delta,unit,kind,description,purchase_id,count_id,created_at,actor) VALUES (${id},${firm},${branch},${warehouseId},${sqlString(movement.ingredientId)},${movement.delta},${unit},${sqlString(kind)},${sqlString(description)},${purchaseIdVal},NULL,${sqlString(now)},'demo-seed') ON CONFLICT (id) DO NOTHING;`);
     statements.push(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM inventory.movements WHERE id=${id} AND firm_id=${firm} AND branch_id=${branch} AND warehouse_id=${warehouseId} AND ingredient_id=${sqlString(movement.ingredientId)} AND delta=${movement.delta} AND unit=${unit} AND kind=${sqlString(kind)}) THEN RAISE EXCEPTION 'Demo stok hareketi kimliği farklı içerikle kullanılıyor: ${movement.id}'; END IF; END $$;`);
     statements.push(`INSERT INTO inventory.audit (firm_id,branch_id,warehouse_id,entity_id,action,request_id,actor,detail,occurred_at) SELECT ${firm},${branch},${warehouseId},${id},'movement_added',${id},'demo-seed',${sqlString(`${demo.ingredients.find((ingredient) => ingredient.id === movement.ingredientId).name}: ${movement.delta} ${demo.ingredients.find((ingredient) => ingredient.id === movement.ingredientId).unit} · ${description}`)},${sqlString(now)} WHERE NOT EXISTS (SELECT 1 FROM inventory.audit WHERE firm_id=${firm} AND branch_id=${branch} AND request_id=${id});`);
   }

@@ -31,10 +31,10 @@
   "products": [
     { "id": "55555555-5555-4555-8555-555555555501", "sku": "PZZ-001", "name": "Margherita Pizza", "categoryId": "pizza", "priceMinor": 32000, "description": "Domates sosu, mozzarella ve fesleğen.", "image": "🍕", "allergens": ["Gluten", "Süt"], "recipeId": "recipe-margherita" },
     { "id": "55555555-5555-4555-8555-555555555502", "sku": "SND-001", "name": "Tavuklu Sandviç", "categoryId": "sandwich", "priceMinor": 26000, "description": "Tavuk ve taze sebzeli sandviç.", "image": "🥪", "allergens": ["Gluten"], "recipeId": "recipe-sandwich" },
-    { "id": "55555555-5555-4555-8555-555555555503", "sku": "TTL-012", "name": "San Sebastian Cheesecake", "categoryId": "dessert", "priceMinor": 22000, "description": "Fırınlanmış cheesecake dilimi.", "image": "🍰", "allergens": ["Süt", "Yumurta"], "recipeId": null },
+    { "id": "55555555-5555-4555-8555-555555555503", "sku": "TTL-012", "name": "San Sebastian Cheesecake", "categoryId": "dessert", "priceMinor": 22000, "description": "Fırınlanmış cheesecake dilimi.", "image": "🍰", "allergens": ["Süt", "Yumurta"], "recipeId": "recipe-san-sebastian" },
     { "id": "55555555-5555-4555-8555-555555555504", "sku": "ICK-010", "name": "Filtre Kahve", "categoryId": "drinks", "priceMinor": 12000, "description": "Taze çekilmiş kahveden hazırlanır.", "image": "☕", "allergens": [], "recipeId": "recipe-coffee" },
     { "id": "55555555-5555-4555-8555-555555555505", "sku": "ICK-008", "name": "Ev Yapımı Limonata", "categoryId": "drinks", "priceMinor": 12500, "description": "Limon ve şekerle hazırlanır.", "image": "🍋", "allergens": [], "recipeId": "recipe-lemonade" },
-    { "id": "55555555-5555-4555-8555-555555555506", "sku": "PZZ-002", "name": "Karışık Pizza", "categoryId": "pizza", "priceMinor": 41000, "description": "Karışık malzemeli pizza.", "image": "🍕", "allergens": ["Gluten", "Süt"], "recipeId": null }
+    { "id": "55555555-5555-4555-8555-555555555506", "sku": "PZZ-002", "name": "Karışık Pizza", "categoryId": "pizza", "priceMinor": 41000, "description": "Karışık malzemeli pizza.", "image": "🍕", "allergens": ["Gluten", "Süt"], "recipeId": "recipe-mixed-pizza" }
   ],
   "ingredients": [
     { "id": "flour", "name": "Un", "unit": "g", "criticalBelow": 5000 },
@@ -63,7 +63,66 @@
     { "id": "recipe-margherita", "productId": "55555555-5555-4555-8555-555555555501", "version": 1, "portion": "1 pizza", "lines": [{ "ingredientId": "flour", "quantity": 250 }, { "ingredientId": "tomato-sauce", "quantity": 80 }, { "ingredientId": "mozzarella", "quantity": 120 }] },
     { "id": "recipe-sandwich", "productId": "55555555-5555-4555-8555-555555555502", "version": 1, "portion": "1 sandviç", "lines": [{ "ingredientId": "bread", "quantity": 1 }, { "ingredientId": "chicken", "quantity": 120 }] },
     { "id": "recipe-coffee", "productId": "55555555-5555-4555-8555-555555555504", "version": 1, "portion": "1 fincan", "lines": [{ "ingredientId": "coffee-beans", "quantity": 18 }, { "ingredientId": "water", "quantity": 220 }] },
-    { "id": "recipe-lemonade", "productId": "55555555-5555-4555-8555-555555555505", "version": 1, "portion": "1 bardak", "lines": [{ "ingredientId": "lemon", "quantity": 1 }, { "ingredientId": "sugar", "quantity": 20 }, { "ingredientId": "water", "quantity": 250 }] }
+    { "id": "recipe-lemonade", "productId": "55555555-5555-4555-8555-555555555505", "version": 1, "portion": "1 bardak", "lines": [{ "ingredientId": "lemon", "quantity": 1 }, { "ingredientId": "sugar", "quantity": 20 }, { "ingredientId": "water", "quantity": 250 }] },
+    { "id": "recipe-san-sebastian", "productId": "55555555-5555-4555-8555-555555555503", "version": 1, "portion": "1 dilim", "lines": [{ "ingredientId": "cream", "quantity": 80 }, { "ingredientId": "eggs", "quantity": 1 }, { "ingredientId": "sugar", "quantity": 40 }, { "ingredientId": "flour", "quantity": 15 }] },
+    { "id": "recipe-mixed-pizza", "productId": "55555555-5555-4555-8555-555555555506", "version": 1, "portion": "1 pizza", "lines": [{ "ingredientId": "flour", "quantity": 250 }, { "ingredientId": "tomato-sauce", "quantity": 80 }, { "ingredientId": "mozzarella", "quantity": 100 }, { "ingredientId": "mushrooms", "quantity": 50 }, { "ingredientId": "cheddar", "quantity": 40 }, { "ingredientId": "oregano", "quantity": 5 }] }
+  ],
+  "purchaseOrders": [
+    {
+      "id": "po-demo-01",
+      "orderNumber": "SIP-2026-001",
+      "supplierCariId": "party-kadikoy-produce",
+      "orderDate": "2026-10-08",
+      "status": "approved",
+      "lines": [
+        { "id": "pol-demo-01-1", "ingredientId": "lemon", "quantity": 50, "unit": "adet" },
+        { "id": "pol-demo-01-2", "ingredientId": "mushrooms", "quantity": 3000, "unit": "g" }
+      ]
+    },
+    {
+      "id": "po-demo-02",
+      "orderNumber": "SIP-2026-002",
+      "supplierCariId": "party-marmara-dairy",
+      "orderDate": "2026-10-09",
+      "status": "draft",
+      "lines": [
+        { "id": "pol-demo-02-1", "ingredientId": "cream", "quantity": 5000, "unit": "g" },
+        { "id": "pol-demo-02-2", "ingredientId": "cheddar", "quantity": 2000, "unit": "g" }
+      ]
+    }
+  ],
+  "purchases": [
+    {
+      "id": "pur-demo-01",
+      "documentNumber": "DEMO-ALI-201",
+      "documentDate": "2026-10-07",
+      "supplierCariId": "party-abc",
+      "purchaseOrderId": null,
+      "status": "approved",
+      "subtotalMinor": 440000,
+      "discountMinor": 0,
+      "taxMinor": 45000,
+      "totalMinor": 485000,
+      "lines": [
+        { "id": "sm-flour-buy", "ingredientId": "flour", "quantity": 5000, "unit": "g", "unitPriceMinor": 40, "discountRateBps": 0, "taxRateBps": 1000, "subtotalMinor": 200000, "discountMinor": 0, "netMinor": 200000, "taxMinor": 20000, "totalMinor": 220000 },
+        { "id": "sm-mozz-buy", "ingredientId": "mozzarella", "quantity": 1000, "unit": "g", "unitPriceMinor": 240, "discountRateBps": 0, "taxRateBps": 1042, "subtotalMinor": 240000, "discountMinor": 0, "netMinor": 240000, "taxMinor": 25000, "totalMinor": 265000 }
+      ]
+    },
+    {
+      "id": "pur-demo-02",
+      "documentNumber": "DEMO-ALI-208",
+      "documentDate": "2026-10-08",
+      "supplierCariId": "party-coffee",
+      "purchaseOrderId": null,
+      "status": "approved",
+      "subtotalMinor": 160000,
+      "discountMinor": 0,
+      "taxMinor": 16000,
+      "totalMinor": 176000,
+      "lines": [
+        { "id": "sm-coffee-buy", "ingredientId": "coffee-beans", "quantity": 1000, "unit": "g", "unitPriceMinor": 160, "discountRateBps": 0, "taxRateBps": 1000, "subtotalMinor": 160000, "discountMinor": 0, "netMinor": 160000, "taxMinor": 16000, "totalMinor": 176000 }
+      ]
+    }
   ],
   "parties": [
     { "id": "party-ahmet", "name": "Ahmet Yılmaz", "types": ["customer"], "phone": "+90 555 010 10 01", "note": "Örnek bireysel müşteri hesabı" },

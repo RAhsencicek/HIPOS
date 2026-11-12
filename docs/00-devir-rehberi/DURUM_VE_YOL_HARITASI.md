@@ -617,6 +617,18 @@ Canlı desk/cihaz testinde bildirilen (1) masa taşıma ve adisyon bölme sonras
    - Kasa ve Garson salon planlarında (`waiter-table-card`) parçalı ödeme yapılmış masalarda brüt tutar yerine gerçek kalan masa bakiyesi (`Math.Max(0, gross - paid)`) ve yeşil `{ödenen} ödendi` etiketi gösterildi; masa detayına girildiğinde görülen bakiye ile ana menüdeki tutar eşitlendi.
    - Son ürün ödendiğinde adisyon kapanışında tetiklenen reçete stok düşümünde (`pos_sale`), PostgreSQL `ck_inventory_movement_kind` kısıtının eksik tür nedeniyle patlaması (`500`) giderildi ve API başlangıcında `EnsureInventorySchemaAsync` ile kural otomatik güvenceye alındı; Masa 06 canlı ortamda kalan ₺260,00 tahsil edilerek başarıyla kapatıldı ve boşaltıldı.
 
+### 🔷 CANLI SAHA DÜZELTMESİ: San Sebastian / Karışık Pizza Reçete Entegrasyonu, Satın Alma & Mal Kabul Uyumu (✅ DOĞRULANDI - 12 KASIM 2026)
+
+Canlı ortam testinde San Sebastian Cheesecake satıldığında stok hareket geçmişinde görünmemesi ve Satın Alma / Mal Kabul modülünün mevcut demo verileriyle tam uyumlu olmaması sorunu giderildi:
+1. **%100 Ürün-Reçete Eşleşmesi (`demo-single-branch.v1.json`, `seed-demo.mjs`):**
+   - San Sebastian Cheesecake (`recipe-san-sebastian` -> Krema 80g, Yumurta 1 adet, Şeker 40g, Un 15g) ve Karışık Pizza (`recipe-mixed-pizza` -> Un 250g, Domates Sosu 80g, Mozzarella 100g, Mantar 50g, Cheddar 40g, Kekik 5g) reçeteleri tanımlandı ve menüdeki 6 ürünün tamamı reçeteli hale getirildi.
+   - Satış anında adisyon kapandığında `PaymentSimulator.DepleteInventoryForCheckAsync` San Sebastian satışlarını da otomatik olarak hammadde stoklarından düşerek `inventory.movements` tablosuna `pos_sale` olarak kaydeder.
+2. **Satın Alma (Procurement) ve Mal Kabul İrsaliye Uyumu (`inventory.purchases`, `inventory.purchase_orders`):**
+   - Cari tedarikçi alımlarıyla (`DEMO-ALI-201` ABC Gıda, `DEMO-ALI-208` Kahve Tedarik) tam tutar ve kalem eşleşmeli Mal Kabul İrsaliyeleri (`purchases`, `purchase_lines`) ile onaylı/taslak Satın Alma Siparişleri (`SIP-2026-001` Kadıköy Sebze Hali onaylı, `SIP-2026-002` Marmara Süt Ürünleri taslak) eklendi.
+   - Stok hareketleri (`sm-flour-buy`, `sm-mozz-buy`, `sm-coffee-buy`) doğrudan mal kabul irsaliyesine (`receiving`, `purchase_id`) bağlandı; cari borç, stok girişi ve irsaliye tek omurgada birleştirildi.
+3. **Admin Stok Hareket Defteri İsimlendirmesi (`InventoryHttpPage.tsx`):**
+   - Defter tablosundaki `kindName` haritasına `pos_sale: "Satış düşümü"` ve `recipe_consumption: "Reçete tüketimi"` eklenerek ham teknik terimler yerine restoran personeline uygun Türkçe terimlerin gösterilmesi sağlandı.
+
 ---
 
 ## 5. DOKÜMANTASYON VE SÖZLEŞME KİLİTLEME TAAHHÜDÜ

@@ -312,6 +312,6 @@ function IngredientTable({ items, editable = false, thresholdDrafts, setThreshol
 function MovementTable({ items }: { items: Movement[] }) {
   const kindName: Record<string, string> = { opening: "Açılış", manual_in: "Elle giriş", manual_out: "Elle çıkış",
     count_adjustment: "Sayım düzeltmesi", receiving: "Mal kabul", purchase_correction: "Eksik teslim düzeltmesi",
-    supplier_return: "Tedarikçiye iade", waste_loss: "Fire / zayi" };
+    supplier_return: "Tedarikçiye iade", waste_loss: "Fire / zayi", pos_sale: "Satış düşümü", recipe_consumption: "Reçete tüketimi" };
   return <section className="card content-card"><div className="card-heading padded"><div><span className="card-kicker">DEĞİŞTİRİLEMEZ HAREKET DEFTERİ</span><h2>Son stok hareketleri</h2></div></div><div className="table-scroll"><table><thead><tr><th>ZAMAN</th><th>HAMMADDE</th><th>KAYNAK</th><th>AÇIKLAMA</th><th>MİKTAR ETKİSİ</th><th>AKTÖR</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{dateTime(item.createdAt)}</td><td>{item.ingredientName}</td><td>{kindName[item.kind] ?? item.kind}</td><td>{item.description}</td><td>{item.delta > 0 ? "+" : ""}{fmtQty(item.delta)} {item.unit}</td><td>{item.actor}</td></tr>)}</tbody></table>{items.length === 0 && <div className="empty-list">Henüz stok hareketi yok.</div>}</div></section>;
 }
