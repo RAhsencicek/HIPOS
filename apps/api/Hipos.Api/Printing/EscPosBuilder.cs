@@ -139,7 +139,8 @@ public static class EscPosBuilder
         string paymentMethod = "NAKIT",
         bool openCashDrawer = false,
         long paidMinor = 0,
-        long remainingMinor = 0)
+        long remainingMinor = 0,
+        bool isPartialOrAlman = false)
     {
         var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -197,11 +198,18 @@ public static class EscPosBuilder
 
         SetDoubleSize(bw, true);
         SetBold(bw, true);
-        WriteText(bw, $"TOPLAM: {FormatMoney(netTotalMinor)}\n");
+        WriteText(bw, isPartialOrAlman ? $"TAHSIL EDILEN: {FormatMoney(netTotalMinor)}\n" : $"TOPLAM: {FormatMoney(netTotalMinor)}\n");
         SetDoubleSize(bw, false);
         SetBold(bw, false);
 
-        if (paidMinor > 0 && remainingMinor > 0)
+        if (isPartialOrAlman)
+        {
+            WriteText(bw, "================================================\n");
+            SetAlignment(bw, 1); // Center
+            WriteText(bw, $"ODEME TURU: {paymentMethod.ToUpperInvariant()}\n");
+            WriteText(bw, "** TAHSILAT BILGI FISIDIR **\n");
+        }
+        else if (paidMinor > 0 && remainingMinor > 0)
         {
             WriteText(bw, "------------------------------------------------\n");
             WriteText(bw, $"TAHSIL EDILEN : {FormatMoney(paidMinor)}\n");

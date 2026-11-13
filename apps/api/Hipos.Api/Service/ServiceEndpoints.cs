@@ -558,8 +558,6 @@ public static class ServiceEndpoints
             var checkId = assignment?.CheckId ?? command.OrderId;
             if (assignment is not null)
             {
-                if (assignment.WaiterId != command.WaiterId)
-                    return Fail(context, "TABLE_ASSIGNED_TO_OTHER_WAITER", 409, "Bu masa başka bir garsona atanmış.");
                 var hasOpenCheck = await salesDb.Checks.AsNoTracking().AnyAsync(row => row.Id == checkId &&
                     row.FirmId == firmId && row.BranchId == branchId && row.Status == "open", context.RequestAborted);
                 if (!hasOpenCheck)

@@ -364,7 +364,8 @@ public sealed class PrintingService(
         string paymentMethod = "NAKIT",
         IReadOnlyList<ReceiptLineInput>? paidItemsOverride = null,
         bool isAlmanReceipt = false,
-        IReadOnlyList<Guid>? checkIdsOverride = null)
+        IReadOnlyList<Guid>? checkIdsOverride = null,
+        long? paidAmountMinor = null)
     {
         var cfg = await GetConfigAsync(firmId, branchId, ct);
         var (tableIds, tableName) = await ResolveTableScopeAsync(firmId, branchId, tableId, ct);
@@ -399,7 +400,8 @@ public sealed class PrintingService(
             openCashDrawer: openCashDrawer,
             paymentMethod: paymentMethod,
             paidItemsOverride: paidItemsOverride,
-            isAlmanReceipt: isAlmanReceipt);
+            isAlmanReceipt: isAlmanReceipt,
+            paidAmountMinor: paidAmountMinor);
     }
 
     private async Task<PrintResult> PrintChecksBillCoreAsync(
@@ -411,7 +413,8 @@ public sealed class PrintingService(
         bool openCashDrawer = false,
         string paymentMethod = "NAKIT",
         IReadOnlyList<ReceiptLineInput>? paidItemsOverride = null,
-        bool isAlmanReceipt = false)
+        bool isAlmanReceipt = false,
+        long? paidAmountMinor = null)
     {
         var cfg = await GetConfigAsync(firmId, branchId, ct);
         var primaryCheck = checks[0];
@@ -438,6 +441,9 @@ public sealed class PrintingService(
 
         var successfulPayments = orders.SelectMany(o => o.PaymentAttempts).Where(p => p.Status == "succeeded").ToList();
 
+        var isPartialPayment = paidAmountMinor is > 0 && paidItemsOverride is null or { Count: 0 };
+        var isPartialOrAlman = isAlmanReceipt || isPartialPayment;
+
         if (paidItemsOverride is { Count: > 0 })
         {
             consolidated = paidItemsOverride
@@ -456,6 +462,21 @@ public sealed class PrintingService(
                 .ToList();
 
             grossTotal = consolidated.Sum(x => x.LineTotalMinor);
+            discountMinor = 0;
+            netTotal = grossTotal;
+            paidMinor = netTotal;
+            remainingMinor = 0;
+        }
+        else if (isPartialPayment)
+        {
+            consolidated = [
+                new CashierReceiptItem(
+                    ProductName: "Parcali Masa Tahsilati",
+                    Quantity: 1,
+                    UnitPriceMinor: paidAmountMinor!.Value,
+                    LineTotalMinor: paidAmountMinor.Value)
+            ];
+            grossTotal = paidAmountMinor.Value;
             discountMinor = 0;
             netTotal = grossTotal;
             paidMinor = netTotal;
@@ -540,9 +561,11 @@ public sealed class PrintingService(
         var (firmTitle, branchTitle) = await ResolveFirmAndBranchTitlesAsync(firmId, branchId, ct);
         var receiptKindLabel = isAlmanReceipt
             ? $"{branchTitle} · ALMAN HESABI FISI"
-            : primaryCheck.TableId is null
-                ? $"{branchTitle} · GEL-AL HESAP FISI"
-                : $"{branchTitle} · SALON HESAP FISI";
+            : isPartialPayment
+                ? $"{branchTitle} · PARCALI TAHSILAT FISI"
+                : primaryCheck.TableId is null
+                    ? $"{branchTitle} · GEL-AL HESAP FISI"
+                    : $"{branchTitle} · SALON HESAP FISI";
 
         var checkNumberLabel = checks.Count > 1
             ? $"{primaryCheck.Id.ToString()[..8].ToUpperInvariant()}+{checks.Count - 1}"
@@ -562,7 +585,8 @@ public sealed class PrintingService(
             paymentMethod: paymentMethod,
             openCashDrawer: openCashDrawer,
             paidMinor: paidMinor,
-            remainingMinor: remainingMinor);
+            remainingMinor: remainingMinor,
+            isPartialOrAlman: isPartialOrAlman);
 
         return await DeliverPrintJobAsync(
             firmId: firmId,

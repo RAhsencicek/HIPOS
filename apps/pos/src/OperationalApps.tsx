@@ -349,14 +349,6 @@ async function request<T>(path: string, actor: string, body?: unknown, method?: 
   return response.json() as Promise<T>;
 }
 
-const demoDescriptions: Record<string, string> = {
-  "55555555-5555-4555-8555-555555555501": "Domates sosu, mozzarella ve fesleğen.",
-  "55555555-5555-4555-8555-555555555502": "Tavuk ve taze sebzeli sandviç.",
-  "55555555-5555-4555-8555-555555555503": "Fırınlanmış cheesecake dilimi.",
-  "55555555-5555-4555-8555-555555555504": "Taze çekilmiş kahveden hazırlanır.",
-  "55555555-5555-4555-8555-555555555505": "Limon ve şekerle hazırlanır.",
-  "55555555-5555-4555-8555-555555555506": "Karışık malzemeli, fırından yeni çıkmış pizza.",
-};
 
 type CashOverview = { responsibles?: Array<{ id: string; name: string; roleTitle?: string | null }>; registers: Array<{ id: string; name: string; code: string; responsible?: string | null }>; openShifts: Array<{ shift: { id: string; version: number; registerId: string; openedBy: string; openedAt: string; openingCashMinor: number; expectedCashMinor: number | null; retainedFloatMinor?: number | null; droppedRevenueMinor?: number | null } }> };
 
@@ -1489,7 +1481,7 @@ export function CashierApp() {
         setSelectedItemQuantities({});
         setCustomerSelected(null);
 
-        if (almanSelectedItems.length > 0 && !res.tableReleased) {
+        if (almanSelectedItems.length > 0) {
           const paidReceiptLines: ReceiptLineInput[] = almanSelectedItems.map((line) => ({
             productName: line.productName,
             quantity: line.selectedQty,
@@ -1501,12 +1493,15 @@ export function CashierApp() {
             paidAmountMinor: res.paidMinor,
             isAlmanReceipt: true,
           });
-        } else if (res.tableReleased) {
+        } else if (!res.tableReleased) {
+          void printThermalTableBill(primarySelectedId, method === "cash", tenderTitle, {
+            paidAmountMinor: res.paidMinor,
+            isAlmanReceipt: false,
+          });
+        } else {
           void printThermalTableBill(primarySelectedId, method === "cash", tenderTitle, {
             checkIds: res.closedCheckIds,
           });
-        } else {
-          void printThermalTableBill(primarySelectedId, method === "cash", tenderTitle);
         }
 
         if (res.tableReleased) {
@@ -3651,10 +3646,7 @@ export function WaiterApp() {
     };
   }, [waiterSession]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [menus, setMenus] = useState<RestaurantMenu[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string; isActive: boolean }>>([]);
-  const [catalogView, setCatalogView] = useState<"menus" | "categories">("menus");
-  const [selectedMenuId, setSelectedMenuId] = useState("");
   const [tables, setTables] = useState<Table[]>([]);
   const [configuredFloors, setConfiguredFloors] = useState<string[]>([]);
   const [kitchenItems, setKitchenItems] = useState<KitchenStatusItem[]>([]);
@@ -3672,6 +3664,11 @@ export function WaiterApp() {
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [tableId, setTableId] = useState("");
   const [waiterId, setWaiterId] = useState("");
+  const [selectedFloor, setSelectedFloor] = useState<string>("all");
+  const [tableDetailOpen, setTableDetailOpen] = useState(false);
+  const [quickNoteCartId, setQuickNoteCartId] = useState<string | null>(null);
+  const [quickNoteText, setQuickNoteText] = useState("");
+  const quickModifierTags = ["Buzsuz", "Az Şekerli", "Laktozsuz Süt", "Sosu Ayrı", "Çok Sıcak", "Tatlı Sonra", "İkram", "Acısız"];
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -3699,19 +3696,7 @@ export function WaiterApp() {
   const [splitQuantities, setSplitQuantities] = useState<Record<number, number>>({});
   const [operationError, setOperationError] = useState("");
   const [operationSaving, setOperationSaving] = useState(false);
-  const [tableActionNotice, setTableActionNotice] = useState("");
-  const [detailSyncNotice, setDetailSyncNotice] = useState("");
-  const [tableStatusError, setTableStatusError] = useState("");
   const [tableStatusSaving, setTableStatusSaving] = useState(false);
-  const [reservationDate, setReservationDate] = useState("");
-  const [reservationGuestName, setReservationGuestName] = useState("");
-  const [reservationOpen, setReservationOpen] = useState(false);
-  const reservationDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = reservationDialog.current;
-    if (reservationOpen && dialog && !dialog.open) dialog.showModal();
-    if (!reservationOpen && dialog?.open) dialog.close();
-  }, [reservationOpen]);
   const [adjustmentTab, setAdjustmentTab] = useState<"discount" | "line">("discount");
   const [discountMode, setDiscountMode] = useState<"percentage" | "fixed">("percentage");
   const [discountValue, setDiscountValue] = useState(10);
@@ -3744,9 +3729,9 @@ export function WaiterApp() {
       } catch { /* Masa özeti yenilendi; adisyon listesi tekrar açıldığında yeniden yüklenir. */ }
     }
     const message = `${cause instanceof Error ? cause.message : "Kayıt başka bir cihazda değişti."} Güncel masa ve adisyon bilgileri yüklendi. Sepetiniz korundu; bilgileri kontrol edip işlemi yeniden deneyin.`;
-    setDetailSyncNotice("Başka bir cihazda değişiklik algılandı. Masa ve adisyon bilgileri güncellendi; sepetiniz korundu.");
+    setNotice("Başka bir cihazda değişiklik algılandı. Masa ve adisyon bilgileri güncellendi; sepetiniz korundu.");
     if (area === "operation") setOperationError(message);
-    else setTableStatusError(message);
+    else setError(message);
   }
 
   const reload = useCallback(async () => {
@@ -3770,14 +3755,14 @@ export function WaiterApp() {
       if (previous && latest && (previous.status !== latest.status
         || previous.assignment?.version !== latest.assignment?.version
         || previous.assignment?.totalMinor !== latest.assignment?.totalMinor)) {
-        setDetailSyncNotice("Masa veya açık adisyon başka bir cihazda güncellendi. Son bilgiler yüklendi; sepetiniz korundu.");
+        setNotice("Masa veya açık adisyon başka bir cihazda güncellendi. Son bilgiler yüklendi; sepetiniz korundu.");
       }
       if (checkResult) {
         const latestChecks = checkResult.items.filter((check) => check.status === "open");
         const priorChecks = openChecksRef.current;
         if (latestChecks.some((check) => priorChecks.find((prior) => prior.id === check.id)?.version !== undefined
           && priorChecks.find((prior) => prior.id === check.id)?.version !== check.version)) {
-          setDetailSyncNotice("Açık adisyon başka bir cihazda güncellendi. Son bilgiler yüklendi; sepetiniz korundu.");
+          setNotice("Açık adisyon başka bir cihazda güncellendi. Son bilgiler yüklendi; sepetiniz korundu.");
           setSplitQuantities({});
         }
         openChecksRef.current = latestChecks;
@@ -3807,11 +3792,8 @@ export function WaiterApp() {
         setKitchenItems(latestItems);
       }
       tablesRef.current = updated;
-      const activeMenus = menuResult.items.filter((menu) => menu.isActive);
       const categoryNames = new Map(menuResult.categories.map((category) => [category.id, category.name]));
-      setMenus(activeMenus);
       setCatalogCategories(menuResult.categories.filter((category) => category.isActive));
-      setSelectedMenuId((current) => activeMenus.some((menu) => menu.id === current) ? current : activeMenus[0]?.id ?? "");
       setProducts(menuResult.products.map((product) => ({
         ...product, category: { id: product.categoryId, name: categoryNames.get(product.categoryId) ?? "Kategorisiz" },
       })));
@@ -3891,8 +3873,9 @@ export function WaiterApp() {
 
   const requestedTable = tables.find((item) => item.id === tableId);
   const selectedTable = tables.find((item) => item.id === (requestedTable?.group?.primaryTableId ?? tableId));
-  const selectedKitchenItems = kitchenItems;
-  const waiter = waiters.find((item) => item.id === waiterId);
+  const waiter = waiters.find((item) => item.id === waiterId)
+    ?? waiters.find((w) => waiterSession?.user?.fullName && w.name.trim().toLowerCase() === waiterSession.user.fullName.trim().toLowerCase())
+    ?? waiters[0];
   const getTableStatus = (item: Table) => {
     const primary = item.group ? tables.find((table) => table.id === item.group?.primaryTableId) ?? item : item;
     return primary.status === "bill_requested" ? "bill_requested"
@@ -3902,14 +3885,6 @@ export function WaiterApp() {
   const isAvailableTable = (item: Table) => getTableStatus(item) === "idle" && !item.assignment && !item.group;
   const transferTargets = tables.filter((table) => table.id !== selectedTable?.id && isAvailableTable(table));
   const groupCandidates = tables.filter((table) => table.id !== selectedTable?.id && isAvailableTable(table));
-  const emptyTableCount = tables.filter((item) => getTableStatus(item) === "idle" && !item.assignment && !item.group).length;
-  const occupiedTableCount = tables.filter((item) => getTableStatus(item) === "occupied" || Boolean(item.group && getTableStatus(item) !== "reserved" && getTableStatus(item) !== "bill_requested")).length;
-  const billRequestedTableCount = tables.filter((item) => getTableStatus(item) === "bill_requested").length;
-  const reservedTableCount = tables.filter((item) => getTableStatus(item) === "reserved").length;
-  const assignedToOtherWaiter = Boolean(selectedTable?.assignment && waiter && selectedTable.assignment.waiterId !== waiter.id);
-  const selectedMenu = menus.find((menu) => menu.id === selectedMenuId);
-  const menuSections = selectedMenu?.sections ?? [];
-  const selectedMenuProductIds = new Set(menuSections.flatMap((section) => section.productIds));
   const cartRows = useMemo(() => cart.flatMap((line) => {
     const product = products.find((item) => item.id === line.productId);
     return product ? [{ ...product, ...line }] : [];
@@ -3917,26 +3892,26 @@ export function WaiterApp() {
   const normalizedSearch = search.trim().toLocaleLowerCase("tr-TR");
   const activeCategoryIds = new Set(catalogCategories.map((category) => category.id));
   const availableProducts = products.filter((product) => product.isActive && product.status === "published" && product.channels.includes("pos") && product.desiredChannels.includes("pos") && product.price.amountMinor > 0 && activeCategoryIds.has(product.category.id));
-  const visibleProducts = catalogView === "categories" ? availableProducts : availableProducts.filter((product) => selectedMenuProductIds.has(product.id));
-  const catalogGroups = normalizedSearch
-    ? [{ sectionId: "search-results", name: "Arama sonuçları", products: visibleProducts.filter((product) => product.name.toLocaleLowerCase("tr-TR").includes(normalizedSearch)) }]
-    : catalogView === "categories"
-      ? catalogCategories.map((category) => ({ sectionId: category.id, name: category.name, products: availableProducts.filter((product) => product.category.id === category.id) })).filter((group) => group.products.length > 0)
-      : menuSections.map((section) => ({ ...section, products: availableProducts.filter((product) => section.productIds.includes(product.id)) }));
+  const displayedProducts = useMemo(() => {
+    let list = availableProducts;
+    if (normalizedSearch) {
+      list = list.filter((p) => p.name.toLocaleLowerCase("tr-TR").includes(normalizedSearch));
+    } else if (categoryId !== null) {
+      list = list.filter((p) => p.category.id === categoryId);
+    }
+    return list;
+  }, [availableProducts, normalizedSearch, categoryId]);
+  const filteredTables = useMemo(() => {
+    if (selectedFloor === "all") return tables;
+    return tables.filter((t) => normalizeFloorName(t.floor) === selectedFloor);
+  }, [tables, selectedFloor]);
   const total = cartRows.reduce((sum, item) => sum + (item.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)) * item.quantity, 0);
   const editingCartLine = cart.find((line) => line.cartId === editingCartId);
   const splitCheck = openChecks.find((check) => check.id === splitCheckId);
   const adjustmentCheck = openChecks.find((check) => check.id === adjustmentCheckId);
-  const checkAdjustmentTotals = (selectedTable?.assignment?.adjustments ?? []).reduce((totals, adjustment) => {
-    totals[adjustment.action] += adjustment.amountMinor;
-    return totals;
-  }, { discount: 0, comp: 0, void: 0 });
   const splitLines = splitCheck?.orders.flatMap((order) => order.items) ?? [];
   const splitTotal = splitLines.reduce((sum, line) => sum + (splitQuantities[line.id] ?? 0) * line.unitPriceMinor, 0);
   const tableActionsBlocked = cartRows.length > 0 || saving || operationSaving || tableStatusSaving;
-  const reservationMin = new Date(Date.now() + 60_000);
-  reservationMin.setMinutes(reservationMin.getMinutes() - reservationMin.getTimezoneOffset());
-  const reservationMinValue = reservationMin.toISOString().slice(0, 16);
 
   function getOperationRequestId(key: string) {
     if (operationRequest.current?.key !== key)
@@ -3944,10 +3919,10 @@ export function WaiterApp() {
     return operationRequest.current.id;
   }
 
-  async function updateTableStatus(action: "request-bill" | "cancel-bill-request" | "reservation/cancel") {
+  async function updateTableStatus(action: "request-bill" | "cancel-bill-request") {
     if (!selectedTable || tableStatusSaving) return;
     ++reloadSerial.current;
-    setTableStatusSaving(true); setTableStatusError("");
+    setTableStatusSaving(true); setError("");
     try {
       const result = await request<{ tableId: string; status: Table["status"]; version: number }>(`${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/${action}`, "pos-single", {
         expectedVersion: selectedTable.version ?? 1,
@@ -3955,44 +3930,12 @@ export function WaiterApp() {
       ++reloadSerial.current;
       setTables((current) => current.map((table) => table.id === result.tableId ? {
         ...table, status: result.status, version: result.version,
-        ...(action === "reservation/cancel" ? { reservedFor: null, reservationGuestName: null } : {}),
       } : table));
-      setTableActionNotice(action === "request-bill" ? "Hesap isteği kaydedildi." : action === "cancel-bill-request" ? "Hesap isteği kaldırıldı." : "Rezervasyon kaldırıldı.");
-      setReservationDate(""); setRefreshTick((tick) => tick + 1);
+      setNotice(action === "request-bill" ? "Hesap isteği kaydedildi." : "Hesap isteği kaldırıldı.");
+      setRefreshTick((tick) => tick + 1);
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "table");
-      else setTableStatusError(cause instanceof Error ? cause.message : "Masa durumu güncellenemedi.");
-    }
-    finally { setTableStatusSaving(false); }
-  }
-
-  function openReservation() {
-    if (!selectedTable || tableActionsBlocked) return;
-    setReservationGuestName(selectedTable.reservationGuestName ?? "");
-    const date = selectedTable.reservedFor ? new Date(selectedTable.reservedFor) : null;
-    setReservationDate(date ? new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : "");
-    setTableStatusError(""); setReservationOpen(true);
-  }
-
-  async function reserveTable() {
-    if (!selectedTable || !reservationDate || tableActionsBlocked) return;
-    const guestName = reservationGuestName.trim();
-    if (!guestName || guestName.length > 120) {
-      setTableStatusError("Lütfen ad soyad girin (en fazla 120 karakter)."); return;
-    }
-    const reservedFor = new Date(reservationDate);
-    if (Number.isNaN(reservedFor.getTime()) || reservedFor.getTime() <= Date.now()) {
-      setTableStatusError("Rezervasyon için ileri bir tarih ve saat seçin."); return;
-    }
-    setTableStatusSaving(true); setTableStatusError("");
-    try {
-      await request(`${servicePath}/tables/${encodeURIComponent(selectedTable.id)}/reservation`, "pos-single", {
-        expectedVersion: selectedTable.version ?? 1, reservedFor: reservedFor.toISOString(), guestName,
-      });
-      setTableActionNotice("Rezervasyon kaydedildi."); setReservationOpen(false); setRefreshTick((tick) => tick + 1);
-    } catch (cause) {
-      if (isVersionConflict(cause)) await refreshAfterConflict(cause, "table");
-      else setTableStatusError(cause instanceof Error ? cause.message : "Masa rezerve edilemedi.");
+      else setError(cause instanceof Error ? cause.message : "Masa durumu güncellenemedi.");
     }
     finally { setTableStatusSaving(false); }
   }
@@ -4001,6 +3944,20 @@ export function WaiterApp() {
     if (saving) return;
     setRetryOrderId(null);
     setCart((current) => current.flatMap((line) => line.cartId !== cartId ? [line] : line.quantity + delta <= 0 ? [] : [{ ...line, quantity: line.quantity + delta }]));
+  }
+
+  function handleFastProductTap(product: Product) {
+    if (saving) return;
+    if (product.isOutOfStock) {
+      setError(`${product.name} tükendi.`);
+      return;
+    }
+    const existingIndex = cart.findIndex((line) => line.productId === product.id && (!line.options || line.options.length === 0));
+    if (existingIndex >= 0) {
+      setCart((current) => current.map((line, idx) => idx === existingIndex ? { ...line, quantity: line.quantity + 1 } : line));
+    } else {
+      setCart((current) => [...current, { cartId: createRequestId(), productId: product.id, quantity: 1, note: "", options: [] }]);
+    }
   }
   function openCustomization(product: Product, line?: CartLine) {
     if (saving) return;
@@ -4028,7 +3985,6 @@ export function WaiterApp() {
 
   const [printingBill, setPrintingBill] = useState(false);
   const [settlingTable, setSettlingTable] = useState<"NAKIT" | "KART" | null>(null);
-  const [testPrinting, setTestPrinting] = useState<string | null>(null);
 
   async function printBillForTable() {
     if (!selectedTable?.assignment || printingBill) return;
@@ -4077,7 +4033,6 @@ export function WaiterApp() {
     }
   }
 
-  const [printerSettingsOpen, setPrinterSettingsOpen] = useState(false);
   const [reprintingKitchen, setReprintingKitchen] = useState(false);
 
   async function reprintKitchenTicket() {
@@ -4094,22 +4049,6 @@ export function WaiterApp() {
       setError(cause instanceof Error ? cause.message : "Mutfak fişi tekrar yazdırılamadı.");
     } finally {
       setReprintingKitchen(false);
-    }
-  }
-
-  async function triggerTestPrint(target: "kitchen" | "cashier") {
-    if (testPrinting) return;
-    setTestPrinting(target); setError(""); setNotice("");
-    try {
-      const res = await request<{ success: boolean; target: string; transportUsed: string }>(
-        `/api/v1/firms/${firmId}/branches/${branchId}/printing/test?target=${target}`,
-        "pos-single", {}
-      );
-      setNotice(`${target === "kitchen" ? "Mutfak" : "Kasa"} test fişi başarıyla gönderildi (${res.transportUsed}).`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Test fişi gönderilemedi.");
-    } finally {
-      setTestPrinting(null);
     }
   }
 
@@ -4149,6 +4088,7 @@ export function WaiterApp() {
 
       setCart([]); setRetryOrderId(null); setLastOrderId(result.order.id);
       setNotice(`${result.table} siparişi mutfağa gönderildi.${kitchenPrintNotice}`);
+      setTableId("");
       setRefreshTick((tick) => tick + 1);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Sipariş gönderilemedi."); }
     finally { setSaving(false); }
@@ -4156,7 +4096,7 @@ export function WaiterApp() {
 
   function openTableAction(action: "transfer" | "merge" | "discount" | "group" | "ungroup") {
     if (!selectedTable || tableActionsBlocked || (!selectedTable.assignment && action !== "group" && action !== "ungroup")) return;
-    setOperationError(""); setTableActionNotice(""); setTargetTableId(""); setMergeSourceIds([]);
+    setOperationError(""); setNotice(""); setTargetTableId(""); setMergeSourceIds([]);
     setGroupMemberIds([]); setGroupGuestCount(2);
     if (action === "discount") { setAdjustmentTab("discount"); setDiscountMode("percentage"); setDiscountValue(10); setDiscountReason(""); setLineAdjustments({}); }
     setTableAction(action);
@@ -4169,13 +4109,13 @@ export function WaiterApp() {
     try {
       if (tableAction === "ungroup" && selectedTable.group) {
         await request(`${servicePath}/table-groups/${selectedTable.group.id}/close`, "pos-single", { expectedVersion: selectedTable.group.version });
-        setTableActionNotice("Masa grubu ayrıldı. Açık adisyon ana masada korunuyor.");
+        setNotice("Masa grubu ayrıldı. Açık adisyon ana masada korunuyor.");
       } else if (tableAction === "group") {
         await request(`${servicePath}/table-groups`, "pos-single", {
           requestId: getOperationRequestId(`group:${selectedTable.id}:${groupMemberIds.slice().sort().join(",")}:${groupGuestCount}`),
           primaryTableId: selectedTable.id, memberTableIds: groupMemberIds, guestCount: groupGuestCount,
         });
-        setTableActionNotice("Masa grubu oluşturuldu. Tüm siparişler ana masanın adisyonunda toplanır.");
+        setNotice("Masa grubu oluşturuldu. Tüm siparişler ana masanın adisyonunda toplanır.");
       }
       operationRequest.current = null; setTableAction(null); setRetryOrderId(null); setTableId(selectedTable.id);
       setRefreshTick((tick) => tick + 1);
@@ -4188,7 +4128,7 @@ export function WaiterApp() {
 
   async function openSplitAction() {
     if (!selectedTable?.assignment || tableActionsBlocked) return;
-    setOperationError(""); setTableActionNotice(""); setTableAction("split"); setOperationSaving(true);
+    setOperationError(""); setNotice(""); setTableAction("split"); setOperationSaving(true);
     try {
       const result = await request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(selectedTable.id)}`, "pos-single");
       const checks = result.items.filter((check) => check.status === "open");
@@ -4205,7 +4145,7 @@ export function WaiterApp() {
 
   async function openAdjustmentAction() {
     if (!selectedTable?.assignment || tableActionsBlocked) return;
-    setOperationError(""); setTableActionNotice(""); setAdjustmentTab("discount");
+    setOperationError(""); setNotice(""); setAdjustmentTab("discount");
     setLineAdjustments({}); setAdjustmentManagerPin(""); setTableAction("discount"); setOperationSaving(true);
     try {
       const result = await request<{ items: OpenCheck[] }>(`${checksPath}?tableId=${encodeURIComponent(selectedTable.id)}`, "pos-single");
@@ -4259,7 +4199,7 @@ export function WaiterApp() {
       setTableAction(null); setRefreshTick((tick) => tick + 1);
       const actionLabel = action === "discount" ? "İndirim" : action === "comp" ? "İkram" : "Ürün iptali";
       const approval = result?.adjustment?.approvalMode?.startsWith("manager_pin:") ? `Yönetici Onayı: ${result.adjustment.approvalMode.slice(12)}` : "Geliştirme onayı";
-      setTableActionNotice(`${actionLabel} (${money(result.adjustment.amountMinor)}) gerekçesiyle kaydedildi (${approval}).`);
+      setNotice(`${actionLabel} (${money(result.adjustment.amountMinor)}) gerekçesiyle kaydedildi (${approval}).`);
       setAdjustmentManagerPin("");
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "operation");
@@ -4278,7 +4218,7 @@ export function WaiterApp() {
       });
       operationRequest.current = null;
       setTableAction(null); setTableId(targetTableId); setRetryOrderId(null);
-      setTableActionNotice(`${selectedTable.name} masası başarıyla taşındı.`); setRefreshTick((tick) => tick + 1);
+      setNotice(`${selectedTable.name} masası başarıyla taşındı.`); setRefreshTick((tick) => tick + 1);
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "operation");
       else setOperationError(cause instanceof Error ? cause.message : "Masa taşınamadı.");
@@ -4301,7 +4241,7 @@ export function WaiterApp() {
         sourceTableIds: mergeSourceIds, expectedVersions,
       });
       operationRequest.current = null;
-      setTableAction(null); setTableActionNotice(`${mergeSourceIds.length} masa ${selectedTable.name} ile birleştirildi.`);
+      setTableAction(null); setNotice(`${mergeSourceIds.length} masa ${selectedTable.name} ile birleştirildi.`);
       setRefreshTick((tick) => tick + 1);
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "operation");
@@ -4324,7 +4264,7 @@ export function WaiterApp() {
         expectedVersion: splitCheck.version, items,
       });
       operationRequest.current = null;
-      setTableAction(null); setTableActionNotice("Adisyon başarıyla bölündü."); setRefreshTick((tick) => tick + 1);
+      setTableAction(null); setNotice("Adisyon başarıyla bölündü."); setRefreshTick((tick) => tick + 1);
     } catch (cause) {
       if (isVersionConflict(cause)) await refreshAfterConflict(cause, "operation");
       else setOperationError(cause instanceof Error ? cause.message : "Adisyon bölünemedi.");
@@ -4349,238 +4289,406 @@ export function WaiterApp() {
     );
   }
 
-  return <main className="ops-shell waiter-shell">
-    <header className="ops-header">
-      <a href={buildPosTerminalHref("/waiter", terminalScope)} className="ops-brand waiter-brand"><img src="/hipos-logo.png" alt="HIPOS" /><span>GARSON</span></a>
-      <div className="waiter-header-actions">
-        <span style={{ fontSize: "0.85rem", color: "#60a5fa", fontWeight: "600", marginRight: "4px" }}>
-          👤 Garson: {waiterSession.user.fullName}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            clearPosSession("waiter");
-            setWaiterSession(null);
-          }}
-          className="waiter-back"
-          style={{
-            padding: "0.35rem 0.75rem",
-            fontSize: "0.8rem",
-            background: "#334155",
-            borderColor: "#475569",
-            color: "#f8fafc",
-            fontWeight: 600,
-            cursor: "pointer",
-            marginRight: "8px",
-          }}
-          title="Garsonu değiştir veya ekranı kilitle"
-        >
-          🔒 Garson Değiştir / Kilitle
-        </button>
-        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("kitchen")}>🖨️ Mutfak Test</button>
-        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} disabled={Boolean(testPrinting)} onClick={() => void triggerTestPrint("cashier")}>🧾 Kasa Test</button>
-        <button className="waiter-quiet-action" style={{ fontSize: "12px", padding: "4px 8px" }} onClick={() => setPrinterSettingsOpen(true)}>⚙️ Yazıcı Ayarları</button>
-        {selectedTable && <button className="waiter-back" onClick={() => { setTableId(""); setCart([]); setNotice(""); setError(""); setRetryOrderId(null); }}>← Masalara dön</button>}
-        <SyncStatusPill
-          syncStatus={syncStatus}
-          localReachable={localReachable}
-          apiOffline={connectionState === "unavailable"}
-          apiLoading={connectionState === "checking"}
-          flushing={syncFlushing}
-          onTrigger={() => void triggerSyncFlush()}
-        />
-      </div>
-    </header>
-    {!selectedTable && notice && <p className="ops-success" role="status" style={{ margin: "12px 16px", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}</p>}
-    {!selectedTable && <><section className="waiter-welcome"><div><span className="ops-eyebrow">GARSON PANELİ / ANA SALON</span><h1>{waiter ? `Hoş geldin, ${waiter.name}` : "Hoş geldin"}</h1><p className="waiter-branch"><svg className="waiter-location-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>Aktif şube: <strong>Merkez</strong></p></div>
-      <label className="waiter-select">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-    </section>
-    <section className="waiter-summary" aria-label="Masa özeti">
-      <div><strong>{tables.length}</strong><span>Toplam masa</span></div><div className="empty"><strong>{emptyTableCount}</strong><span>Boş</span></div><div className="occupied"><strong>{occupiedTableCount}</strong><span>Dolu</span></div><div className="bill-requested"><strong>{billRequestedTableCount}</strong><span>Hesap istendi</span></div><div className="reserved"><strong>{reservedTableCount}</strong><span>Rezerve</span></div>
-    </section>
-    <div className="waiter-section-heading"><h2>Masalar</h2><span>{tables.length} masa</span><button onClick={() => setRefreshTick((tick) => tick + 1)} disabled={loading} aria-label="Masaları yenile">Yenile</button></div>
-    {loading && <p className="ops-message">Menü ve masalar yükleniyor…</p>}
-    {error && <p className="ops-error" role="alert">{error}</p>}
-    {!loading && !error && tables.length === 0 && <p className="ops-message">Gösterilecek aktif masa bulunamadı.</p>}
-    {!selectedTable && kitchenNotice && <p className="waiter-kitchen-notice" role="alert">{kitchenNotice}</p>}
-    {buildFloorSections(tables, configuredFloors).map((floor) => {
-      const floorTables = tables.filter((item) => normalizeFloorName(item.floor) === floor.key);
-      if (!floorTables.length) return null;
-      return <section className="waiter-floor-section" key={floor.key} aria-label={floor.label}><div className="waiter-floor-heading"><h3>{floor.label}</h3><span>{floorTables.length} masa</span></div><div className="waiter-table-grid">{floorTables.map((item) => {
-      const status = getTableStatus(item);
-      const visualStatus = status === "bill_requested" ? "bill-requested" : item.group ? "grouped" : status === "reserved" ? "reserved" : status === "occupied" ? "occupied" : "empty";
-      const statusLabel = status === "bill_requested" ? "Hesap istendi" : item.group ? "Grupta" : status === "reserved" ? "Rezerve" : status === "occupied" ? "Dolu" : "Boş";
-      return <button type="button" className={`waiter-table-card ${visualStatus}`} key={item.id} onClick={() => { setTableId(item.group?.primaryTableId ?? item.id); setCart([]); setNotice(""); setTableActionNotice(""); setDetailSyncNotice(""); setTableStatusError(""); setReservationDate(item.reservedFor ? new Date(new Date(item.reservedFor).getTime() - new Date(item.reservedFor).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : ""); setRetryOrderId(null); }}>
-      <svg className="waiter-table-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="3" /><path d="M9 3h6M9 21h6M2 10v4M22 10v4" /></svg><strong>{item.name}</strong><span className="waiter-table-status">{statusLabel}</span>
-      {item.group && <small className="waiter-group-card-label">{item.group.tableIds.length} masa · {item.group.guestCount} kişi<br />Ana masa: {item.group.tableNames[0]}</small>}
-      {item.assignment && <>
-        <span className="waiter-table-owner">{item.assignment.waiterName ?? "Açık adisyon"}</span>
-        <b>{money(item.assignment.totalMinor)}</b>
-        {(item.assignment.paidMinor ?? 0) > 0 && (
-          <small style={{ color: "#059669", fontSize: "11px", fontWeight: 700, marginTop: "2px" }}>
-            {money(item.assignment.paidMinor!)} ödendi
-          </small>
-        )}
-      </>}
-      {status === "reserved" && item.reservedFor && <small className="waiter-reserved-time">{new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.reservedFor))}</small>}
-    </button>;
-    })}</div></section>;
-    })}</>}
-    <dialog ref={reservationDialog} className="waiter-reservation-dialog" aria-labelledby="reservation-title" onCancel={(event) => { if (tableStatusSaving) event.preventDefault(); else setReservationOpen(false); }} onClose={() => setReservationOpen(false)}>
-      {reservationOpen && selectedTable && <form className="waiter-custom-modal" onSubmit={(event) => { event.preventDefault(); void reserveTable(); }}>
-        <header><div><span className="ops-eyebrow">{selectedTable.name}</span><h2 id="reservation-title">{getTableStatus(selectedTable) === "reserved" ? "Rezervasyonu düzenle" : "Masayı rezerve et"}</h2></div><button type="button" className="waiter-modal-close" aria-label="Rezervasyon penceresini kapat" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>×</button></header>
-        <label className="waiter-note-field">Ad soyad<input autoFocus required maxLength={120} autoComplete="off" placeholder="Rezervasyon sahibinin adı soyadı" value={reservationGuestName} disabled={tableStatusSaving} onChange={(event) => { setReservationGuestName(event.target.value); setTableStatusError(""); }} /></label>
-        <label className="waiter-note-field">Tarih ve saat<input type="datetime-local" required value={reservationDate} min={reservationMinValue} disabled={tableStatusSaving} onChange={(event) => { setReservationDate(event.target.value); setTableStatusError(""); }} /></label>
-        {reservationDate && !Number.isNaN(new Date(reservationDate).getTime()) && <p className="waiter-reservation-preview">{new Intl.DateTimeFormat("tr-TR", { dateStyle: "full", timeStyle: "short" }).format(new Date(reservationDate))}</p>}
-        {tableStatusError && <p className="ops-error" role="alert">{tableStatusError}</p>}
-        <footer><button type="button" className="waiter-cancel-custom" disabled={tableStatusSaving} onClick={() => setReservationOpen(false)}>Vazgeç</button><button type="submit" className="ops-primary" disabled={tableActionsBlocked || !reservationGuestName.trim() || !reservationDate}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaydet"}</button></footer>
-      </form>}
-    </dialog>
-    <PrinterSettingsModal
-      open={printerSettingsOpen}
-      firmId={firmId}
-      branchId={branchId}
-      appKind="waiter"
-      onClose={() => setPrinterSettingsOpen(false)}
-      onSaved={(msg) => setNotice(msg)}
-    />
-    {selectedTable && <section className="waiter-order-page" aria-live="polite">
-      <div className="waiter-order-heading"><div><span className="ops-eyebrow">MASA DETAYI</span><h1>{selectedTable.group ? selectedTable.group.tableNames.join(" + ") : selectedTable.name}</h1>{selectedTable.group && <p className="waiter-group-info">{selectedTable.group.guestCount} kişi · Ana masa: {selectedTable.name} · Ortak adisyon</p>}</div><span className={`waiter-table-status ${getTableStatus(selectedTable) === "bill_requested" ? "bill-requested" : getTableStatus(selectedTable) === "reserved" ? "reserved" : selectedTable.assignment || selectedTable.group ? "occupied" : "empty"}`}>{getTableStatus(selectedTable) === "bill_requested" ? "Hesap istendi" : selectedTable.group ? "Masa grubu" : getTableStatus(selectedTable) === "reserved" ? "Rezerve" : selectedTable.assignment ? "Dolu" : "Boş"}</span></div>
-      {notice && <p className="ops-success" role="status" style={{ margin: "10px 0", padding: "10px 14px", borderRadius: "8px", fontWeight: "bold" }}>{notice}{lastOrderId && <small> · Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}
-      {error && <p className="ops-error" role="alert" style={{ margin: "10px 0" }}>{error}</p>}
-      {getTableStatus(selectedTable) === "reserved" && !selectedTable.assignment && <section className="waiter-reservation-summary" aria-label="Rezervasyon bilgisi"><div><strong>{selectedTable.reservationGuestName ?? "Masa rezerve"}</strong><span>{selectedTable.reservedFor ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "full", timeStyle: "short" }).format(new Date(selectedTable.reservedFor)) : "Rezervasyon saati belirtilmemiş"}</span></div><div className="waiter-state-actions"><button className="waiter-back" disabled={tableActionsBlocked} onClick={openReservation}>Düzenle</button><button className="waiter-state-danger" disabled={tableActionsBlocked} onClick={() => void updateTableStatus("reservation/cancel")}>{tableStatusSaving ? "Kaydediliyor…" : "Rezervasyonu kaldır"}</button></div></section>}
-      {getTableStatus(selectedTable) !== "reserved" && <div className="waiter-context-toolbar">
-        <label className="waiter-select waiter-order-waiter">Garson<select value={waiterId} onChange={(event) => { setWaiterId(event.target.value); setRetryOrderId(null); }}><option value="">Garson seçin</option>{waiters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-        <div className="waiter-context-actions">
-          {getTableStatus(selectedTable) === "idle" && !selectedTable.assignment && !selectedTable.group && <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={openReservation}>Rezerve et</button>}
-          {selectedTable.assignment && <button className={`waiter-status-action ${getTableStatus(selectedTable) === "bill_requested" ? "active" : ""}`} disabled={tableStatusSaving} onClick={() => void updateTableStatus(getTableStatus(selectedTable) === "bill_requested" ? "cancel-bill-request" : "request-bill")}>{tableStatusSaving ? "Kaydediliyor…" : getTableStatus(selectedTable) === "bill_requested" ? "Hesap isteğini kaldır" : "Hesap istendi"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>{printingBill ? "Basılıyor…" : "🧾 Ara Hesap Fişi"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#d97706", color: "#fff", borderColor: "#d97706" }} disabled={reprintingKitchen || tableActionsBlocked} onClick={() => void reprintKitchenTicket()}>{reprintingKitchen ? "Basılıyor…" : "🔁 Mutfak Fişi Tekrar"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>{settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit İle Kapat"}</button>}
-          {selectedTable.assignment && <button className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>{settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart İle Kapat"}</button>}
-          <button className="waiter-quiet-action" disabled={tableActionsBlocked} onClick={() => openTableAction(selectedTable.group ? "ungroup" : "group")}>{selectedTable.group ? "Grubu Ayır" : "Masa Grubu Oluştur"}</button>
-        </div>
-      </div>}
-      {getTableStatus(selectedTable) !== "reserved" && !selectedTable.assignment && cartRows.length > 0 && <p className="waiter-inline-hint">Masa veya rezervasyon işlemleri için önce sepeti boşaltın ya da siparişi gönderin.</p>}
-      {tableStatusError && !reservationOpen && <p className="ops-error" role="alert">{tableStatusError}</p>}
-      {detailSyncNotice && <p className="ops-message" role="status">{detailSyncNotice}</p>}
-      {selectedTable.assignment && <div className="waiter-open-check"><div><strong>Açık adisyon · {selectedTable.assignment.waiterName ?? "Garson atanmamış"}</strong><span>{(selectedTable.assignment.paidMinor ?? 0) > 0 ? "Kalan masa tutarı" : "Mevcut sipariş"}</span></div><b>{money(selectedTable.assignment.totalMinor)}</b>
-        {(selectedTable.assignment.paidMinor ?? 0) > 0 && <div className="waiter-open-check-breakdown" aria-label="Adisyon ödeme dökümü">
-          <div><span>Masa toplamı</span><b>{money(selectedTable.assignment.grossTotalMinor)}</b></div>
-          <div style={{ color: "#059669" }}><span>Tahsil edilen</span><b>{money(selectedTable.assignment.paidMinor!)}</b></div>
-        </div>}
-        {selectedTable.assignment.adjustmentMinor > 0 && <div className="waiter-open-check-breakdown" aria-label="Adisyon tutar dökümü">
-          <div><span>İşlemler öncesi ara toplam</span><b>{money(selectedTable.assignment.grossTotalMinor)}</b></div>
-          {checkAdjustmentTotals.discount > 0 && <div><span>İndirim</span><b>−{money(checkAdjustmentTotals.discount)}</b></div>}
-          {checkAdjustmentTotals.comp > 0 && <div><span>İkram</span><b>−{money(checkAdjustmentTotals.comp)}</b></div>}
-          {checkAdjustmentTotals.void > 0 && <div><span>Ürün iptali</span><b>−{money(checkAdjustmentTotals.void)}</b></div>}
-        </div>}
-        {selectedTable.assignment.items.length > 0 && <ul>{selectedTable.assignment.items.map((line, index) => <li key={`${line.productId}-${index}`}>
-          <span><strong className="waiter-line-name">{line.quantity} × {line.productName}</strong>{Boolean(line.note || line.options?.length) && <small className="waiter-line-detail">{[...(line.options ?? []).map((option) => option.optionName), line.note].filter(Boolean).join(" · ")}</small>}</span>
-          <b className="waiter-line-price">{money(line.lineTotalMinor)}</b>
-        </li>)}</ul>}
-      </div>}
-      {kitchenNotice && <p className="waiter-kitchen-notice" role="alert">{kitchenNotice}</p>}
-      {selectedKitchenItems.length > 0 && <section className="waiter-kitchen-status" aria-label="Mutfak durumu">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
-          <h2 style={{ margin: 0 }}>Mutfak Durumu</h2>
+  return <main className="ops-shell waiter-shell" style={{ maxWidth: "800px" }}>
+    {!selectedTable ? (
+      <>
+        <header className="waiter-header-compact">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontWeight: 850, fontSize: "16px", color: "#fff", letterSpacing: "0.04em" }}>
+              HIPOS <span style={{ color: "#4ade80", fontSize: "11px", fontWeight: 800 }}>GARSON</span>
+            </span>
+            <span className="waiter-header-user">
+              <span className="badge-waiter">GARSON</span> {waiterSession.user.fullName}
+            </span>
+            {kitchenItems.some((k) => k.status === "ready") && (
+              <span style={{ background: "#f59e0b", color: "#000", fontWeight: 850, padding: "2px 8px", borderRadius: "10px", fontSize: "11px" }}>
+                🔔 {kitchenItems.filter((k) => k.status === "ready").length} Hazır
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <SyncStatusPill
+              syncStatus={syncStatus}
+              localReachable={localReachable}
+              apiOffline={connectionState === "unavailable"}
+              apiLoading={connectionState === "checking"}
+              flushing={syncFlushing}
+              onTrigger={() => void triggerSyncFlush()}
+            />
+            <button
+              type="button"
+              onClick={() => { clearPosSession("waiter"); setWaiterSession(null); }}
+              style={{ background: "#334155", border: "1px solid #475569", color: "#f8fafc", borderRadius: "6px", padding: "5px 9px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              title="Garson Değiştir / Kilitle"
+            >
+              🔒
+            </button>
+          </div>
+        </header>
+
+        {notice && <p className="ops-success" role="status" style={{ margin: "6px 0 10px", padding: "8px 12px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px" }}>{notice}</p>}
+        {error && <p className="ops-error" role="alert" style={{ margin: "6px 0 10px", padding: "8px 12px", borderRadius: "8px", fontSize: "13px" }}>{error}</p>}
+
+        <div className="waiter-floor-pills" role="tablist" aria-label="Salon ve katlar">
           <button
             type="button"
-            className="waiter-quiet-action"
-            style={{ fontSize: "12px", background: "#fef3c7", borderColor: "#fde68a", color: "#92400e", fontWeight: "bold", padding: "6px 12px", borderRadius: "6px" }}
-            disabled={reprintingKitchen || tableActionsBlocked}
-            onClick={() => void reprintKitchenTicket()}
-            title="Aşçı için mutfak sipariş fişini 'TEKRAR BASIM' ibaresiyle yeniden yazdırır."
+            className={`waiter-floor-pill ${selectedFloor === "all" ? "active" : ""}`}
+            onClick={() => setSelectedFloor("all")}
           >
-            {reprintingKitchen ? "Yazdırılıyor…" : "🖨️ Mutfak Fişini Tekrar Bas"}
+            Tüm Masalar ({tables.length})
           </button>
+          {configuredFloors.map((fl) => {
+            const count = tables.filter((t) => normalizeFloorName(t.floor) === normalizeFloorName(fl)).length;
+            if (!count) return null;
+            return (
+              <button
+                type="button"
+                key={fl}
+                className={`waiter-floor-pill ${selectedFloor === normalizeFloorName(fl) ? "active" : ""}`}
+                onClick={() => setSelectedFloor(normalizeFloorName(fl))}
+              >
+                {fl} ({count})
+              </button>
+            );
+          })}
         </div>
-        <ul>{selectedKitchenItems.map((item) => <li key={item.id}>
-        <span><strong>{item.quantity} × {item.productName}</strong>{item.note && <small>{item.note}</small>}</span>
-        <span className={`waiter-kitchen-state ${item.status}`}>{item.status === "cancelled" ? "İptal bildirildi" : item.status === "pending" ? "Bekliyor" : item.status === "preparing" ? "Hazırlanıyor" : item.status === "ready" ? "Hazır" : "Servise çıktı"}</span>
-      </li>)}</ul></section>}
-      {selectedTable.assignment && <section className="waiter-table-actions" aria-labelledby="table-actions-title">
-        <div className="waiter-actions-heading"><div><span className="ops-eyebrow">AÇIK ADİSYON</span><h2 id="table-actions-title">Masa İşlemleri</h2></div><span>{selectedTable.assignment.items.length} kalem</span></div>
-        <div className="waiter-action-grid">
-          <button disabled={tableActionsBlocked || Boolean(selectedTable.group)} onClick={() => openTableAction("transfer")}><span aria-hidden="true">⇄</span><strong>Masa Taşı</strong><small>Adisyonu boş masaya aktar</small></button>
-          <button disabled={tableActionsBlocked || Boolean(selectedTable.group)} onClick={() => openTableAction("merge")}><span aria-hidden="true">⊕</span><strong>Masa Birleştir</strong><small>Başka masanın hesabını ekle</small></button>
-          <button disabled={tableActionsBlocked} onClick={() => void openSplitAction()}><span aria-hidden="true">◫</span><strong>Adisyon Böl</strong><small>Ürünleri ayrı hesaba ayır</small></button>
-          <button disabled={tableActionsBlocked} onClick={() => { window.location.href = `/cashier?tableId=${encodeURIComponent(selectedTable.group?.primaryTableId ?? selectedTable.id)}`; }}><span aria-hidden="true">₺</span><strong>Ödeme Al</strong><small>Kasa ekranını aç</small></button>
-          <button disabled={tableActionsBlocked} onClick={() => void openAdjustmentAction()}><span aria-hidden="true">％</span><strong>İndirim / İkram</strong><small>Gerekçeli işlem kaydı</small></button>
+
+        {loading && <p className="ops-message">Masalar yükleniyor…</p>}
+        {!loading && filteredTables.length === 0 && <p className="ops-message">Bu alanda masa bulunamadı.</p>}
+
+        <div className="waiter-mobile-table-grid" aria-label="Masalar">
+          {filteredTables.map((item) => {
+            const status = getTableStatus(item);
+            const visualStatus = status === "bill_requested" ? "bill-requested" : item.group ? "grouped" : status === "reserved" ? "reserved" : status === "occupied" ? "occupied" : "empty";
+            const statusLabel = status === "bill_requested" ? "Hesap istendi" : item.group ? "Grupta" : status === "reserved" ? "Rezerve" : status === "occupied" ? "Dolu" : "Boş";
+            return (
+              <button
+                type="button"
+                className={`waiter-card-touch ${visualStatus}`}
+                key={item.id}
+                onClick={() => {
+                  setTableId(item.group?.primaryTableId ?? item.id);
+                  setCart([]);
+                  setNotice("");
+                  setError("");
+                  setTableDetailOpen(false);
+                  setRetryOrderId(null);
+                }}
+              >
+                <span className="waiter-card-name">{item.name}</span>
+                <span className={`waiter-card-status-badge ${visualStatus}`}>{statusLabel}</span>
+                {item.assignment ? (
+                  <span className="waiter-card-amount">{money(item.assignment.totalMinor)}</span>
+                ) : (
+                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>Boş</span>
+                )}
+                {item.group && <small style={{ fontSize: "10px", color: "#475569" }}>{item.group.guestCount} kişi</small>}
+              </button>
+            );
+          })}
         </div>
-        {cartRows.length > 0 && <p className="waiter-action-hint">Gönderilmemiş sepet varken masa işlemleri kapalıdır. Önce siparişi mutfağa gönderin veya sepeti boşaltın.</p>}
-        {operationSaving && !tableAction && <p className="ops-message">Adisyon bilgileri yükleniyor…</p>}
-        {operationError && !tableAction && <p className="ops-error" role="alert">{operationError}</p>}
-      </section>}
-      {tableActionNotice && <p className="ops-success" role="status">{tableActionNotice}</p>}
-      {getTableStatus(selectedTable) !== "reserved" && <section className="waiter-bill-summary" aria-label="Adisyon ve yeni sipariş tutarları">
-        {selectedTable.assignment && <div><span>Mevcut adisyon</span><strong>{money(selectedTable.assignment.totalMinor)}</strong></div>}
-        <div className={`new-order${selectedTable.assignment ? "" : " waiter-order-total-only"}`}><span>{selectedTable.assignment ? "Yeni sipariş" : "Sipariş toplamı"}</span><strong>{money(total)}</strong></div>
-      </section>}
-      {selectedTable.assignment && <div className="waiter-checkout-bar" style={{ display: "flex", gap: "10px", marginTop: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
-        <button type="button" className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={printingBill || Boolean(settlingTable)} onClick={() => void printBillForTable()}>
-          {printingBill ? "Baskı alınıyor…" : "🧾 Ara Hesap Fişi Bas"}
-        </button>
-        <button type="button" className="waiter-status-action" style={{ background: "#d97706", color: "#fff", borderColor: "#d97706", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={reprintingKitchen || Boolean(settlingTable) || tableActionsBlocked} onClick={() => void reprintKitchenTicket()}>
-          {reprintingKitchen ? "Yazdırılıyor…" : "🖨️ Mutfak Fişini Tekrar Bas"}
-        </button>
-        <button type="button" className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("NAKIT")}>
-          {settlingTable === "NAKIT" ? "Kapatılıyor…" : "💵 Nakit Ödeme & Masayı Kapat"}
-        </button>
-        <button type="button" className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed", padding: "10px 16px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable) || tableActionsBlocked} onClick={() => void settleTable("KART")}>
-          {settlingTable === "KART" ? "Kapatılıyor…" : "💳 Kart Ödeme & Masayı Kapat"}
-        </button>
-      </div>}
-      {getTableStatus(selectedTable) !== "reserved" && !waiter && <p className="ops-message">Sipariş eklemek için önce garson seçin.</p>}
-      {assignedToOtherWaiter && <p className="ops-message">Bu masa {selectedTable.assignment?.waiterName ?? "başka bir garsona"} tarafından yönetiliyor. Sipariş eklemek için o garsonu seçin.</p>}
-      {getTableStatus(selectedTable) !== "reserved" && waiter && !assignedToOtherWaiter && <>
-      <div className="waiter-catalog-heading"><h2 className="waiter-catalog-title">{catalogView === "categories" ? "Kategoriler" : menus.length > 1 ? "Menü seçin" : selectedMenu?.name ?? "Menü"}</h2>
-        {catalogView === "menus" && menus.length > 1 && <label className="waiter-menu-select">Aktif menü
-          <select aria-label="POS aktif menüsü" value={selectedMenuId} onChange={(event) => {
-            setSelectedMenuId(event.target.value); setCategoryId(null); setSearch("");
-          }}>{menus.map((menu) => <option key={menu.id} value={menu.id}>{menu.name}</option>)}</select>
-        </label>}
-      </div>
-      <div className="waiter-catalog-views" role="group" aria-label="Ürün görünümü">
-        <button type="button" aria-pressed={catalogView === "menus"} onClick={() => { setCatalogView("menus"); setCategoryId(null); setSearch(""); }}>Menüler</button>
-        <button type="button" aria-pressed={catalogView === "categories"} onClick={() => { setCatalogView("categories"); setCategoryId(null); setSearch(""); }}>Kategoriler</button>
-      </div>
-      {!loading && catalogView === "menus" && menuSections.length === 0 && !error && <p className="ops-message">Aktif menü bulunmuyor. Ürünleri Kategoriler görünümünden inceleyebilirsiniz.</p>}
-      {!loading && catalogView === "categories" && availableProducts.length === 0 && !error && <p className="ops-message">POS’ta kullanılabilir kategori ürünü bulunmuyor.</p>}
-      <label className="waiter-search"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 5 5" /></svg><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ürün ara…" aria-label="Ürün ara" /></label>
-      <div className="waiter-categories" aria-label="Menü bölümleri">{catalogGroups.map((group) => {
-        const expanded = Boolean(normalizedSearch) || categoryId === group.sectionId;
-        const panelId = `waiter-products-${group.sectionId}`;
-        return <section className={`waiter-category${normalizedSearch ? " waiter-category-search" : ""}`} key={group.sectionId}>
-          {normalizedSearch ? <h3 className="waiter-products-title">Arama sonuçları · {group.products.length} ürün</h3> : <h3>
-            <button className="waiter-category-toggle" aria-expanded={expanded} aria-controls={panelId} onClick={() => setCategoryId((current) => current === group.sectionId ? null : group.sectionId)}>
-              <span>{group.name}</span><small>{group.products.length} ürün</small>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
-          </h3>}
-          <div className="waiter-category-panel" id={panelId} hidden={!expanded}>{expanded && (group.products.length === 0
-            ? <p className="ops-message">{normalizedSearch ? "Aramanızla eşleşen ürün bulunamadı." : "Bu kategoride ürün bulunamadı."}</p>
-            : <section className="ops-product-grid waiter-menu-grid" aria-label={`${group.name} ürünleri`}>{group.products.map((product) => <article className={`ops-product waiter-product ${product.isOutOfStock ? "out-of-stock" : ""}`} key={product.id}>
-              <div className="waiter-product-main"><span className="waiter-product-image" aria-hidden="true"><PosProductImage image={product.image} productId={product.id} name={product.name} /></span><div><strong>{product.name}{product.isOutOfStock && <span className="waiter-stock-badge out-of-stock">🚫 Tükendi</span>}{!product.isOutOfStock && product.isCriticalStock && <span className="waiter-stock-badge critical-stock">⚠️ Kritik ({product.availablePortions ?? 0})</span>}</strong><span>{demoDescriptions[product.id] ?? product.category.name}</span></div></div>
-              <div className="waiter-product-bottom"><strong>{money(product.price.amountMinor)}</strong>{product.isOutOfStock ? <button className="waiter-add-product out-of-stock" disabled={true} title={`${product.name} tükendi`}>Tükendi</button> : <button className="waiter-add-product" disabled={saving} onClick={() => openCustomization(product)}>＋ <span>Ekle</span></button>}</div>
-            </article>)}</section>)}</div>
-        </section>;
-      })}</div>
-      <section className="ops-cart waiter-cart"><div><span>Sepet</span><strong>{money(total)}</strong></div>
-        {cartRows.length ? <ul>{cartRows.map((item) => <li key={item.cartId}>
-          <span className="waiter-cart-item"><strong className="waiter-line-name">{item.quantity} × {item.name}</strong><small>{[...item.options.map((option) => option.optionName), item.note].filter(Boolean).join(" · ") || "Standart hazırlama"}</small><b className="waiter-line-price">{money(item.quantity * (item.price.amountMinor + item.options.reduce((delta, option) => delta + option.priceDeltaMinor * option.quantity, 0)))}</b></span>
-          <div className="waiter-cart-actions">
-            <button className="waiter-cart-edit" disabled={saving} aria-label={`${item.name} düzenle`} onClick={() => openCustomization(item, item)}>Düzenle</button>
-            <div className="ops-quantity"><button disabled={saving} aria-label={`${item.name} azalt`} onClick={() => changeCartLine(item.cartId, -1)}>−</button><b>{item.quantity}</b><button disabled={saving} aria-label={`${item.name} artır`} onClick={() => changeCartLine(item.cartId, 1)}>+</button></div>
+      </>
+    ) : (
+      <>
+        {/* Table Order View */}
+        <div className="waiter-order-nav-bar">
+          <button
+            type="button"
+            className="waiter-btn-back"
+            onClick={() => { setTableId(""); setCart([]); setError(""); setNotice(""); }}
+          >
+            ← Masalar
+          </button>
+          <div style={{ textAlign: "center" }}>
+            <strong style={{ fontSize: "16px", color: "#0f172a", display: "block", lineHeight: 1.2 }}>
+              {selectedTable.group ? selectedTable.group.tableNames.join(" + ") : selectedTable.name}
+            </strong>
+            <span style={{ fontSize: "11px", color: getTableStatus(selectedTable) === "bill_requested" ? "#d97706" : selectedTable.assignment ? "#2563eb" : "#059669", fontWeight: 700 }}>
+              {getTableStatus(selectedTable) === "bill_requested" ? "⚠️ Hesap İstendi" : selectedTable.assignment ? `Dolu · ${money(selectedTable.assignment.totalMinor)}` : "Yeni Sipariş"}
+            </span>
           </div>
-        </li>)}</ul> : <p>Menüden ürün ekleyin.</p>}
-        <button className="ops-primary" disabled={!waiter || !cartRows.length || saving} onClick={() => void sendOrder()}>{saving ? "Gönderiliyor…" : "Siparişi mutfağa gönder"}</button>
-        {error && <p className="ops-error" role="alert">{error}</p>}
-      </section></>}
+          {selectedTable.assignment ? (
+            <button
+              type="button"
+              style={{
+                background: "#eff6ff",
+                border: "1.5px solid #93c5fd",
+                color: "#1d4ed8",
+                padding: "6px 11px",
+                borderRadius: "8px",
+                fontSize: "12px",
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+              onClick={() => setTableDetailOpen(true)}
+              title="Açık adisyon detayları ve masa işlemleri"
+            >
+              📋 {money(selectedTable.assignment.totalMinor)} ▾
+            </button>
+          ) : (
+            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>Yeni Sipariş</span>
+          )}
+        </div>
+
+        {(notice || kitchenNotice) && <p className="ops-success" role="status" style={{ margin: "6px 0 10px", padding: "8px 12px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px" }}>{notice || kitchenNotice}{lastOrderId && <small> · Sipariş: {lastOrderId.slice(0, 8)}</small>}</p>}
+        {error && <p className="ops-error" role="alert" style={{ margin: "6px 0 10px", padding: "8px 12px", borderRadius: "8px", fontSize: "13px" }}>{error}</p>}
+
+        {/* Quick Search */}
+        <div style={{ margin: "0 0 8px" }}>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Ürün ara (örn: filtre, çay, pizza)..."
+            style={{
+              width: "100%",
+              padding: "9px 12px",
+              borderRadius: "10px",
+              border: "1px solid #cbd5e1",
+              fontSize: "13px",
+              background: "#fff",
+              boxSizing: "border-box"
+            }}
+          />
+        </div>
+
+        {/* Categories Bar */}
+        <div className="waiter-cat-scroll" role="tablist" aria-label="Ürün kategorileri">
+          <button
+            type="button"
+            className={`waiter-cat-btn ${categoryId === null ? "active" : ""}`}
+            onClick={() => { setCategoryId(null); setSearch(""); }}
+          >
+            Tümü ({availableProducts.length})
+          </button>
+          {catalogCategories.map((cat) => {
+            const count = availableProducts.filter((p) => p.category.id === cat.id).length;
+            if (!count) return null;
+            return (
+              <button
+                type="button"
+                key={cat.id}
+                className={`waiter-cat-btn ${categoryId === cat.id ? "active" : ""}`}
+                onClick={() => { setCategoryId(cat.id); setSearch(""); }}
+              >
+                {cat.name} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Product Cards */}
+        {displayedProducts.length === 0 ? (
+          <p className="ops-message">Ürün bulunamadı.</p>
+        ) : (
+          <div className="waiter-touch-product-grid">
+            {displayedProducts.map((product) => {
+              const qtyInCart = cart.filter((c) => c.productId === product.id).reduce((s, c) => s + c.quantity, 0);
+              return (
+                <div
+                  key={product.id}
+                  className={`waiter-touch-product-card ${qtyInCart > 0 ? "in-cart" : ""} ${product.isOutOfStock ? "out-of-stock" : ""}`}
+                  onClick={() => handleFastProductTap(product)}
+                >
+                  <div>
+                    <span className="waiter-prod-name">
+                      {product.name}
+                      {qtyInCart > 0 && <span className="waiter-prod-qty-badge">{qtyInCart}×</span>}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "6px" }}>
+                    <span className="waiter-prod-price">{money(product.price.amountMinor)}</span>
+                    {product.isOutOfStock && <small style={{ color: "#ef4444", fontWeight: 700 }}>Tükendi</small>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Sticky Bottom Bar with Order Lines & Mutfağa Gönder */}
+        {cartRows.length > 0 && (
+          <div className="waiter-sticky-bottom-bar">
+            {/* Added lines mini list */}
+            <div style={{ maxHeight: "110px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
+              {cartRows.map((item) => (
+                <div key={item.cartId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", padding: "3px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+                    <strong
+                      style={{ color: "#0f172a", cursor: "pointer" }}
+                      onClick={() => {
+                        const prod = products.find((p) => p.id === item.productId);
+                        if (prod) openCustomization(prod, item);
+                      }}
+                      title="Seçenekleri düzenle"
+                    >
+                      {item.quantity}× {item.name} ✏️
+                    </strong>
+                    {item.note && <small style={{ color: "#2563eb", background: "#dbeafe", padding: "1px 5px", borderRadius: "4px", fontSize: "10px" }}>{item.note}</small>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <b style={{ color: "#059669", fontVariantNumeric: "tabular-nums" }}>{money(item.quantity * item.price.amountMinor)}</b>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setQuickNoteCartId(item.cartId); setQuickNoteText(item.note || ""); }}
+                      style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "2px 6px", fontSize: "12px", cursor: "pointer" }}
+                      title="Sipariş notu / özel istek"
+                    >
+                      💬
+                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); changeCartLine(item.cartId, -1); }} style={{ width: "26px", height: "26px", borderRadius: "50%", border: "1px solid #cbd5e1", background: "#f8fafc", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>−</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); changeCartLine(item.cartId, 1); }} style={{ width: "26px", height: "26px", borderRadius: "50%", border: "1px solid #cbd5e1", background: "#f8fafc", fontWeight: "bold", cursor: "pointer", fontSize: "14px" }}>+</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Submit to Kitchen */}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void sendOrder()}
+              style={{
+                background: saving ? "#64748b" : "#059669",
+                color: "#fff",
+                border: 0,
+                borderRadius: "12px",
+                padding: "14px 18px",
+                fontSize: "15px",
+                fontWeight: 800,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: saving ? "not-allowed" : "pointer",
+                boxShadow: "0 4px 14px rgba(5, 150, 105, 0.35)"
+              }}
+            >
+              <span>{cartRows.reduce((s, i) => s + i.quantity, 0)} Ürün · {money(total)}</span>
+              <span>{saving ? "İletiliyor…" : "MUTFAĞA GÖNDER 🚀"}</span>
+            </button>
+          </div>
+        )}
+
+        {/* Table Check Detail Drawer / Sheet */}
+        {tableDetailOpen && selectedTable?.assignment && (
+          <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setTableDetailOpen(false); }}>
+            <div className="waiter-custom-modal" style={{ maxWidth: "440px", width: "94%" }}>
+              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span className="ops-eyebrow">{selectedTable.name}</span>
+                  <h2 style={{ margin: "2px 0 0", fontSize: "18px" }}>Mevcut Masa Adisyonu</h2>
+                </div>
+                <button type="button" className="waiter-modal-close" onClick={() => setTableDetailOpen(false)}>×</button>
+              </header>
+              <div style={{ maxHeight: "240px", overflowY: "auto", margin: "12px 0", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "8px", background: "#f8fafc" }}>
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {selectedTable.assignment.items.map((it, idx) => (
+                    <li key={`${it.productId}-${idx}`} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #e2e8f0", fontSize: "13px" }}>
+                      <span><strong>{it.quantity}×</strong> {it.productName} {it.note && <small style={{ color: "#64748b" }}>({it.note})</small>}</span>
+                      <b style={{ fontVariantNumeric: "tabular-nums" }}>{money(it.lineTotalMinor)}</b>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "16px", fontWeight: 800, marginBottom: "16px" }}>
+                <span>Açık Adisyon Toplamı:</span>
+                <span style={{ color: "#1d4ed8" }}>{money(selectedTable.assignment.totalMinor)}</span>
+              </div>
+              {(selectedTable.assignment.paidMinor ?? 0) > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: 700, color: "#059669", marginBottom: "12px" }}>
+                  <span>Tahsil Edilen (Parçalı):</span>
+                  <span>{money(selectedTable.assignment.paidMinor!)}</span>
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <button type="button" className="waiter-status-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} disabled={printingBill} onClick={() => void printBillForTable()}>
+                  {printingBill ? "Basılıyor…" : "🧾 Ara Hesap Fişi"}
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#d97706", color: "#fff", borderColor: "#d97706", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} disabled={reprintingKitchen} onClick={() => void reprintKitchenTicket()}>
+                  {reprintingKitchen ? "Basılıyor…" : "🔁 Mutfak Tekrar"}
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#475569", color: "#fff", borderColor: "#475569", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} onClick={() => { setTableDetailOpen(false); openTableAction("transfer"); }}>
+                  ⇄ Masayı Taşı
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#6366f1", color: "#fff", borderColor: "#6366f1", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} onClick={() => { setTableDetailOpen(false); void openSplitAction(); }}>
+                  ✂️ Adisyon Böl
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#7c3aed", color: "#fff", borderColor: "#7c3aed", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} onClick={() => { setTableDetailOpen(false); void openAdjustmentAction(); }}>
+                  🏷️ İndirim / İkram
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#0284c7", color: "#fff", borderColor: "#0284c7", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} onClick={() => { void updateTableStatus("request-bill"); setTableDetailOpen(false); }}>
+                  🔔 Hesap İste
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#059669", color: "#fff", borderColor: "#059669", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable)} onClick={() => void settleTable("NAKIT")}>
+                  💵 Nakit Kapat
+                </button>
+                <button type="button" className="waiter-status-action" style={{ background: "#0d9488", color: "#fff", borderColor: "#0d9488", padding: "10px", borderRadius: "8px", fontWeight: "bold" }} disabled={Boolean(settlingTable)} onClick={() => void settleTable("KART")}>
+                  💳 Kart Kapat
+                </button>
+              </div>
+              <footer style={{ marginTop: "14px" }}>
+                <button type="button" className="waiter-cancel-custom" style={{ width: "100%" }} onClick={() => setTableDetailOpen(false)}>
+                  Sipariş Ekranına Dön
+                </button>
+              </footer>
+            </div>
+          </div>
+        )}
+
+        {/* Quick Modifier Modal */}
+        {quickNoteCartId && (
+          <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setQuickNoteCartId(null); }}>
+            <div className="waiter-custom-modal" style={{ maxWidth: "380px", width: "90%" }}>
+              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, fontSize: "16px" }}>Sipariş Notu / Özel İstek</h3>
+                <button type="button" className="waiter-modal-close" onClick={() => setQuickNoteCartId(null)}>×</button>
+              </header>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", margin: "12px 0" }}>
+                {quickModifierTags.map((tag) => (
+                  <button
+                    type="button"
+                    key={tag}
+                    className="waiter-note-tag-btn"
+                    onClick={() => {
+                      setQuickNoteText((curr) => curr ? `${curr}, ${tag}` : tag);
+                    }}
+                  >
+                    + {tag}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={quickNoteText}
+                onChange={(e) => setQuickNoteText(e.target.value)}
+                placeholder="Örn: sosu ayrı, az tuzlu, çok sıcak..."
+                rows={3}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+              />
+              <footer style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px" }}>
+                <button type="button" className="waiter-cancel-custom" onClick={() => setQuickNoteCartId(null)}>Vazgeç</button>
+                <button
+                  type="button"
+                  className="ops-primary"
+                  style={{ width: "auto", padding: "8px 16px" }}
+                  onClick={() => {
+                    setCart((curr) => curr.map((l) => l.cartId === quickNoteCartId ? { ...l, note: quickNoteText.trim() } : l));
+                    setQuickNoteCartId(null);
+                  }}
+                >
+                  Kaydet
+                </button>
+              </footer>
+            </div>
+          </div>
+        )}
+      </>
+    )}
       {customizingProduct && <div className="waiter-modal-backdrop waiter-product-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCustomization(); }}><section className="waiter-custom-modal waiter-product-modal" role="dialog" aria-modal="true" aria-labelledby="customize-title"><header><div><span className="ops-eyebrow">ÜRÜNÜ DÜZENLE</span><h2 id="customize-title">{customizingProduct.name}</h2></div><button className="waiter-modal-close" onClick={closeCustomization} aria-label="Kapat">×</button></header>
         <ProductOptionPicker key={`${customizingProduct.id}:${editingCartId ?? "new"}`} firmId={firmId} branchId={branchId} actor="pos-single" productId={customizingProduct.id} basePriceMinor={customizingProduct.price.amountMinor} initial={editingCartLine?.options ?? []} onChange={setOptionSelection} />
         <label className="waiter-note-field">Ürün notu<textarea value={customNote} onChange={(event) => setCustomNote(event.target.value.slice(0, 500))} placeholder="Örn. sosu ayrı, az tuzlu…" maxLength={500} rows={3} /><small>{customNote.length}/500</small></label><p className="waiter-custom-hint">Seçenekler ve fiyatlar sipariş gönderilirken sunucuda doğrulanır.</p><footer><button className="waiter-cancel-custom" onClick={closeCustomization}>Vazgeç</button><button className="ops-primary" disabled={saving || !optionSelection?.valid} onClick={saveCustomizedProduct}>{editingCartId ? "Değişiklikleri kaydet" : "Sepete ekle"} · {money((optionSelection?.unitPriceMinor ?? customizingProduct.price.amountMinor) * (editingCartLine?.quantity ?? 1))}</button></footer></section></div>}
-      {tableAction && <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !operationSaving) { setTableAction(null); setOperationError(""); } }}><section className="waiter-custom-modal waiter-action-modal" role="dialog" aria-modal="true" aria-labelledby="table-action-title">
+      {tableAction && selectedTable && <div className="waiter-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !operationSaving) { setTableAction(null); setOperationError(""); } }}><section className="waiter-custom-modal waiter-action-modal" role="dialog" aria-modal="true" aria-labelledby="table-action-title">
         <header><div><span className="ops-eyebrow">{selectedTable.name}</span><h2 id="table-action-title">{tableAction === "transfer" ? "Masa Taşı" : tableAction === "merge" ? "Masa Birleştir" : tableAction === "split" ? "Adisyon Böl" : tableAction === "group" ? "Masa Grubu Oluştur" : tableAction === "ungroup" ? "Grubu Ayır" : "İndirim / İkram"}</h2></div><button className="waiter-modal-close" disabled={operationSaving} onClick={() => { setTableAction(null); setOperationError(""); }} aria-label="Kapat">×</button></header>
         {tableAction === "group" && <>
           <p className="waiter-action-description">Ana masa: <strong>{selectedTable.name}</strong>. Seçilen masalar birlikte kullanımda görünür. Herhangi birinden aynı sipariş ekranı açılır. Ek masaların boş olması gerekir.</p>
@@ -4649,7 +4757,6 @@ export function WaiterApp() {
         </>}
         {operationError && <p className="ops-error" role="alert">{operationError}</p>}
       </section></div>}
-    </section>}
     <footer className="ops-footer">{lastUpdated ? `Son güncelleme ${lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}.` : "Masa bilgileri sunucudan alınır."}</footer>
   </main>;
 }

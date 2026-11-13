@@ -3552,3 +3552,307 @@ button, select { font: inherit; }
   background: #dc2626;
 }
 
+/* ==========================================================================
+   WAITER HANDHELD (KODPOS / MOBILE) ERGONOMICS
+   ========================================================================== */
+
+/* Compact waiter header */
+.waiter-header-compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #1e2e23;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  color: #f1f5f9;
+}
+
+.waiter-header-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.waiter-header-user .badge-waiter {
+  background: #3b82f6;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+/* Floor Filter Pills */
+.waiter-floor-pills {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 2px 0 8px;
+  margin-bottom: 6px;
+  scrollbar-width: none;
+}
+.waiter-floor-pills::-webkit-scrollbar {
+  display: none;
+}
+.waiter-floor-pill {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.waiter-floor-pill.active {
+  background: #1e3a29;
+  border-color: #1e3a29;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(30, 58, 41, 0.25);
+}
+
+/* Responsive Table Grid for Handheld (Kodpos 480px / phone) */
+.waiter-mobile-table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+@media (max-width: 480px) {
+  .waiter-mobile-table-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+}
+
+.waiter-card-touch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 4px;
+  min-height: 82px;
+  border-radius: 12px;
+  border: 1.5px solid #dcd6c9;
+  background: #fff;
+  cursor: pointer;
+  text-align: center;
+  position: relative;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.waiter-card-touch:active {
+  transform: scale(0.97);
+}
+.waiter-card-touch.empty {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+.waiter-card-touch.occupied {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+.waiter-card-touch.bill-requested {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.waiter-card-touch.reserved {
+  border-color: #a855f7;
+  background: #faf5ff;
+}
+.waiter-card-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.waiter-card-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.waiter-card-status-badge.empty {
+  background: #e2e8f0;
+  color: #475569;
+}
+.waiter-card-status-badge.occupied {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.waiter-card-status-badge.bill-requested {
+  background: #fef3c7;
+  color: #92400e;
+}
+.waiter-card-status-badge.reserved {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+.waiter-card-amount {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1d4ed8;
+  margin-top: 1px;
+}
+
+/* Table Order Screen Header */
+.waiter-order-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.waiter-btn-back {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.waiter-btn-back:active {
+  background: #e2e8f0;
+}
+
+/* Category Horizontal Scroll */
+.waiter-cat-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 2px 0 10px;
+  margin-bottom: 8px;
+  scrollbar-width: none;
+}
+.waiter-cat-scroll::-webkit-scrollbar {
+  display: none;
+}
+.waiter-cat-btn {
+  padding: 7px 14px;
+  border-radius: 18px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.waiter-cat-btn.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+
+/* Product Touch Grid */
+.waiter-touch-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  padding-bottom: 130px; /* space for sticky bar */
+}
+@media (max-width: 480px) {
+  .waiter-touch-product-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+}
+.waiter-touch-product-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px;
+  min-height: 84px;
+  border-radius: 12px;
+  border: 1.5px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  transition: all 0.1s;
+  user-select: none;
+}
+.waiter-touch-product-card:active {
+  transform: scale(0.97);
+  background: #f8fafc;
+}
+.waiter-touch-product-card.in-cart {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+.waiter-touch-product-card.out-of-stock {
+  opacity: 0.5;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+.waiter-prod-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.3;
+}
+.waiter-prod-price {
+  font-size: 14px;
+  font-weight: 800;
+  color: #059669;
+  margin-top: 4px;
+}
+.waiter-prod-qty-badge {
+  display: inline-block;
+  background: #10b981;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  margin-left: 4px;
+}
+
+/* Sticky Bottom Action Bar */
+.waiter-sticky-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border-top: 1px solid #cbd5e1;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+  padding: 8px 12px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Quick Note Modal */
+.waiter-note-tag-btn {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.waiter-note-tag-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+

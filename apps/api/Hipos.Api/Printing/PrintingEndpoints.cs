@@ -129,7 +129,8 @@ public static class PrintingEndpoints
                 paymentMethod: string.IsNullOrWhiteSpace(req?.PaymentMethod) ? paymentMethod : req!.PaymentMethod!,
                 paidItemsOverride: req?.PaidItems,
                 isAlmanReceipt: req?.IsAlmanReceipt ?? false,
-                checkIdsOverride: req?.CheckIds);
+                checkIdsOverride: req?.CheckIds,
+                paidAmountMinor: req?.PaidAmountMinor);
 
             if (!result.Success && string.Equals(result.Error, "Bu masada yazdırılacak adisyon bulunamadı.", StringComparison.Ordinal))
             {
